@@ -1,0 +1,959 @@
+*I've identified the priv-esc exploit being used to gain rootshell on linux systems; it is located in /EQGRP/Linux/bin/h
+Here's the relevant information on the file:
+file h
+h: ELF 32-bit LSB executable, Intel 80386, version 1 (SYSV), statically linked, for GNU/Linux 2.2.5, stripped
+
+strace ./h
+execve("./h", ["./h"], [/* 80 vars */]) = 0
+strace: [ Process PID=7958 runs in 32 bit mode. ]
+uname({sysname="Linux", nodename="REDACTED", ...}) = 0
+fcntl64(0, F_GETFD)                     = 0
+fcntl64(1, F_GETFD)                     = 0
+fcntl64(2, F_GETFD)                     = 0
+geteuid32()                             = 1000
+getuid32()                              = 1000
+getegid32()                             = 1000
+getgid32()                              = 1000
+brk(NULL)                               = 0x9b71000
+brk(0x9b72000)                          = 0x9b72000
+getuid32()                              = 1000
+brk(0x9b7a000)                          = 0x9b7a000
+munmap(0x9b7a000, 4131938304)           = -1 EINVAL (Invalid argument)
+write(2, "[-] Unable to unmap stack: Inval"..., 44[-] Unable to unmap stack: Invalid argument
+) = 44
+exit_group(1)                           = ?
++++ exited with 1 +++
+
+strings h
+PTRhx
+Hu7R
++5(V
+ug+=(V
++5(V
+@t7=
++5(V
+?AELDt
+PWVS
+PWVh
+PWVS
+J(9M
+w	;U
+p8v;
+p[v.
+pnv!
+)5HV
+;pTta
+v=+U
+AELD
+PSVW
+t<VW
++5(V
+@t8=
++5(V
+ZYPj
+^_Pj
+^_Pj
+ZYPj
+VS~u
+VS~y
++=(V
+SPVQ
+FX9F
+RSWV
+PSWV
+,[^_
+<.u_
+hC6	
+hC6	
+G$+U
+VQRW
+P4uB
+PVSW
+x	2u
+x	6u
+h7		
+Y^h"
+u,@P
+tDPj
+u(@P
+u$@P
+u @P
+4?RV
+0<	w
+u!+}
+~)QV
+;5 W
+t)RWVP
+<0=t+
+xy;U
+xy;U
+to<%tk
+tL<%tH
+RtmVj
+PVj0
+RVj0
+v3IK
+u#;M
+PQRW
+PVh,
+	w9B
+tG<%tC
+t:RP
+t2Wj
+N(Qj
+:$t'
+:$t+
+u/;C
+QWVS
+PSj 
+t(PSj 
+PSj 
+PSj 
+gfff
+HPWW
+HPWW
+HPWW
+RV)}
+@PSR
+RWVS
+PWVS
+PWVS
+PWVS
+QSj 
+t+PSj 
+PSj 
+RSj 
+PVj0
+PVj0
+t";5 @
+;5$@
+QVh,
+@tJf
+QSh,
+t	)A
+xPPS
+~*;]
+J,QS
+G +G
+G +G
+t:;]
+STRV
+STRV
+S(RV
+H$;H(
+G +G
+G +G
+t-;]
+FAJy
+H +H
+WPRQ
+WPRQ
+B +B
+^ +^
+PSVR
+{$PR)
+{$PR)
+~$PR+}
+{ t	
+CAJy
+RVSP
+AFJy
+QSPV
+{ t;
+F\xX
+XZSh
+GuP1
+RSVP
+0tk9
+Gu~1
+GuL1
+t#Jt @
+FX9F
+USVW
+_^[]
+_^[]
+tWRj
+u5Pj
+tOPVj
+u2QVj
+/staf
+XZh"
+Sj	h
+ZYh"
+Pj	h
+_Xh"
+Qh&*	
+Qj	h
+XZh"
+Qh7*	
+hG*	
+hV*	
+<$t,
+t_<}
+<:t	
+VQSR
+@t5P
+8j$S
+ShTW
+RhhW
+tk;]
+<}t/
+;5pW
+h`,	
+<:tpB
+h)+	
+8j$Q
+t'<:t#
+B<:t
+h .	
+@bQs
+h 0	
+;9wz
+ELFuc
+h,,	
+hA,	
+;5l@
+;5l@
+hr1	
+Ph`2	
+3hS2	
+t	;}$
+wW;u
+t	;}$
+t)WS
+t*WS
+ShN3	
+<%t	
+Dj/P
+@j/P
+8/u^
+VPSW
+:/u^
+QWSV
+Ph@M
+RQSV
+Ph@M
+<,t71
+B<,t
+Ph@M
+Ph@M
+P$;U
+XZt'
+|,;u
+AG<:tq1
+B<:tP
+WQRP
+E$!U
+tN;}
+PRQV
+E$!u
+E$!]
+E$!U
+u WV
+t7)M
+<[^_
+AC;M
+AC;M
+h :	
+PQRW
+<2t"
+hC:	
+hI:	
+Y^hT:	
+Vj:P
+tH9]
+=ZYW@P
+SQRW
+B s&
+$C;Z r
+/SYS
+B s#
+$C;Z r
+h`A	
+h`A	
+Ph X
+Fj@V
+t$Pj
+SStJ
+u	Hy
+Jt.P
+X[^_
+Bt(P
+X[^_
+Jtv1
+WVUS
+[]^_
+Jti1
+Jti1
+RQSV
+PRQSV
+PRSV
+TRSV
+R Iu
+WVUS
+[]^_
+u+PSV
+CRSV
+tG;E
+D	dP
+F +F
+RPWS
+x89M
+RSVP
+Gu[1
+Gu#1
+t0@Nt
+t(@Nt
+C$PS
+C$+E
+t	9P
+$[^_
+gfff
+Qj@j
+RQSW
+</t-
+:t9G
+:trG
+G;=$Y
+<\th
+0t=<\u
+0tB<\
+0tB<\
+0tB<\
+< t;<	t7<\t3F
+< t.<	t
+< t1<	t
+< t1<	t
+< t1<	t
+gmon
+seco
+/j	h>
+@t8P
+t	;M
+$[^_
+R Iu
+WVUS
+[]^_
+PVh,
+QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQj
+PhdY
+PSRV
+QWRV
+r{;E
+}!;u
+xy;U
+}!;u
+xy;U
+3</~
+t"Pj
+0t)1
+VUUU
+~.SR
+ t#Wj
+0<	v
+s1It
+s1It
+xy;U
+3</~
+t"Pj
+0t)1
+VUUU
+~@SR
+ t)Wj
+0<	v
+s1It
+s1It
+xy;U
+3</~
+t"Pj
+0t)1
+VUUU
+~@SR
+ t)Wj
+0<	v
+s1It
+s1It
+xy;U
+PWh,
+RPh@*
+RPh@*
+w6r*
+RPh@*
+w;r/
+RPh@*
+@bQs
+Ph#.
+wF;U
+wF;U
+[-] %s: %s
+[-] Unable to exit, entering neverending loop.
+Kernel seems not to be vulnerable
+double allocation
+Unable to determine kernel address
+Unable to set up LDT
+Unable to change page protection
+Invalid LDT entry
+Unable to jump to call gate
+local
+Unable to spawn shell
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+Unable to allocate memory
+Unable to unmap stack
+Unable to expand BSS
+/proc/sys/kernel/osrelease
+FATAL: kernel too old
+FATAL: cannot determine library version
+/dev/null
+malloc: using debugging hooks
+realloc(): invalid pointer %p!
+malloc: top chunk is corrupt
+Arena %d:
+system bytes     = %10u
+in use bytes     = %10u
+Total (incl. mmap):
+max mmap regions = %10u
+max mmap bytes   = %10lu
+free(): invalid pointer %p!
+MALLOC_TRIM_THRESHOLD_
+MALLOC_TOP_PAD_
+MALLOC_MMAP_THRESHOLD_
+MALLOC_MMAP_MAX_
+MALLOC_CHECK_
+Unknown error
+Unknown error 
+apic
+mtrr
+cmov
+pse36
+clflush
+acpi
+fxsr
+sse2
+ia64
+i386
+i486
+i586
+i686
+LD_PRELOAD
+LD_LIBRARY_PATH
+LD_ORIGIN_PATH
+LD_DEBUG_OUTPUT
+LD_PROFILE
+GCONV_PATH
+HOSTALIASES
+LOCALDOMAIN
+LOCPATH
+MALLOC_TRACE
+NLSPATH
+RESOLV_HOST_CONF
+RES_OPTIONS
+TMPDIR
+TZDIR
+LD_AOUT_LIBRARY_PATH
+LD_AOUT_PRELOAD
+LD_WARN
+LD_LIBRARY_PATH
+LD_BIND_NOW
+LD_BIND_NOT
+LD_DYNAMIC_WEAK
+/etc/suid-debug
+LD_ASSUME_KERNEL
+libc
+messages
+/usr/share/locale
+POSIX
+LANGUAGE
+charset=
+OUTPUT_CHARSET
+/locale.alias
+/usr/share/locale
+parse error
+parser stack overflow
+plural=
+nplurals=
+0123456789abcdefghijklmnopqrstuvwxyz
+(null)
+(nil)
+Success
+Operation not permitted
+No such file or directory
+No such process
+Interrupted system call
+Input/output error
+No such device or address
+Argument list too long
+Exec format error
+Bad file descriptor
+No child processes
+Cannot allocate memory
+Permission denied
+Bad address
+Block device required
+Device or resource busy
+File exists
+Invalid cross-device link
+No such device
+Not a directory
+Is a directory
+Invalid argument
+Too many open files in system
+Too many open files
+Text file busy
+File too large
+No space left on device
+Illegal seek
+Read-only file system
+Too many links
+Broken pipe
+Numerical result out of range
+Resource deadlock avoided
+File name too long
+No locks available
+Function not implemented
+Directory not empty
+No message of desired type
+Identifier removed
+Channel number out of range
+Level 2 not synchronized
+Level 3 halted
+Level 3 reset
+Link number out of range
+Protocol driver not attached
+No CSI structure available
+Level 2 halted
+Invalid exchange
+Invalid request descriptor
+Exchange full
+No anode
+Invalid request code
+Invalid slot
+Bad font file format
+Device not a stream
+No data available
+Timer expired
+Out of streams resources
+Machine is not on the network
+Package not installed
+Object is remote
+Link has been severed
+Advertise error
+Srmount error
+Communication error on send
+Protocol error
+Multihop attempted
+RFS specific error
+Bad message
+Name not unique on network
+File descriptor in bad state
+Remote address changed
+Streams pipe error
+Too many users
+Destination address required
+Message too long
+Protocol not available
+Protocol not supported
+Socket type not supported
+Operation not supported
+Protocol family not supported
+Address already in use
+Network is down
+Network is unreachable
+Connection reset by peer
+No buffer space available
+Connection timed out
+Connection refused
+Host is down
+No route to host
+Operation already in progress
+Operation now in progress
+Stale NFS file handle
+Structure needs cleaning
+Not a XENIX named type file
+No XENIX semaphores available
+Is a named type file
+Remote I/O error
+Disk quota exceeded
+No medium found
+Wrong medium type
+Operation canceled
+Resource temporarily unavailable
+Inappropriate ioctl for device
+Numerical argument out of domain
+Too many levels of symbolic links
+Value too large for defined data type
+Can not access a needed shared library
+Accessing a corrupted shared library
+.lib section in a.out corrupted
+Attempting to link in too many shared libraries
+Cannot exec a shared library directly
+Invalid or incomplete multibyte or wide character
+Interrupted system call should be restarted
+Socket operation on non-socket
+Protocol wrong type for socket
+Address family not supported by protocol
+Cannot assign requested address
+Network dropped connection on reset
+Software caused connection abort
+Transport endpoint is already connected
+Transport endpoint is not connected
+Cannot send after transport endpoint shutdown
+Too many references: cannot splice
+                0000000000000000
+,ccs=
+ANSI_X3.4-1968//TRANSLIT
+/proc
+/cpuinfo
+processor
+/meminfo
+MemTotal: %ld kB
+MemFree: %ld kB
+/etc/mtab
+proc
+/etc/fstab
+/lib/
+/usr/lib/
+ORIGIN
+PLATFORM
+system search path
+RUNPATH
+RPATH
+find library=%s; searching
+file=%s;  needed by %s
+cannot allocate name record
+cannot create searchlist
+cannot map zero-fill pages
+cannot handle TLS data
+cannot read file data
+cannot stat shared object
+ELF file OS ABI invalid
+ELF file ABI version invalid
+internal error
+invalid ELF header
+file too short
+  trying file=%s
+ search path=
+		(%s from file %s)
+		(%s)
+cannot create cache for search path
+cannot create search path array
+cannot create shared object descriptor
+cannot open shared object file
+cannot create RUNPATH/RPATH copy
+failed to map segment from shared object
+object file has no dynamic section
+shared object cannot be dlopen()ed
+  dynamic: 0x%0*lx  base: 0x%0*lx   size: 0x%0*Zx
+    entry: 0x%0*lx  phdr: 0x%0*lx  phnum:   %*u
+cannot allocate memory for program header
+cannot change memory protections
+cannot dynamically load executable
+object file has no loadable segments
+ELF load command address/offset not properly aligned
+ELF load command alignment not page-aligned
+file=%s;  generating link map
+only ET_DYN and ET_EXEC can be loaded
+ELF file's phentsize not the expected size
+ELF file version does not match current one
+ELF file data encoding not little-endian
+ELF file version ident does not match current one
+/etc/ld.so.cache
+ld.so-1.7.0
+glibc-ld.so.cache1.1
+ search cache=%s
+undefined symbol: 
+<main program>
+relocation error
+, version 
+symbol 
+ not defined in file 
+ with link time reference
+ (no version symbols)
+protected
+normal
+ [%s]
+binding file %s to %s: %s symbol `%s'
+symbol=%s;  lookup in file=%s
+file=%s;  needed by %s (relocation dependency)
+out of memory
+<program name unknown>
+%s: %s: %s%s%s%s%s
+DYNAMIC LINKER BUG!!!
+continued
+%s: error: %s: %s (%s)
+fatal
+error while loading shared libraries
+/proc/self/exe
+IGNORE
+/usr/lib/gconv
+gconv-modules
+=INTERNAL->ucs4
+=ucs4->INTERNAL
+UCS-4LE//
+=INTERNAL->ucs4le
+=ucs4le->INTERNAL
+=INTERNAL->utf8
+=utf8->INTERNAL
+=ucs2->INTERNAL
+=INTERNAL->ucs2
+=ascii->INTERNAL
+=INTERNAL->ascii
+=ucs2reverse->INTERNAL
+=INTERNAL->ucs2reverse
+UCS-4// ISO-10646/UCS4/
+UCS-4BE// ISO-10646/UCS4/
+CSUCS4// ISO-10646/UCS4/
+ISO-10646// ISO-10646/UCS4/
+OSF00010104// ISO-10646/UCS4/
+OSF00010105// ISO-10646/UCS4/
+OSF00010106// ISO-10646/UCS4/
+WCHAR_T// INTERNAL
+UTF8// ISO-10646/UTF8/
+UTF-8// ISO-10646/UTF8/
+ISO-IR-193// ISO-10646/UTF8/
+OSF05010001// ISO-10646/UTF8/
+UCS2// ISO-10646/UCS2/
+UCS-2// ISO-10646/UCS2/
+OSF00010100// ISO-10646/UCS2/
+OSF00010101// ISO-10646/UCS2/
+OSF00010102// ISO-10646/UCS2/
+ANSI_X3.4// ANSI_X3.4-1968//
+ISO-IR-6// ANSI_X3.4-1968//
+ISO646-US// ANSI_X3.4-1968//
+US-ASCII// ANSI_X3.4-1968//
+IBM367// ANSI_X3.4-1968//
+CP367// ANSI_X3.4-1968//
+CSASCII// ANSI_X3.4-1968//
+UCS-2LE// ISO-10646/UCS2/
+UCS-2BE// UNICODEBIG//
+module
+alias
+10646-1:1993// ISO-10646/UCS4/
+10646-1:1993/UCS4/ ISO-10646/UCS4/
+ISO-10646/UTF-8/ ISO-10646/UTF8/
+ANSI_X3.4-1986// ANSI_X3.4-1968//
+ISO_646.IRV:1991// ANSI_X3.4-1968//
+OSF00010020// ANSI_X3.4-1968//
+UNICODELITTLE// ISO-10646/UCS2/
+gconv_trans_context
+gconv_trans
+gconv_trans_init
+gconv_trans_end
+GCONV_PATH
+/usr/lib/gconv/gconv-modules.cache
+gconv
+gconv_init
+gconv_end
+LC_CTYPE
+LC_NUMERIC
+LC_TIME
+LC_COLLATE
+LC_MONETARY
+LC_MESSAGES
+LC_ALL
+LC_PAPER
+LC_NAME
+LC_ADDRESS
+LC_TELEPHONE
+LC_MEASUREMENT
+LC_IDENTIFICATION
+LOCPATH
+/usr/lib/locale
+LANG
+/usr/lib/locale/locale-archive
+upper
+lower
+alpha
+digit
+xdigit
+space
+print
+graph
+blank
+cntrl
+punct
+alnum
+toupper
+tolower
+POSIX
+ANSI_X3.4-1968
+[Am-
+kpnJ
+uD;s
+)r+[
+[!|n
+uYD?e
+I9C-
+I!G.
+U^h6LU3
+U.y`
+3?Cy
+'_Djz
+$po?b
+w};u
+=t%j
+MP0!
+t0tv
+=u8Q)+
+*~xx
+~j2=
+|;#o
+Ac+;
+^2XX%
+!{>;b
+dI@B
+2I%%
+{fG5
+0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ
+Universal
+/etc/localtime
+%[^0-9,+-]
+%hu:%hu:%hu
+M%hu.%hu.%hu%n
+/usr/share/zoneinfo
+TZDIR
+posixrules
+ %d %d 
+%s %s %s %s %d %d
+.profile
+%s: cannot stat file: %s
+%s: cannot map file: %s
+%s: cannot create file: %s
+%s: cannot open file: %s
+%s: file is no correct profile data file for `%s'
+Out of memory while initializing profiler
+^[yY]
+^[nN]
+Sunday
+Monday
+Tuesday
+Wednesday
+Thursday
+Friday
+Saturday
+January
+February
+March
+April
+June
+July
+August
+September
+October
+November
+December
+%a %b %e %H:%M:%S %Y
+%m/%d/%y
+%H:%M:%S
+%I:%M:%S %p
+%a %b %e %H:%M:%S %Z %Y
+%p%t%g%t%m%t%f
+%a%N%f%N%d%N%b%N%s %h %e %r%N%C-%z %T%N%c%N
++%c %a %l
+ISO/IEC 14652 i18n FDCC-set
+Keld Simonsen
+keld@dkuug.dk
++45 3122-6543
++45 3325-6543
+1997-12-20
+ISO/IEC JTC1/SC22/WG20 - internationalization
+C/o Keld Simonsen, Skt. Jorgens Alle 8, DK-1615 Kobenhavn V
+i18n:1999
+i18n:1999
+i18n:1999
+i18n:1999
+i18n:1999
+i18n:1999
+i18n:1999
+i18n:1999
+i18n:1999
+i18n:1999
+i18n:1999
+i18n:1999
+i18n:1999
+i18n:1999
+i18n:1999
+i18n:1999
+ !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~
+Ainvalid mode for dlopen()
+cannot extend global scope
+cannot create scope list
+dlopen
+opening file=%s; opencount == %u
+empty dynamic string token substitution
+DST not allowed in SUID/SGID programs
+closing file=%s; opencount == %u
+calling fini: %s
+shared object not open
+inity
+ (lazy)
+relocation processing: %s%s
+%s: Symbol `%s' has different size in shared object, consider re-linking
+cannot restore segment prot after reloc
+%s: profiler out of memory shadowing PLTREL of %s
+%s: profiler found no PLTREL in object %s
+cannot make segment writable for relocation
+unexpected reloc type 0x
+unexpected PLT reloc type 0x
+cannot allocate symbol search list
+Filters not supported with LD_TRACE_PRELINKING
+cannot allocate dependency list
+cannot load auxiliary `%s' because of empty dynamic string token substitution
+empty dynamics string token substitution
+load filtered object=%s requested by file=%s
+load auxiliary object=%s requested by file=%s
+calling init: %s
+calling preinit: %s
+cannot allocate version reference table
+no version information available (required by 
+checking for version `%s' in file %s required by file %s
+unsupported version 
+ of Verneed record
+weak version `
+' not found (required by 
+ of Verdef record
+`. I.
+. r.
+. s.
+. S.
+. S.
+. S.
+. {.
+. v.
+. V.
+F. T.
+j. S.
+u. u.
+z. ^.
+b. O.
+[. K.
+D. K.
+. ].
+. ].
+a. v.
+{.  
+GCC: (GNU) 3.2.2 20030222 (ASPLinux 3.2.2-5asp)
+GCC: (GNU) 3.2.2 20030222 (ASPLinux 3.2.2-5asp)
+GCC: (GNU) 3.2.2 20030222 (ASPLinux 3.2.2-5asp)
+GCC: (GNU) 3.2.2 20030222 (ASPLinux 3.2.2-5asp)
+GCC: (GNU) 3.2.2 20030222 (ASPLinux 3.2.2-5asp)
+GCC: (GNU) 3.2.2 20030222 (ASPLinux 3.2.2-5asp)
+GCC: (GNU) 3.2.2 20030222 (ASPLinux 3.2.2-5asp)
+GCC: (GNU) 3.2.2 20030222 (ASPLinux 3.2.2-5asp)
+.shstrtab
+.init
+.text
+__libc_freeres_fn
+.fini
+.rodata
+__libc_subfreeres
+__libc_atexit
+.eh_frame
+.data
+.ctors
+.dtors
+.jcr
+.got
+.bss
+__libc_freeres_ptrs
+.comment
+.note.ABI-tag
