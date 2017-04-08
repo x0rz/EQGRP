@@ -1,0 +1,12 @@
+#NOGS
+-lcd /current/down -nohist
+-lsh env | grep NOPEN ; echo set:;set | grep NOPEN
+-lsh -nohist echo $NOPEN_RHOSTNAME | grep  / 
+-lsh -nohist cat /dev/null > /current/tmp/norc.newauto ; echo $NOPEN_RHOSTNAME | grep -q / && NEWNAME=`echo $NOPEN_RHOSTNAME | sed "s,/,__,g"` && touch  /current/etc/norc.$NEWNAME && ( grep -v myname /current/etc/norc.$NEWNAME > /current/etc/norc.newauto 2>/dev/null ; echo -n "\# Set our -myname aliases to:" ; echo -e "alias -myname2=-lsetenv NOPEN_RHOSTNAME_WITH_SLASHES=${NOPEN_RHOSTNAME}\\nalias -myname=-lsetenv NOPEN_RHOSTNAME=$NEWNAME" | tee /current/etc/norc.$NEWNAME ; cat /current/tmp/norc.newauto >> /current/etc/norc.$NEWNAME ) ; rm /current/tmp/norc.newauto
+-lsh -nohist mkdir -p /current/tmp/autodone.$NOPEN_RHOSTNAME /current/tmp/autodone.$NOPEN_RHOSTNAME /current/tmp/$NOPEN_RHOSTNAME 2>/dev/null ; rmdir /current/tmp/autodone.$NOPEN_RHOSTNAME /current/tmp/autodone.$NOPEN_RHOSTNAME /current/tmp/$NOPEN_RHOSTNAME 2>/dev/null
+-lsh -nohist [ "$GSOPTIONS" = "new" ]  && rm -f /current/tmp/autodone.$NOPEN_RHOSTNAME ; touch /current/tmp/autodone.$NOPEN_RHOSTNAME.new ; cd /current/etc ; chmod +x gethostinfo.pl auto* ; ./autocheck && ./autodone 
+-gs -nohist /current/etc/autonext
+-mynorc -nohist
+-mypath -nohist
+-myname2 -nohist
+-myname -nohist

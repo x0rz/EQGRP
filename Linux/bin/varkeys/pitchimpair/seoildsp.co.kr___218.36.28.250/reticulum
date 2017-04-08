@@ -1,0 +1,20 @@
+PITCHIMPAIR___seoildsp.co.kr___218.36.28.250___20040406-132009() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.6 
+    #
+    set host seoildsp.co.kr
+    set ip 218.36.28.250
+    set hostType "Solaris26"
+    set len 476
+    set cv0 64e2d584
+    set cv1 5ab27962
+    set cv2 db4a31ed
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

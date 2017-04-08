@@ -1,0 +1,28 @@
+HOWTO for nftp
+
+nftp allows plain old FTP to be used redirected through a NOPEN
+connection.
+
+Connect to a remote NOPEN server you want to redirect ftp through.
+Run this command there:
+
+	-tunnel 12121 udp
+
+
+Then, in a local window:
+
+	nftp -r NOPEN-SERVER-IP TARGETIP
+
+where NOPEN-SERVER-IP is the IP on the NOPEN server that will be
+conversing with the remote FTP server; and
+
+TARGETIP is the ACTUAL IP of the FTP server.
+
+Don't worry, in NOPEN redirect mode (with -r), nftp will not contact
+TARGETIP directly.
+
+NOTE: Once nftp exits, the "-tunnel" on the NOPEN server will exit.
+
+nftp is a complete ftp client. See "man nftp.1" for complete client
+details.
+

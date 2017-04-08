@@ -1,0 +1,253 @@
+#!/usr/bin/env perl
+use File::Basename ;
+require Time::Local;
+$COLOR_SUCCESS="\033[1;32m";
+$COLOR_FAILURE="\033[1;31m";
+$COLOR_WARNING="\033[1;33m";
+$COLOR_NORMAL="\033[0;39m";
+$COLOR_NOTE="\033[0;34m";
+$VER="1.6" ;
+$prog = basename $0 ;
+
+require "getopts.pl";
+
+$usagetext="
+Usage:  $prog -h                        (prints this usage statement)
+        $prog [ options ] [-f filename]
+        $prog [ options ] hostname [hostname2 ...]
+
+ -q   In quiet mode, only the UTC_OFFSET line is shown, otherwise the
+      local and remote times used are output.
+
+ -m   When the source of the nonlocal time is from icmptime (and so it
+      has no date associated with it), output three possible offsets:
+      with the target ahead a day, behind a day or on the same day. This
+      is useful when target's date is tomorrow because of his timezone
+      but otherwise his date is correct.
+
+ -n   Suppress warnings about icmptime not being able to determine date.
+
+$prog reads from STDIN or the -f filename provided, looking for a
+GMT or UTC timestamp, e.g. from the output of \"date -u\" or icmptime. If
+the input has more than one line matching \"##:##:## (UTC/GMT)\", the
+final one found is used. If a hostname is given and icmptime is in the
+path, and you are root, $prog runs \"icmptime hostname\" as its input.
+
+On finding a GMT time, $prog computes the UTC_OFFSET, in minutes,
+between the time read and this machine's GMT, which is currently:
+
+" . `date -u` ;
+
+$vertext = "
+$prog version $VER
+" ;
+# note: these are supposed to be Jan=0 based, like Time::Local::gmtime
+%monval = (Jan,0,Feb,1,Mar,2,Apr,3,May,4,Jun,5,
+	   Jul,6,Aug,7,Sep,8,Oct,9,Nov,10,Dec,11);
+%monstr = (0,Jan,1,Feb,2,Mar,3,Apr,4,May,5,Jun,6,
+	   Jul,7,Aug,8,Sep,9,Oct,10,Nov,11,Dec);
+%daystr=(0,Sun,1,Mon,2,Tue,3,Wed,4,Thu,5,Fri,6,Sat,7,Sun) ;
+
+
+
+&usage("bad option(s)") if (! &Getopts( "hf:vdqmn" ) ) ;
+&usage if $opt_h ;
+if ( $quiet = $opt_q ) {
+  $COLOR_SUCCESS="" ;
+  $COLOR_FAILURE="" ;
+  $COLOR_WARNING="" ;
+  $COLOR_NORMAL="" ;
+  $COLOR_NOTE="" ;
+}
+$nowarnings = $opt_n ;
+if ($opt_v) {
+  print $vertext ;
+  &done() ;
+}
+$showmultipledays = ($opt_m) ;
+
+
+if ( @ARGV ) {
+  $hosts = 1 ;
+} else {
+  $stdin = 1 unless $opt_f;
+  @ARGV = ("dostdin") ;
+}
+
+
+$icmptimenote[2] = "AHEAD  one day: " ;
+$icmptimenote[1] = "TODAY's   date: " ;
+$icmptimenote[0] = "BEHIND one day: " ;
+foreach $host (@ARGV) {
+  $usingicmptime=0 ;
+  if ($opt_f) {
+    open (IN,"< $opt_f") or usage("Cannot open $opt_f") ;
+  } elsif (! $stdin ) {
+    mydie("Cannot use with icmptime unless you are root") unless ( $> == 0 ) ;
+    if (`which icmptime 2>&1 | grep -v "no icmptime"`) {
+      print "\n${COLOR_FAILURE}   WARNING: \aUsing icmptime which gives remote HH:MM:SS since
+   GMT 00:00:00. Assuming remainder of his GMT matches ours,
+   which may not be (his day could be off).\n$COLOR_NORMAL\n" unless ($quiet or $warned++ or $nowarnings) ;
+      open (IN, "icmptime $host 2>/dev/null |") or usage("Cannot open \"icmptime $host |\"") ;
+    } else {
+      usage("icmptime not in path\n") ;
+    }
+  } else {
+    open (IN,"<&STDIN") ;
+  }
+  #select STDOUT ;
+  $debug = $opt_d;
+  $gotinput = 0 ;
+  $remotedate = "" ;
+  while (<IN>) {
+    next unless ( /\d\d:\d\d:\d\d (utc|gmt)/i ) ;
+    next if (/Send.*Timestamp/) ;
+    $gotinput++ ;
+    chomp($remotedate = $_) ;
+    chomp($localdate = `date -u`) ;
+    if (/receive timestamp/i ) {
+      $usingicmptime=1;
+      ($remotetimeonly) = /(\d\d:\d\d:\d\d)/ ;
+      $remotedate = $localdate ; #assume day/year matches since we do not get day/year
+      $remotedate =~ s/\d\d:\d\d:\d\d/$remotetimeonly/ ;
+      print "\n${COLOR_FAILURE}   WARNING: \aUsing icmptime which gives remote HH:MM:SS since
+   GMT 00:00:00. Assuming remainder of his GMT matches ours,
+   which may not be (his day could be off).\n$COLOR_NORMAL\n" unless ($quiet or $warned++ or $nowarnings) ;
+    }
+    # last ; # don't want this--take the last line with gmt/utc, not first
+  }
+  close (IN) ;
+  if ($hosts and ! $gotinput) {
+    warn "${COLOR_FAILURE}No reply/host\tHOST: $host${COLOR_NORMAL}\n";
+    next ;
+  }
+  print "${COLOR_NOTE}
+    LOCAL: $localdate$COLOR_NORMAL
+   REMOTE: $remotedate
+$COLOR_NORMAL" unless ($quiet or $showmultipledays);
+
+  unless ($remotedate) {
+    warn "${COLOR_FAILURE}No GMT or UTC time found in stdin$COLOR_NORMAL\n";
+    next ;
+  }
+  if ($usingicmptime and $showmultipledays) {
+    $loopmore=2 ;
+  } else {
+    $loopmore=1 ;
+  }
+  while ($loopmore >= 0) {
+    # get localmin
+    ($sec,$min,$hr,$mday,$mon,$year,$wday,$yday,$isdst) = gmtime ;
+    $localsecs = Time::Local::timegm($sec,$min,$hr,$mday,$mon,$year) ;
+    $localmin = $localsecs / 60 ;
+
+    # get remotemin
+    $remotedate =~ s/:/ /g ;
+    $remotedate =~ s/  / /g ;
+    ($daystr,$monstr,$mday,$hr,$min,$sec,$tz,$year) = split (/ /,$remotedate) ;
+    $mon = $monval{$monstr} ;	# Jan=0 based
+
+    $remotesecs = Time::Local::timegm($sec,$min,$hr,$mday,$mon,$year) ;
+    $remotemin = $remotesecs / 60 ;
+
+    if ($usingicmptime and $showmultipledays) {
+      $remotemin += 24*60 if ($loopmore == 2) ;
+      $remotemin -= 24*60 if ($loopmore == 0) ;
+      my ($sec,$min,$hr,$mday,$mon,$year,$wday) = gmtime($remotemin * 60)  ;
+      printf "${COLOR_FAILURE}Assuming $icmptimenote[$loopmore]  %s %s %2d %02d:%02d:%02d UTC %4d   ",
+	$daystr{$wday},$monstr{$mon}, $mday, $hr, $min,$sec,1900+$year ;
+    }
+
+    $offset = int($remotemin - $localmin) ;
+    #select STDOUT ;
+    printf "${COLOR_NOTE}UTC_OFFSET=%-9d$COLOR_NORMAL",$offset;
+    if (($host eq "dostdin") or ($#ARGV == 0)) {
+      print "\n";
+    } else {
+      print "\t${COLOR_WARNING}HOST: $host${COLOR_NORMAL}\n" ;
+    }
+    $loopmore-- ;
+    last unless ($usingicmptime and $showmultipledays) ;
+  }
+}#endforeach $host (@ARGV)
+
+sub usage() {
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  print $usagetext . $vertext;
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  &done() ;
+} # end sub usage
+
+sub getinput() {
+  local($prompt,$default,@junk) = @_;
+  local($ans,$tmp) = ("","");
+
+  $tmp = $default;
+  if (chop($tmp) eq "") {
+    #damn ^M's in script files
+    $default = $tmp;
+  }
+
+  print $prompt;
+  if ($default) {
+    print " [$default] ";
+  } else {
+    print " ";
+  }
+  print "\n";
+  chomp($ans = <STDIN>);
+  $ans = $default if ( $ans eq "" );
+  return $ans;
+} # end sub getinput()
+
+sub ipcheck() {
+  # returns 1 iff $ipstr is in dotted decimal notation with each 
+  # octet between 0 and 255 inclusive (i.e. 0.0.0.0 and 255.255.255.255 are valid)
+  local($ipstr,@junk) = @_;
+  # need -1 in following split to keep null trailing fields (to reject "1.2.3.4.")
+  @octets=split(/\./,$ipstr,-1);
+  return 0 if ($#octets != 3);
+  foreach (@octets) {
+    # return 0 if (empty or nondigits or <0 or >255)
+    return 0 if ($_ eq "" || ( /\D/ ) || $_ < 0 || $_ > 255);
+  }
+  return 1;
+} # end sub ipcheck
+
+sub done() {
+  # Just exit unless $NOPENTN. 
+  # If $NOPENTN, dump out "NOPEN:$targetip"
+  # otherwise "NOPEN!"
+  if ($NOPENTN) {
+    if ($targetip) {
+      print "NOPEN:$targetip\n" ;
+    } else {
+      print "NOPEN!\n" ;
+    }
+  }
+  exit;
+}
+
+sub myrand () {
+  local ($mymin,$mymax) = (@_);
+  local $tmp;
+  $tmp=int(rand($mymax - $mymin + 1));
+  $tmp+=int(rand($mymax - $mymin + 1));
+  $tmp+=int(rand($mymax - $mymin + 1));
+  $tmp+=int(rand($mymax - $mymin + 1));
+  $tmp+=int(rand($mymax - $mymin + 1));
+  $tmp %= ($mymax - $mymin + 1);
+
+  $tmp = $tmp + $mymin;
+  return $tmp;
+}
+sub mydie {
+  local ($what,$color,$color2,$what2) = (@_) ;
+  $color = $COLOR_FAILURE unless $color ;
+  $color2 = $color unless $color2 ;
+  $what2 = " $what2" if ($what2) ;
+#  local (@stuff) = (@_,$hopping) ;
+  warn  "${color2}${prog}[$$]$what2\a: ${color}$what$COLOR_NORMAL\n" ;
+#"\n${COLOR_FAILURE}\a$what $hopping$COLOR_NORMAL\n" ;
+  exit 1;
+}

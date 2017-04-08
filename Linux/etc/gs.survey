@@ -1,0 +1,7 @@
+#NOGS
+-lcd /current/down -nohist
+-lsh /current/etc/autosurvey $GSOPTIONS -nohist
+-gs /port -nohist
+# Redo-ing -mynorc and -mypath in case survey changed our path or aliases -nohist
+-mynorc -nohist
+-mypath -nohist

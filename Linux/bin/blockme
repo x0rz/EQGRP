@@ -1,0 +1,132 @@
+#!/usr/bin/env perl
+
+# Blockme inserts iptables rules to prevent traffic to unintended hosts
+# Also can remove rules and list them
+
+use Getopt::Std;
+
+$VER = "1.0.0.3";
+$prog = `basename $0`;
+chomp $prog;
+$iptablesListCommand = "iptables -L OUTPUT --line-numbers -n";
+
+# Get command line options
+die("Invalid command line option") unless getopts("hvlr:a:");
+
+# Helpful information if necessary or if invalid inputs
+usage() if $opt_h;
+version() if $opt_v;
+usage() if (defined($opt_l) and (defined($opt_r) or defined($opt_a)));
+usage() if (defined($opt_r) and (defined($opt_l) or defined($opt_a)));
+usage() if (defined($opt_a) and (defined($opt_r) or defined($opt_l)));
+unless (defined($opt_a) or defined($opt_r) or defined($opt_l)) {
+  usage() if ("@ARGV" =~ /[^\.\d\/]/);
+  usage() if ("@ARGV" =~ m,/.*/,);
+  $opt_a = "@ARGV";
+}
+
+# Do what user asked to do
+$rulenumber = $opt_r;
+$netblock = $opt_a;
+die ("No iptables in PATH") unless `which iptables 2>/dev/null`;
+die("You must be root.\n") if ($>);
+listrules() if defined($opt_l);
+removerule() if defined($opt_r);
+addrule() if defined($opt_a);
+
+### END MAIN PROGRAM ###
+
+# Usage statement function
+sub usage()
+{
+	select STDERR;
+	print "\n$prog [options] [IPADDR/MASK]\n";
+	print "\n";
+	print "Options:\n";
+	print " -h/-v            Usage/version information\n";
+	print " -l               List current blocked output rules\n";
+	print " -r RULENUM       Remove RULENUM from iptables OUTPUT rules\n";
+	print " -a IPADDR/MASK   add DROP of address/network to iptables OUTPUT rules\n";
+	print "                  (-a is assumed if just an IP/MASK is given)\n";
+	print "                  (ONLY specify mask as 1-32, no 255.255.255.0-style)\n";
+	print "                  (if not present, MASK defaults to 24 - Class C)\n\n";
+	print "NOTE: This tool is NOT meant to do any fine-grained manipulation of\n";
+	print "      iptables rules.  It is meant to be all or nothing to prevent\n";
+	print "      accidental comms.  \"man iptables\" if more specific rules needed\n\n";
+	version();
+}
+
+# Version information function
+sub version()
+{
+	print "$prog version $VER\n";
+	exit 1;
+}
+
+# List the rules in the output chain
+sub listrules()
+{
+	system("$iptablesListCommand") and
+	  die("Unable to run \"$iptablesListCommand: $!\n");
+}
+
+# Remove a rule number from the output chain
+sub removerule()
+{
+	# Confirm this is the rule user wants to delete
+	die ("No rule number specified") if (length($rulenumber) <= 0);
+	$validrule = `$iptablesListCommand 2>/dev/null | egrep -vi "^(chain|num)" | grep "^$rulenumber "`;
+	chomp $validrule;
+	die("Invalid rule number specified: $rulenumber") unless (length($validrule) > 0);
+	print "The rule you would like to delete is:\n\n";
+	print "$validrule\n";
+	print "Is this correct? (Y/N): ";
+	$response = <STDIN>;
+	chomp $response;
+	die("Rule removal aborted") unless ($response =~ /^[yY]/);
+  
+  # If here, got confirmation, delete the rule
+	system("iptables -D OUTPUT $rulenumber") and
+	  die("Unable to run \"iptables -D OUTPUT $rulenumber\"\n");
+	print "Rule $rulenumber removed successfully\n";
+	print "\nNOTE: rule numbers change as rules are added/deleted\n"
+}
+
+sub addrule()
+{
+	### Confirm that this is valid input
+
+	# Make sure a valid IP address
+	($address, $mask) = split(/\//, $netblock);
+	die("Invalid IP address given") unless ($address =~ /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+	@octets = split(/\./, $address);
+	foreach $octet (@octets)
+	{
+		die("Invalid IP address given") if ($octet > 255);
+	}  
+
+	# Make sure a valid mask
+	if (length($mask))
+	{
+		die("Invalid mask given") unless ($mask =~ /^(\d{1,2})$/);    
+		die("Invalid mask given") if ($mask > 32);
+	}
+	else
+	{
+		$mask = "24";
+	}
+	if ($address =~ /^(127|0+)./) {
+	  die("Refusing to block all traffic to $1.*");
+	}
+
+	# Inputs are valid, add the rule
+	system("iptables -I OUTPUT 1 -j DROP --destination $address/$mask") and
+	  die("Unable to run \"iptables -I OUTPUT 1 -j DROP --destination $address/$mask\"\n");
+
+	# Now display the rules
+	print "Rule added, displaying current rules:\n\n";
+	system("$iptablesListCommand") and
+	  die("Unable to run \"$iptablesListCommand: $!\n");
+	print "\nNOTE: rule numbers change as rules are added/deleted\n"
+}
+

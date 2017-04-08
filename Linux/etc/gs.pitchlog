@@ -1,0 +1,2 @@
+#NOGS
+-lsh if [ "x$GSOPTIONS" = "x-h" -o "x$GSOPTIONS" = "x" ] ; then  echo -e "\\nUsage: -gs pitchlog [comment to log all on one line]\\n" ; else echo -e `date -u` "$HOSTNAME/$NOPEN_RHOSTNAME: $GSOPTIONS" >> /current/down/pitch-problems.txt ; echo -e "\\n`cat /current/down/pitch-problems.txt`\\n" ; fi -nohist

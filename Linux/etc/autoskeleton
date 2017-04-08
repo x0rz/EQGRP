@@ -1,0 +1,248 @@
+#!/usr/bin/env perl 
+##
+$VER="1.0.0.3";
+
+$| = 1 ;
+($scriptcount, $functioncount) = ();
+myinit() ;
+
+
+dbg("This output is from dbg(): @ARGV") if $opt_D;
+
+progprint("This output is from progprint(): @ARGV") if $opt_P;
+
+if ($opt_T) {
+  ($output,$nopenlines,@output) =  doit("@ARGV");
+  my ($count,$outlines) = (1);
+  foreach (@output) {
+    $_ = $COLOR_NORMAL.$_.$COLOR_NOTE;
+    $outlines .= sprintf("line %03d: $_\n",$count++)
+  }
+  progprint("Results of (\$output,\$nopenlines,\@output)= doit(\"@ARGV\"):\n\n".
+	    "\$nopenlines = \"$COLOR_FAILURE.$nopenlines$COLOR_NOTE\"\n".
+	    "\$output = \"$COLOR_NORMAL$output$COLOR_NOTE\"\n".
+	    "\@output (newlines added back in) = (\n".$outlines.
+	    "         \n)"
+	   );
+}
+
+if ($opt_O) {
+  progprint("This output is from progprint(@ARGV)\n\n".
+	    "(See also $optmp/dammit for output from a call to dbg following this.)"
+	   );
+  dbg("This output is from dbg(@ARGV)");
+  mywarn("This output is from mywarn(@ARGV)");
+  dolocalecho("This output is from dolocalecho(@ARGV)");
+  dolocalecho("This output is from dolocalecho(@ARGV,POPUP)",POPUP);
+}
+
+if ($opt_I) {
+  my ($ans,$longans) = mygetinput("Answer this prompt with something:","nothing");
+  my $more = "(You entered no input, so the default of \"nothing\" was used)\n"
+    if ($longans eq "nothing");
+  progprint($COLOR_NORMAL."\n\n".
+	    $more.
+	    "RESPONSE:\n".
+	    "            \$ans     = $ans\n".
+	    "            \$longans = $longans\n".
+	    "");
+  offerabort("This is a call to offerabort(), with a default of Continue.","C");
+  progprint("You did NOT answer abort above.");
+}
+
+
+if ($opt_S) {
+  my $scriptlist = "";
+  while (@scriptlist) {
+    my $c1 = shift @scriptlist;
+    my $c2 = shift @scriptlist;
+    my $c3 = shift @scriptlist;
+    $scriptlist .= sprintf("    %-22s      %-22s      %s\n",$c1,$c2,$c3);
+  }
+  mydie($COLOR_NORMAL."\n\n".
+	"There are $scriptcount auto* scripts in $opetc. \n\n".
+	$scriptlist."\n\n".
+	"Each ought to have usage statement available with the -h option, and some have\n".
+	"a longer usage available with -H. E.g., -gs rsync -h and -gs rsync -H.\n\n".
+	"Run -gs helpall to see usage for all of them (LAB ONLY). Output from that is\n".
+	"saved in $opetc/helpall.output."
+	) ;
+
+}
+
+# Called via do so must end with 1;
+1;
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0 unless $calledviarequire;
+  $stoiccmd = "called as: -gs skeleton @ARGV";
+  if ($willautoport and $socket) {
+    $stoiccmd = "in $prog, called as: skeleton(@ARGV)";
+    dbg("via require autoskeleton ARGV=(
+".join("\n",@ARGV)."
+) prog=$prog");
+#    progprint("$prog called -gs skeleton @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $prog = "-gs skeleton";
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $vertext = "$prog version $VER\n" ;
+  }
+  clearallopts();
+  $vertext = "$prog version $VER\n" ;
+  mydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			    -e $nopen_mylog);
+
+  my $origoptions = "@ARGV";
+  mydie("bad option(s)") if (! Getopts( "hvDTOIFSN:" ) ) ;
+  
+  ###########################################################################
+  # Set strings used in usage before calling it
+  ###########################################################################
+
+  (@scriptlist) = split(/\n/,`cd $opetc ; ls -1 auto* | sort`);
+  @scriptlist = grep ! /\.old/ , @scriptlist;
+  @scriptlist = grep ! /\.bak/ , @scriptlist;
+  @scriptlist = grep ! /^autoport\./ , @scriptlist;
+  @scriptlist = grep ! /\~/ , @scriptlist;
+  @scriptlist = grep ! /(bz2|[0-9])$/ , @scriptlist;
+  $scriptcount = @scriptlist;
+
+  mydie("You cannot use -N $opt_N when this script already exists:\n\n".
+	`ls -al $opetc/auto$opt_N`) if (-f "$opetc/auto$opt_N");
+
+  if ($opt_F) {
+
+    my (@functionlist) = sort split(/\n/,`cd $opetc ; grep "^sub [a-z]" autoutils | sed "s, {,,g" | sed "s/^sub //g"`);
+    $functioncount = @functionlist;
+    my $functionlist = "";
+    my (@c1,@c2,@c3) = ();
+    while (@functionlist) {
+      if (@functionlist > 2*$functioncount/3) {
+	push(@c1,shift @functionlist);
+      } elsif (@functionlist > $functioncount/3) {
+	push(@c2,shift @functionlist);
+      } else {
+	push(@c3,shift @functionlist);
+      }
+    }
+    while (@c1 or @c2 or @c3) {
+      $functionlist .= sprintf("  %-22s    %-22s    %s\n",shift(@c1),shift(@c2),shift(@c3));
+#      $functionlist .= sprintf("  %-22s    %-22s    %s\n",shift(@c1)); shift(@c2); shift(@c3);
+#      $functionlist .= sprintf("  %-22s    %-22s    %s\n",shift(@c2)); shift(@c1); shift(@c3);
+#      $functionlist .= sprintf("  %-22s    %-22s    %s\n",shift(@c3)); shift(@c2); shift(@c1);
+    }
+    mydie($COLOR_NORMAL."\n\n".
+	  "There are $functioncount functions/subroutines in autoutils:\n".
+	  $functionlist
+	 ) ;
+
+  }
+
+
+#  my $half = int(@functionlist/2);
+#  for (my $i=0; $i < $half; $i++) {
+#    $functionlist .= sprintf("     %-35s    %s\n",$functionlist[$i],$functionlist[$i+$half]);
+#  }
+#  $functionlist .= sprintf("     %-35s    %s\n","",$functionlist[$#functionlist])
+#    unless (@functionlist % 2);
+
+  ###########################################################################
+  # PROCESS ARGUMENTS
+  ###########################################################################
+
+
+  usage() if ($opt_h or $opt_v or $opt_N or 
+	      !($opt_D or $opt_T or $opt_O or $opt_I or $opt_F  or $opt_S # or $opt_
+	       )
+	     );
+
+  # Connect to autoport, we need status and more interactively.
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+
+  ## ERROR CHECKING OF OPTS
+
+}
+
+sub setusagetexts {
+  # Separate long usage strings as separate function
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session when \"$prog\" or
+\"=skeleton\" is used.
+
+";
+  my $newname = $opt_N unless ($opt_N =~ /[\/\s]/);
+  $newname = "NEWNAME" unless $newname;
+
+  $gsusagetext="
+Usage:  $prog [OPTIONS]
+
+$prog is a teaching tool meant to help understand how NOPEN automation,
+via Perl, is done. It is restricted to the lab, only.
+
+To use it as a starting point for your own script, copy it to your own new
+files, modify them to your needs. Use the -N NAME option to change the
+pastables below to the name of your choice (entire block can be
+pasted at once):
+
+           -lsh
+           cd $opetc
+           sed \"s,skeleton,$newname,g\" autoskeleton > auto$newname
+           chmod 700 auto$newname
+           sed \"s,skeleton,$newname,g\" gs.skeleton > gs.$newname
+           exit
+           -gs $newname -h
+
+  -D ARGs  Run dbg(\"ARGs\"), which sends that string, timestamped, to the file
+           $optmp/dammit. This is useful in scripts that have forked or
+           closed their stdout/err.
+  -F       $opetc/autoutils has $functioncount subroutines useful in many situations.
+           This option shows a list in alphabetic order.
+  -I       User input functions in autoutils:
+            (\$ans,\$longans) = mygetinput(\$prompt,\@moreargs)
+                Prompts the user, output returned: \$ans is the first
+                letter only, lowercase; \$longans is the entire response.
+            (\$ans,\$longans) = offerabort(\$prompt,\@moreargs)
+                Same as mygetinput, but adds a \"Continue or Abort\" to
+                the prompt, and calls mydie() if the user aborts.
+  -N NAME  Change above pastables to use \"NAME\" instead of \"NEWNAME\"
+  -O       Output functions:
+            progprint(\@opts)
+                Prints output to the screen. Options allow for things
+                like color, a pause, perl's stdout being closed, etc.
+            mywarn(\@opts)
+                Uses dolocalecho and options similar to progprint to
+                show output, color defaults to red.
+            dolocalecho(\@opts)
+                Uses a local echo instead of perl's I/O. Optionally, if
+                the final argument is \"popup\", does so in a popped xterm.
+  -S       $opetc/ has $scriptcount auto* perl scripts. This option shows a
+           list in alphabetic order.
+  -T CMD   Run doit(\"CMD\") and show the results
+            (\$output,\$nopenlines,\@output) = doit(\$cmd)
+                doit() runs \$cmd interactively on target, returning the
+                results in two scalars and an array. The first scalar
+                is the multiline output from target, which is also returned
+                in the array, one line per element. The middle scalar is
+                not very useful--it is the NOPEN prompt/timestamp lines.
+  
+
+Usage:  $prog [OPTIONS]
+
+";
+}#setusagetexts

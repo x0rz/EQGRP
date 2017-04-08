@@ -1,0 +1,3 @@
+#NOGS
+-nohist -lsh /current/etc/autofortidone $GSOPTIONS
+-gs /port -nohist

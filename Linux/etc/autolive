@@ -1,0 +1,429 @@
+#!/usr/bin/env perl
+#
+# INPUT: $opetc/autolive.conf
+#
+# This script makes sure its parent NOPEN window stays connected to its
+# client in the wild by doing periodic -w commands. If said -w produces
+# no output, someone gets beeped.
+#
+# This script will also run "gs autoextras" if the file $opetc/gs.autoextras
+# exists. If the autoextras stuff only needs done once, gs.autoextras should
+# rm -f (or rename) itself.
+#
+# Other stuff:
+#
+# Q1) What should create a autolive.die file?
+# A2) An operator that wants control back of the keepalive window.
+# Q2) How do I change the configuration of autolive?
+# A2) Edit the .conf file as needed, save it and then (cp not mv):
+#     cp autolive.conf autolive.conf.new  
+# Q3) A background process that finds something it wants this
+#     NOPEN connection to do something should:
+#      1) first create a $opetc/gs.autoextras NOGS script which:
+#         A) Does whatever it wants NOPEN to do (pull logs?)
+#         B) rm -f itself (unless you want it done every $wait seconds
+#         C) DO NOT Start up autolive again.(not needed)
+#      2) and then touch /current/etc/autolive.doone (or remove
+#         autolive.doneone). This forces current autolive to stop
+#         sleeping, build a new nopen_auto.$nopen_mypid script which
+#         will first call -gs autoextras and then do another -gs keepalive.
+#
+
+
+# These vars are set only here, not reset in loop below
+$VER="1.0" ;
+$nopen_mypid = $ENV{NOPEN_MYPID} ;
+$nopen_mylog = $ENV{NOPEN_MYLOG} ;
+$nopen_rhostname = $ENV{NOPEN_RHOSTNAME} ;
+$COLOR_SUCCESS="\033[1;32m";
+# note: $COLOR_FAILURE is OK to use in myprint--it's different red than red background
+$COLOR_FAILURE="\033[1;31m";
+$COLOR_WARNING="\033[1;33m";
+$COLOR_NORMAL="\033[0;39m";
+$COLOR_NOTEBAD="\033[0;34m";
+$COLOR_NOTE="\033[1;95m";
+$COLOR_NOTE="\033[7;40m";
+$COLOR_NOTE="\033[1;97m";
+select STDERR ;
+$| = 1 ;
+select STDIN ;
+$| = 1 ;
+use File::Basename ;
+$prog = basename $0 ;
+$opdir = "/current" ;
+$opetc = "$opdir/etc" ;
+$opdown = "$opdir/down" ;
+$opbin = "$opdir/bin" ;
+$checkfile = "$opdown/keepalive.output" ;
+($lastuptime,$lastupstr) = upmin() ;
+$| = 1 ;
+$xargs = "-title \"tail -f autolive.log.$nopen_mypid\" -bg darkred -fg white -geometry 96x49+668-46" ;
+
+# Defaults that can be reset in loop below via parse (require dont work)
+# Both $wait and $allowfail must be multiples of $delay
+$delay = 5 ; # secs per sleep loop
+$wait = 1500 ; # secs (25 min=1500secs) to stay idle
+$allowfail = 180 ; # secs after which failure sends out page
+@pagernumbers=("3199",) ;# beepers to call--add more strings to call more than one
+$okcode = "0055" ; # Code to send for all is OK
+$failcode = "0055-911" ; # Code to send for problem
+$modem = "modem" ; # /dev/$modem is used to dial pagers
+# GMT at which to send all is OK beep(s) (2130EST,2230EDT)
+@positivealert = ("02:30",) ;
+$defdelay = 5 ;
+$defwait = 1500 ;
+$defallowfail = 180 ; # secs after which failure sends out page
+# beepers to call--add more strings to call more than one
+@defpagernums = ("3199") ;
+$defbeeper = "@defpagernums" ;
+$defokcode = "0055" ; # Code to send for all is OK
+$deffailcode = "0055-911" ; # Code to send for problem
+$defmodem = "modem" ; # /dev/$modem is used to dial pagers
+@defpositivealert = ("02:30",) ; # GMT at which to send all is OK beep (2130EST,2230EDT)
+#chomp($defbeeper = <STDIN>) ;
+#myprint("DBG: \$defbeeper=$defbeeper") ;
+$waitmin = $wait / 60 ;
+myintro() ;
+progress("PASTABLES\n=========\n\n");
+progress("# This one stops the keepalive:             -lsh touch /current/etc/autolive.die\n\n");
+progress("# This one loops it once:                   -lsh touch /current/etc/autolive.doone\n\n");
+unlink("$opetc/autolive.die") ;
+`touch $opdown/autolive.log.$nopen_mypid` if ($nopen_mypid);
+unless (`ps -efwwww | grep xterm.*tail.*autolive.log.$nopen_mypid | grep -v grep`) {
+  #child does xterm tail unless one is already running
+  unless(fork) {
+    close(STDIN) ; close(STDOUT) ; close(STDERR) ;
+    # child does xterm
+    exec("xterm $xargs -e tail -f $opdown/autolive.log.$nopen_mypid") ;
+    exit ; # no need really since exec above
+  }
+}
+$timepassed = 0 ;
+until (-e "$opetc/autolive.die") {
+  $newstuff = 0 ;
+  # Do we have new configs or do we have none at all?
+  if (-f "$opetc/autolive.conf.new") {
+    $newstuff = 1 ;
+    rename("$opetc/autolive.conf.new","$opetc/autolive.conf") ;
+  }
+  if (-f "$opetc/autolive.conf") {
+    # we ignore if parse says this is new unless we've parsed
+    # once with this instance already (i.e. $delay loop'd before)
+    my $tmp = parse("$opetc/autolive.conf") ;
+    $newstuff += $tmp   if ($timepassed > $delay) ;
+    if ($newstuff) {
+	myprint("Using new settings from $opetc/autolive.conf[.new]:\n".
+		`cat $opetc/autolive.conf`);
+	$newstuff = 0 ;
+    }
+  } else {
+    # A deleted conf file means reset to defaults and recreate it but prompt
+    # for beeper number in a popped up xterm.
+    if (open(OUTPL,"> $opbin/getinput.pl")) {
+      print OUTPL <<"EOF";
+#!/usr/bin/env perl
+unlink("/tmp/getinput.pl.output") ;
+\$defbeeper = getinput("What beeper #(s) are we paging with problems (space delimited if two or more)?",$defbeeper) ;
+open(OUTPUT,"> /tmp/getinput.pl.output.tmp") ;
+print OUTPUT "\$defbeeper\n";
+close(OUTPUT) ;
+rename("/tmp/getinput.pl.output.tmp","/tmp/getinput.pl.output") ;
+
+sub getinput() {
+  local(\$prompt,\$default,\@allowed) = \@_;
+  local(\$ans,\$tmp,%other) = ();
+  \$other{"Y"} = "N" ;   \$other{"N"} = "Y" ; 
+  if (\$other{\$default} and ! (\@allowed) ) {
+    push (\@allowed,\$other{\$default}) ;
+  }
+  \$| = 1 ;
+  \$tmp = \$default;
+  if (chop(\$tmp) eq "\r") {
+    #damn ^M's in script files
+    \$default = \$tmp;
+  }
+ SUB: while (1) {
+    print \$prompt;
+    if (\$default) {
+      print " [\$default] ";
+    } else {
+      print " ";
+    }
+    chomp(\$ans = <STDIN>);
+    \$ans = \$default if ( \$ans eq "" );
+    if (\$#allowed >= 0) {
+      foreach(\$default,\@allowed) {
+	last SUB if \$ans =~ /^\$_/i ;
+      }
+    } else {
+      last SUB ;
+    }
+  }
+  return \$ans;
+}
+EOF
+      close(OUTPL) ;
+      chmod(0777,"$opbin/getinput.pl") ;
+      unless(fork) { #child does
+	unlink("/tmp/getinput.pl.output") ;
+	exec("xterm $xargs -geometry 199x69+32+24 -e $opbin/getinput.pl") ;
+      }
+    }
+    myprint("Using default settings (and creating $opetc/autolive.conf):") ;
+    sleep 1 until (-e "/tmp/getinput.pl.output") ;
+    sleep 1 ;
+    chomp($tmp = `cat /tmp/getinput.pl.output`);
+    unlink("/tmp/getinput.pl.output") ;
+    @defpagernumbers = split(/\s+/,$tmp) if ($tmp) ;
+    if (open(OUT,"> $opetc/autolive.conf")) {
+      print OUT "#!/usr/bin/env perl
+# Both \$wait and \$allowfail must be multiples of \$delay
+\$delay = $defdelay ; # secs per sleep loop
+\$wait = $defwait ; # secs (25 min=1500secs) to stay idle
+\$allowfail = $defallowfail ; # secs after which failure sends out page
+\$okcode = \"$defokcode\" ; # Code to send for all is OK
+\$failcode = \"$deffailcode\" ; # Code to send for problem
+\$modem = \"$defmodem\" ; # /dev/\$modem is used to dial pagers
+\# beepers to call--add more strings to call more than one
+\@pagernumbers = (" ;
+      print OUT "\"$_\"," foreach (@defpagernumbers) ;
+      print OUT ") ;\n";
+      print OUT "\@positivealert = (" ;
+      print OUT "\"$_\"," foreach (@defpositivealert) ;
+      print OUT ") ;\n1;\n";
+      close(OUT) ;
+    } else {
+      die("\a\aFATAL ERROR: cannot open $opetc/autolive.conf ($!)") ;
+    }
+    close(STDIN) ; close(STDOUT) ; close(STDERR) ;
+    myprint(`cat $opetc/autolive.conf`) ;
+  }
+
+  # Any tasks to run?
+  @extras = () ;
+  progress("Running some extras:\n\n") if @extras ;
+  foreach (@extras) {
+    # run these and wait for them to return
+    progress("Running this: $_\n");
+    system("$_") if (-x "$_") ;
+  }
+
+  # Time to send positive page maybe?
+  ($lastposalert) =
+    `grep -i "sending positive alert" $opdown/autolive.log.$nopen_mypid | tail -1 | cut -f 1,2,3 -d ":"` =~
+      /^([\d:-]+):\d\dZ/ ; # not seconds
+  chomp(my $now = `date -u "+%C%y%m%d-%R"`) ;
+  foreach $alert (@positivealert) {
+    my $when = $now ;
+    $when =~ s/-\d\d:\d\d/-$alert/ ;
+#    myprint("DBG: \$when=$when \$now=$now \$lastposalert=$lastposalert");
+#    myprint("DBG: \$when gt \$lastposalert") if ($when gt $lastposalert) ;
+#    myprint("DBG: \$when le \$now") if ($when le $now) ;
+    if ($when le $now and $when gt $lastposalert) {
+      # need positive alert sent out
+      foreach $beeper (@pagernumbers) {
+	myprint("${COLOR_NOTE}Sending positive alert code $okcode to beeper $beeper") ;
+	system("pager --modem=$modem --code=\"$okcode\" $beeper 2>&1 >> $opdown/pager.log.$nopen_mypid&") ;
+      }
+    }
+  }
+
+  # start looping
+  if ($timepassed >= $wait or ! -e "$opetc/autolive.doneone" or -e "$opetc/autolive.doone") {
+    progress("\n");
+    unless (-e "$opetc/autolive.doneone") {
+      myprint("${COLOR_NOTE}pinging since there was no file $opetc/autolive.doneone");
+      `touch $opetc/autolive.doneone` ;
+    }
+    unlink("$opetc/autolive.doone");
+    myprint("${COLOR_WARNING}ping $lastupstr (up $lastuptime mins last time)");
+    my $extras = "" ;
+    if (-e "$opetc/gs.autoextras") {
+      $extras .= "# Found extra commands to do in gs.autoextras\n-gs autoextras\n" ;
+      myprint("Found $opetc/gs.autoextras to run.");
+    }
+    if (-e "$opetc/autoget.$nopen_rhostname" and -x "$opetc/autoget") {
+      $extras .= "# Found autoget script to run\n-lsh $opetc/autoget keepalive ; sleep 1\n";
+      myprint("Found autoget script to run:".`cat $opetc/autoget.$nopen_rhostname`) ;
+      # autoget will call -gs keepalive again so we don't have to
+      $nextkeepalive = "" ;
+    } else {
+      $nextkeepalive = "-gs keepalive\n" ;
+    }
+    if (open(OUT,">> $opetc/nopen_auto.tmp.$$")) {
+#this no longer needed--noclient wipes nopen_auto.$$ when it uses it
+#-lsh mv $opetc/nopen_auto.$nopen_mypid $opetc/nopen_auto.$nopen_mypid.last
+      print OUT "#NOGS
+${extras}$nextkeepalive";
+      close(OUT) ;
+    } else {
+      die("\a\aFATAL ERROR: cannot open $opetc/nopen_auto.tmp.$$ ($!)") ;
+    }
+    # Here we fork. Child checks that expected -w output arrives, acts if not.
+    # Parent exits allowing the nopen_auto to take place.
+    close(STDIN); close(STDOUT); 
+#    close(STDERR);
+    if (fork) {
+      my $wait=0 ;
+      #hmmmm---if this does exist do we maybe want to exit all autolives?
+      #Assume this guy will start us up agian if he wants?
+      while (-e "$opetc/nopen_auto.$nopen_mypid") {
+	sleep 2 ;
+	$wait += 2 ;
+	if ($wait > 60) {
+	  #page someone here
+	  mydie("Cannot create nopen_auto.$nopen_mypid. Have to page someone");
+	}
+      } # end while dont clobber someone else's nopen_auto file
+      rename("$opetc/nopen_auto.tmp.$$","$opetc/nopen_auto.$nopen_mypid") ;
+      exit ;
+    }
+#    # first time through don't bother looking
+#    exit unless (-e "$checkfile") ;
+    # This is child, needs to check on far end output
+    my $slept = 0 ;
+    my $failsent = 0 ;
+    my $skiponce = 0 ;
+    while (1) {
+      sleep $delay ;
+      $slept += $delay ;
+      my ($uptime,$uptimestr) = upmin() ;
+      if ($uptime > $lastuptime) {
+	myprint("${COLOR_SUCCESS}pong $uptimestr (up $uptime mins > $lastuptime)") ;
+	if ($failsent) {
+	  # We already beeped with failure--now send all clear twice
+	  foreach $beeper (@pagernumbers) {
+	    myprint("${COLOR_NOTE}Sending positive alert code $okcode to beeper $beeper") ;
+	    system("pager --modem=$modem --code=\"$okcode\*$okcode\" $beeper 2>&1 >> $opdown/pager.log.$nopen_mypid&") ;
+	    system("pager --modem=$modem --code=\"$okcode\*$okcode\" $beeper 2>&1 >> $opdown/pager.log.$nopen_mypid&") ;
+	  }
+	}
+	exit ;
+      }
+      if ($slept > 0) {
+	myprint("${COLOR_WARNING}No response for $slept seconds...") unless ($slept % 30 or -e "$opetc/NOPEN_grepping") ;
+	unless ($slept % $allowfail) { # on multiples of $allowfail
+	  unless ($slept > 2*$allowfail) {
+	    # So we send two failures here (skip first if NOPEN_grepping)
+	    unless (-e "$opetc/NOPEN_grepping" or $skiponce++) {
+	      myprint("${COLOR_WARNING}No response for $slept seconds...") if (-e "$opetc/NOPEN_grepping");
+	      foreach $beeper (@pagernumbers) {
+		myprint("${COLOR_WARNING}Sending failure alert code $failcode to beeper $beeper--") ;
+		system("pager --modem=$modem --code=\"$failcode\" $beeper 2>&1 >> $opdown/pager.log.$nopen_mypid &") ;
+	      }
+	      $failsent ++ ;
+	    }
+	  } else {
+	    # now send a final one and exit
+	    foreach $beeper (@pagernumbers) {
+	      myprint("${COLOR_WARNING}Sending failure alert code $failcode to beeper $beeper and exiting") ;
+	    exec("pager --modem=$modem --code=\"911-$failcode\" $beeper 2>&1 >> $opdown/pager.log.$nopen_mypid &") unless fork ;
+	    }
+	    exit ; # above forks one child per each in @pagernumbers
+	  }
+	}
+      }
+    }
+  } # end if ($timepassed >= $wait)
+
+  sleep $delay ;
+  $timepassed += $delay ;
+  my $tmptimeleft = secstostr($wait - $timepassed) ;
+  progress("\rTime left in this loop:\t${tmptimeleft}     ");
+}
+progress("\n\n");
+myprint("Dying since -e $opetc/autolive.die") ;
+unlink("$opetc/autolive.die");
+
+sub mydie {
+  myprint("\a${COLOR_FAILURE}@_") if ($nopen_mypid) ;
+  sleep 1 ;
+  die("\a${COLOR_FAILURE}@_${COLOR_NORMAL}\n") ;
+}
+
+sub myprint {
+  open(NEWOUT,">> $opdown/autolive.log.$nopen_mypid") ;
+  select NEWOUT ;
+  $| = 1 ;
+  chomp(my $date = `date -u \"+%C%y%m%d-%R:%SZ\"`) ;
+  print "$date\[$$\] @_$COLOR_NORMAL\n";
+  close(NEWOUT) ;
+  select STDOUT ;
+}
+
+sub upmin {
+  chomp(my $str = `grep Uptime: $checkfile 2>/dev/null | tail -1`) ;
+  $str =~ s/^\D*// ;
+  ($days,$hrs,$mins,$secs) = $str =~ /(\d+)\D+(\d+):(\d+):(\d+)/ ;
+  return (int(100*($days * 24 * 60 + $hrs * 60 + $mins + ($secs / 60)))/100,$str) ;
+}
+
+sub myintro {
+  return if (-e "$opetc/autolive.intro") ;
+  `touch $opetc/autolive.intro` ;
+  $| = 1 ;
+  chomp(my $date = `date -u \"+%C%y%m%d-%R:%SZ\"`) ;
+  print("$date\[$$\] autolive Version $VER
+
+autolive will now start an infinite loop...will only exit when either:
+  1) it is killed (sloppy--use #2 if you need this window back);
+  2) file called $opetc/autolive.die is created; or
+  3) when $waitmin minutes pass
+
+autolive will reload its settings from $opetc/autolive.conf.new
+if it ever exists (then rename it to just autolive.conf). This is
+how to change settings, e.g. the beeper # to call.
+
+autolive will now sleep for $wait seconds ($waitmin minutes), after
+which it will run -gs keepalive, which calls autolive again when it has
+decided the far end is still up.\n");
+
+print("
+Current autolive.conf file (if any):\n$COLOR_NOTE".`cat $opetc/autolive.conf 2>&1`.
+"$COLOR_NORMAL
+See xterm that just popped up for all further output until something
+kills this autolive with \"touch $opetc/autolive.die\".
+${COLOR_FAILURE}=================$COLOR_NORMAL
+") ;
+$notdoingitthisway = "After that, autolive will call autolive.* in alpha-sorted order
+for all such autolive.* in $opetc, if any.";
+
+}
+sub parse {
+  local ($varfile) = (@_) ;
+  local $name, $val ;
+  my @old = ($delay,$wait,$allowfail,"@pagernumbers",$okcode,$failcode,$modem,"@positivealert") ;
+  do $varfile ;
+  $waitmin = $wait / 60 ;	# $wait might have just changed
+  # return 1 if this is different than what we had
+  my @new = ($delay,$wait,$allowfail,"@pagernumbers",$okcode,$failcode,$modem,"@positivealert") ;
+  # 0..2 are ints
+  for (my $i = 0 ; $i < 3 ; $i++) {
+    return 1 unless ($old[$i] == $new[$i]) ;
+  }
+  # 3+ are strings
+  for (my $i = 3 ; $i < $#new ; $i++) {
+    return 1 unless ($old[$i] eq $new[$i]) ;
+  }
+  return 0 ;
+}
+
+sub progress {
+  # stuff sent to STDERR not logged in /current/down/cmdout/*
+  print STDERR ("@_");
+}
+
+sub secstostr {
+  local ($total) = (@_) ;
+  my $secs = $total % 60 ;
+  $total -= $secs;
+  my $mm = ($total/60) %60  ;
+  $total -= $mm * 60 ;
+  my $hh = (($total/60)  / 60) % 24  ;
+  $total -= $hh * 60 * 60 ;
+  my $dd = (($total/60)  / 60) / 24  ;
+  my $mmout = "${mm}m " if $mm > 0;
+  my $hhout = "${hh}h " if $hh > 0;
+  my $ddout = "${dd}d " if $dd > 0;
+  return "$ddout$hhout$mmout${secs}s" ;
+}

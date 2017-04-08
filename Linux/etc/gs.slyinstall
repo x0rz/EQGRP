@@ -1,0 +1,3 @@
+#NOGS
+-lsh /current/etc/autoslyinstall $GSOPTIONS -nohist
+-gs /port -nohist

@@ -1,0 +1,235 @@
+#!/usr/bin/env perl
+#use strict;
+use File::Basename;
+require "getopts.pl";
+
+$prog = basename ${0} ;
+$version = "1.9.1.3";
+$scanfile = "/current/down/cmdout/scans" ;
+$usagetext = "
+Usage:  $prog [-f file] -p prognum [-V ver] [-t proto] -i IPadr
+        $prog [-f file] -n|r|a|x|o|g|b IP-address
+        $prog [-f file]         (shows unique IPs scanned thus far)
+        $prog -h                (shows this usage statement)
+
+-p prg     gives the port number found for the -V/t/i arguments given
+-n IP      gives the IP's hostname (from program 100###).
+-r IP      gives the destination IP of the returned packet.
+-a IP      gives brpc-endianness architecture guess: \"i386.pc.solaris\" or \"sparc.sun.solaris\"
+-x IP      gives \"hostname:# users:load ...\" if positive xwin scan
+-o IP      gives guess at Solaris version from snmp[12] scans or brpc scan
+-g IP      gives Solaris version and platform from snmp[12] scan(s)
+-b IP      gives udp port RPC program 100232 is listening on (sadmind)
+-B IP      gives udp6 port for 100232/sadmind if available (i.e., if
+                 sadmind is available on two ports, this also works)
+
+-L    will NOT ignore scans against 127.0.0.1 (default does)
+-A    will output all matching entries, not just the last one.
+
+     -  $prog is usually used by other programs, not directly.
+     -  \"file\" defaults to $scanfile.
+     -  The final matching entry found in scanfile is used.
+     -  The null string is returned on failure.
+
+NOTE: $prog requires that one or more scans have already been done.
+";
+foreach (split (/\n/, $defaultcommands) ) {
+  $usagetext .= "\t$_\n";
+}
+$vertext = "\n$prog version $version\n";
+
+die("bad option(s)") if (! &Getopts( "vhp:V:t:i:n:f:r:a:x:g:Lo:b:B:A" ) ) ;
+
+$getlocal = $opt_L ;
+$getall = $opt_A ;
+&usage if ($opt_h or $opt_v );
+$scanfile = $opt_f if ($opt_f and -s $opt_f) ;
+#exit unless (-s $scanfile) ;
+$prognum = int $opt_p ;
+die("Invalid program number $opt_p") if
+  ( ($opt_p != $prognum) or ($prognum < 0) ) ;
+$vernum = int $opt_V ;
+die("Invalid version number $opt_V") if
+  ( ($opt_V != $vernum) or ($vernum < 0) ) ;
+
+if ($opt_i) {
+#  die("-i, -r and -n must not be used together") if ($opt_n or $opt_r) ;
+  die("-i requires -p") unless ($opt_p) ;
+  $ipaddr = $opt_i ;
+} elsif ($opt_n or $opt_r or $opt_a or $opt_g or $opt_x or $opt_o or $opt_b or $opt_B) {
+  die("-[nra] cannot be used with -p, -V or -t") if ($opt_p or $opt_V or $opt_t) ;
+  my $c = -1 ;
+  $c++ if $opt_n ;
+  $c++ if $opt_r ;
+  $c++ if $opt_a ;
+  $c++ if $opt_g ;
+  $c++ if $opt_x ;
+  $c++ if $opt_o ;
+  $c++ if $opt_b ;
+  $c++ if $opt_B ;
+  die("use only one of -[nraxog] at a time") if ($c) ;
+  $ipaddr = "$opt_n$opt_r$opt_a$opt_x$opt_g$opt_o$opt_b$opt_B" ;
+  $wantname = $opt_n ;
+  $wantreturnip = $opt_r ;
+  $wantarch = $opt_a ;
+  $wantxwin = $opt_x ;
+  $wantgs = $opt_g ;
+  $wantbs = ($opt_b or $opt_B) ;
+  $wantsunos = $opt_o ;
+} else {
+  # default is to dump out all scanned hosts found
+  $findips++ ;
+}
+if ($ipaddr) {
+  die("Bad IP $ipaddr") if ( ! &ipcheck($ipaddr)) ;
+} else {
+  $ipaddr = "\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}" ;
+}
+$proto = lc $opt_t ;
+
+die ("$prog takes only \"-\" delimited arguments") if ($#ARGV >= 0) ;
+
+open (SCANS, "< $scanfile") ||
+  die ("Unable to open file $scanfile for read") ;
+
+#  OK. Good to go from here.
+
+$prognum = "100232" if ($wantbs) ;
+$vernum = "\\d+" if $wantname or ! $vernum ;
+$proto = "\\w+" if $wantname or ! $proto ;
+$prognum = "100\\d\\d\\d" if ($wantname or $wantarch);
+$rpc = "\\.\[a-z\]+" if $wantname ;
+$| = 1; # unbuffered output
+($gotxwin,$gotgs) = () ;
+while ( $line = <SCANS> ) {
+  if ($line =~ /^\#/) {
+    $gotxwin=1 if $line =~ /Scan for Xwin folks/ ;
+    $gotgs=1 if (($line =~ /Scan for (Sol|SNMP)\s+version/) or
+		 ($line =~ /mib.*sa test/i));
+
+  }
+  next unless ($line =~ /^Packet from (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s*to\s/) ;
+  if ($findips) {
+    next if (!$getlocal and $1 eq "127.0.0.1") ;
+    $ipaddr = $1 ;
+    $scannedips{"$ipaddr"}++ ;
+    next ;
+  } else {
+    unless (($line =~ /^Packet from $ipaddr(\s|$ )/ )) {
+      next ;
+    }
+  }
+  # OK, got our guy
+  ($tmp) = ( $line =~ /^Packet from $ipaddr\s+to\s+([\d.]+)/ ) ;
+  $returnip = $tmp if $tmp ;
+  if ($wantreturnip) {
+    $returnvalue = $returnip ;
+  } else {
+    while (<SCANS>) {
+#      $returnvalue = "" ;
+      if ($wantxwin) {
+	last unless $gotxwin ;
+	chomp($hostname = $1) if (/^Hostname\s*: (.*)/) ;
+	chomp($userson = $1) if (/^Status\s*:\s*(\d+)/) ;
+	chomp($load = $1) if (/^Status\s*:.*load:\s*(.*)/) ;
+	$load =~ s/ //g ;
+	$returnvalue = "" ;
+	$returnvalue = "$hostname" if (length $hostname) ;
+	$returnvalue .= "+$userson users" if (length $userson) ;
+	$returnvalue .= "+load=$load" if (length $load) ;
+      }	elsif ($wantsunos or $wantgs) {
+	if ($gotgs) {
+	  my $bool = "yes" if (/^\/.*(snmpd|mibiisa)/i) ;
+	  $bool .= " -r " if (/mibiisa.* -r/);
+	  $ver = "SunOS $1" if (/SunOS\s+([\d\.]+)\s/i) ;
+	  $gsver = $ver ;
+	  chomp($platform = $1) if (/Sun SNMP Agent,\s+(.*)/i) ;
+	  if (/(sun\d+\S)\s/ and ! $platform) {
+	    chomp($platform = $1) ;
+	  }
+	  addvalue($bool,$ver,$platform);
+	}
+	if ($wantsunos) {
+	  $returnvalue = "" ;
+	  $gotsunos = /program version netid     address             service         owner/  unless $gotsunos;
+	  #	last unless $gotgs ;
+	  if (/\d+\s+\d+\s+\w+\s+\S+\s+\S*(sol)[ \-]{0,1}(\d+)/i) {
+	    ($ver,$rev) = (lc $1,$2);
+	    $returnvalue = "${ver}2.$rev+" if $rev > $maxrev ;
+	    $maxrev = $rev if $rev >= $maxrev ;
+	  }
+	  $returnvalue = $gsver unless $returnvalue ;
+	  $returnvalue = "Sol2.4+" if ($gotsunos and ! $returnvalue) ;
+	}
+      }	elsif ($wantarch) {
+	if (($tmp) = ( /^\s*$prognum\s+$vernum\s+$proto\s+(\S+)/ )) {
+	  if ($tmp =~ /\\000\\000$/) {
+	    $returnvalue = "i386.pc.solaris" unless ($tmp =~ /^\\000\\000/) ;
+	  } elsif ($tmp =~ /^\\000\\000/) {
+	    $returnvalue = "sparc.sun.solaris" unless ($tmp =~ /\\000\\000$/) ;
+	  }
+	}
+      } else {
+	if (($tmp) = ( /^\s*$prognum\s+$vernum\s+$proto\s+([\S]+)$rpc/ )) {
+	  if (my ($oct1,$oct2) = $tmp =~ /^::\.(\d+)\.(\d+)/) {
+	    $tmp = 256*$oct1 + $oct2 ;
+	    $altbs = $tmp ;
+	  }
+	  # Got what we're here for (name or port)
+	  $returnvalue = $tmp ;
+	  print "$returnvalue\n" if ($returnvalue and $getall) ;
+
+	  # if we ever want only the first match
+	  # uncomment the following
+	  #print "$returnvalue\n" ;
+	  #exit;
+	}
+      }
+      $newip = "" ;
+      if ( /^adios$/ or ($newip) = ( /Packet from ([0-9.]*)/ ) )  {
+	# Got to skip these until our guy comes up again
+	$gotxwin=0 ;
+	$gotgs=0 ;
+	last if ! ($newip eq $ipaddr) ;
+      } # end if $newip
+    } # end while (<SCANS>)
+  } # end if $wantreturnip or not
+} # end while (! eof)
+if ($findips) {
+  print "$_\n" foreach (sort keys %scannedips) ;
+}
+$returnvalue = $altbs if ($opt_B);
+print "$returnvalue\n" if $returnvalue ;
+exit;
+
+sub usage {
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  print $usagetext unless $opt_v ;
+  print $vertext ;
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  exit;
+} # end sub usage
+
+sub ipcheck() {
+  # returns 1 iff $ipstr is in dotted decimal notation with each 
+  # octet between 0 and 255 inclusive (i.e. 0.0.0.0 and 255.255.255.255 are valid)
+  local($ipstr,@junk) = @_;
+  # need -1 in following split to keep null trailing fields (to reject "1.2.3.4.")
+  my @octets=split(/\./,$ipstr,-1);
+  return 0 if ($#octets != 3);
+  foreach (@octets) {
+    # return 0 if (empty or nondigits or <0 or >255)
+    return 0 if ($_ eq "" || ( /\D/ ) || $_ < 0 || $_ > 255);
+  }
+  return 1;
+} # end sub ipcheck
+
+sub addvalue {
+  # addvalue() appends to global $returnvalue each new entry not already in there
+  foreach ( @_ ) {
+    next unless length ;
+    my $tmp = "$_ " ;
+    $returnvalue .= "$tmp" unless ( $returnvalue =~ /$tmp/) ;
+  }
+  return $returnvalue ;
+}

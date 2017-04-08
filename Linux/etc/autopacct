@@ -1,0 +1,102 @@
+#!/usr/bin/env python
+VERSION = '1.0.0.2'
+
+import os
+import sys
+import shlex
+import traceback
+import time
+
+import autoutils
+from autoutils import COLOR
+from autoutils import OptParser
+
+class autopacct:
+
+    def __init__(self):
+
+        self.version = VERSION
+        self.nopen = autoutils.autoutils()
+        self.parser = self.get_arg_parser()
+        self.nopen.connect()
+
+    def main(self, argv):
+        
+        opts, args = self.nopen.parseArgs(self.parser, argv[1:])
+
+        if opts.v:
+            self.print_version(argv[0])
+            return
+
+        atopVersion = []
+        # connect to autoport after parse args
+        if not self.nopen.connected:
+            self.nopen.connect()
+
+        OS = self.nopen.nopen_serverinfo
+        OS = OS.upper()       
+        
+        if "IRIX" in OS:
+            self.nopen.doprint(self.nopen.COLOR_FAILURE, "WARNING!! NO PROCESS ACCOUNTING CHECK for %s" % self.nopen.nopen_serverinfo)
+        else:
+            self.nopen.doprint(self.nopen.COLOR_NORMAL, "This is a %s machine, checking standard log locations now..." % self.nopen.nopen_serverinfo)
+            adm_systems = ["AIX","BSDI","FREEBSD","HPUX","HP-UX","MIRAPOINT","OSF1","SCO_SV","SOLARIS","UNIX_SV"]
+            log_systems = ["LINUX","BSD","DARWIN","JUNOS"]
+            if "OPENBSD" in OS:
+                output, nopenlines, outputlines = self.nopen.doit("-ls -t /var/account /var/*acc* /var/log/account/*acct*")
+            elif any(item in OS for item in adm_systems):
+                output, nopenlines, outputlines = self.nopen.doit("-ls -t /var/adm/*acct* /var/*acc* /var/log/account/*acct*")
+            elif any(item in OS for item in log_systems):
+                output, nopenlines, outputlines = self.nopen.doit("-ls -t /var/log/*acct* /var/*acc* /var/log/account/*acct*")
+            else:
+                self.nopen.doprint(self.nopen.COLOR_FAILURE, "Oops, this OS is not recognized:\n\n%s\n\n" % self.nopen.nopen_serverinfo)
+
+        time.sleep(5)
+
+        self.nopen.doprint(self.nopen.COLOR_NORMAL, "Checking for ATOP pacct logs now...")
+        output, nopenlines, outputlines = self.nopen.doit("-ls -t /tmp/atop.d/")
+        if len(outputlines) == 0: 
+            self.nopen.doprint(self.nopen.COLOR_FAILURE, "DONE: ATOP pacct likely not on target")
+        else:
+            output, nopenlines, outputlines = self.nopen.doit("-gs getstrings /usr/bin/atop")
+            output, nopenlines, atopVersion = self.nopen.doit("-lsh grep Revision /current/down/*/usr/bin/atop.strings")
+            if atopVersion == 1.24:
+                print "ATOP Accounting is on this target, you'll need to use CURVESULFA v1.0.0.0"
+            elif atopVersion == 1.25:
+                print "ATOP Accounting is on this target, you'll need to use CURVESULFA v1.1.0.0"
+            elif atopVersion == 1.27:
+                print "ATOP Accounting is on this target, you'll need to use CURVESULFA v1.1.0.1"
+            else:
+                print "There is no CURVESULFA available to clean this revision of atop: %s" % atopVersion
+        return self.nopen.finish()
+
+    def get_arg_parser(self):
+
+        epilog = '\n-gs pacct version %s\n' % self.version
+
+        help_detail = "-gs pacct merely checks for the standard locations for process accounting and atop accounting."
+        parser = OptParser(usage='usage: -gs pacct\n\n%s' % help_detail, epilog=epilog)
+        parser.add_option('-v', dest='v', action='store_true', help='Show version and exit.')
+
+        return parser
+
+    def print_version(self,prog):
+
+        script_name = os.path.basename(prog)
+        if script_name.startswith('auto'):
+            script_name = script_name.split('auto',1)[1]
+        self.nopen.doprint('-gs %s version %s' % (script_name, self.version))
+
+
+if __name__ == '__main__':
+
+    try:
+        # re-set the argv b/c NOPEN will do weird things with splitting args
+        argv = shlex.split(' '.join(sys.argv))
+        autopacct().main(argv)
+    except Exception, e:
+        print '\n\n%sUnhandled python exception: %s%s\n\n' % \
+            (COLOR['bad'], str(e), COLOR['normal'])
+        print '%sStack trace:\n' % COLOR['fail']
+        traceback.print_exc()
+        print COLOR['normal']

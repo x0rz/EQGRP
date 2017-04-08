@@ -1,0 +1,50 @@
+CUP - a Clean-UP script for HPUX and non-Y2K compliant systems
+by Tom B.
+
+HP-UX will not allow a file to be removed if it
+is a binary and currently executing. If you try,
+you get errno TEXT FILE BUSY.  This could be a
+problem for ops since the last thing you'd like
+to do is remove nosy (along with other things).
+
+To remove nosy, you have to start something in the
+background that will rm it after nosy terminates.
+This can be done in at least 2 ways:
+  - start an "at" job
+  - have nosy start a background shell to rm it
+
+"at" works ok, but if you're not comfortable with
+it, here's the 2nd option.
+
+NOTE: "at" will not work on systems that are still
+      not Y2K compliant, so "cup" may be your only
+      alternative
+
+Starting a background shell is a bit of a problem for
+nosy, as it will wait for the process to finish anyway.
+That's no good if you need nosy to die first. The
+reason why nosy waits is that it's blocking on a read
+from the process it just started.  So, cup close its
+outputs.
+
+To use:
+
+  upload cup
+  chmod +x cup
+  cup &
+
+
+Cup removes itself, and goes to sleep.  It wakes up
+after either
+  - 3 hours have passed
+or
+  - the nosy server is killed (with -1 to the client);
+    in this case, nosy sends a SIGTERM to its process group;
+    cup traps and ignores it, but its sleep is killed
+
+Then, cup kills everything using any of the files in the 
+directory $DIR.  Lastly, the $DIR directory is recusively
+removed.
+
+If you are using a tmp directory other than /tmp/.X11R6,
+you'll have to change the script.

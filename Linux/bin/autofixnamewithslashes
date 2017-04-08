@@ -1,0 +1,16 @@
+#!/bin/sh
+VER=1.0.0.1
+[ "$1" = "-v" ] && echo $0 v.$VER && exit
+echo "$1" | grep -q "/" || ( echo -e "
+Usage: $0 NOPEN_NAME_WITH_SLASHES
+
+$0 creates the right directories for you.
+
+Namely: ../down/DIRNAME ../down/history/DIRNAME and ../down/cmdout/DIRNAME
+
+$0 v.$VER
+" && exit)
+export DIRNAME=`dirname $1`
+#echo running:
+#echo "          mkdir -pv /current/down/$DIRNAME /current/down/{history,cmdout}/$DIRNAME"
+mkdir -pv /current/down/$DIRNAME /current/down/{history,cmdout}/$DIRNAME

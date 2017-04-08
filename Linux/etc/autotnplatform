@@ -1,0 +1,99 @@
+#!/usr/bin/env perl
+##
+$VER="1.0.0.1" ;
+myinit() ;
+@keyfiles = split(/\n/,`find $opbin/varkeys -type f -name incision 2>/dev/null | grep "_$ip\/"`);
+@keyfiles = split(/\n/,`find $opbin/varkeys -type f -name incision 2>/dev/null | grep "$ip"`)
+  unless @keyfiles;
+push(@keyfiles,"$opup/.keys") if (-e "$opup/.keys") ;
+my (%found,%foundplatform) = ();
+my $data = "" ;
+foreach $keyfile (@keyfiles) {
+  if ($keyfile =~ /\.keys/) {
+    last if (keys %foundplatform) ;
+  }
+  next unless (open(KEYIN,"< $keyfile")) ;
+  my $gotkey = 0 ;
+  while (<KEYIN>) {
+    if ($keyfile =~ /\.keys/) {
+      $gotkey++ if (/INCISION/) ;
+      next unless $gotkey;
+      chomp($version=<KEYIN>);
+      chomp($platformfromkeys=<KEYIN>);
+      <KEYIN>;
+      next unless (/^([\da-f]+ [\da-f]+ [\da-f]+)/) ;
+      $keystr = $1 ;
+      $data = "$ip\n".
+	"IN v.$version\n".
+	"Platform: $platformfromkeys\n".
+	"key: $keystr\n";
+      $platformfromkeys = lc $platformfromkeys;
+      last ;
+    } else {
+      $data .= $_ ;
+      $platform = $1 if /OS:(\S+)/;
+      $keystr = $1 if /TARG_AYT=\"(\S+\s+\S+\s+\S+)\"/;
+      $platform = lc $platform;
+      $foundplatform{$platform}++ if $platform;
+    }
+    $platformtype{1}++ if ($platform =~ /sparc.*solaris/i);
+    $platformtype{2}++ if ($platform =~ /86.*solaris/i);
+    $platformtype{3}++ if ($platform =~ /linux/i);
+    $platformtype{4}++ if ($platform =~ /hp/i);
+    $platformtype{5}++ if ($platform =~ /free.*bsd/i);
+  }
+  close(KEYIN);
+}
+$platformtype = "";
+unless (scalar keys %platformtype or
+       !(scalar keys %foundplatforminkeys)) {
+  $platform = $platformfromkeys;
+  $platformtype{1}++ if ($platform =~ /sparc.*solaris/i);
+  $platformtype{2}++ if ($platform =~ /86.*solaris/i);
+  $platformtype{3}++ if ($platform =~ /linux/i);
+  $platformtype{4}++ if ($platform =~ /hp/i);
+  $platformtype{5}++ if ($platform =~ /free.*bsd/i);
+}
+@typefound =  keys %platformtype;
+mydie("No match found for $ip")
+  unless (@typefound);
+if (scalar @typefound == 1) {
+  progprint("platform:$typefound[0] $platform",STDOUT);
+} else {
+  mywarn("More than one platform type found in $opbin/varkeys for $ip");
+}
+progprint("DETAILS:\n\n$data");
+
+#ENDMAIN
+
+
+sub myinit {
+  use File::Basename ;
+  require "../etc/autoutils" ;
+  $vertext = "$prog version $VER\n" ;
+  $usagetext="\nUsage: $prog IP-or-NAME
+
+$prog is called by noclient in -jackpop mode. It looks in
+$opbin/varkeys for the IN information for this target, and
+displays it. If more than one match is found, the IN data
+for all the matches is shown.
+
+In particular, if it is found, or if more than one target is
+found but they all have the same platform type, that platform
+type is shown as follows, with a code that noclient uses to
+determine which noserver to upload.
+
+ platform:1	sparc Solaris
+ platform:2	x86 Solaris
+ platform:3	Linux
+ platform:4	HP-UX
+ platform:5	FreeBSD
+
+
+";
+  mydie("bad option(s)") if (! Getopts( "hv" ) ) ;
+  usage() if ($opt_h or $opt_v or !$ARGV[0]);
+  $ip = $ARGV[0];
+#  mydie("$ip not a valid IP address")
+#    unless ipcheck($ip);
+}#myinit

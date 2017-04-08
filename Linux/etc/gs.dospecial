@@ -1,0 +1,2 @@
+#NOGS
+-lsh /current/etc/autodospecial $GSOPTIONS -nohist

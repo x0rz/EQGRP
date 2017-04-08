@@ -1,0 +1,5 @@
+INTONATION___pfdsun.kuicr.kyoto-u.ac.jp___133.3.5.2___20020702-135908() {
+    ## INCISION Version:4.8.2 OS:sparc-sun-solaris2.6 
+    export TARG_AYT="b1b1509e 818ca176 fdc324dd"
+    [ "$UTC_OFFSET" ] || export UTC_OFFSET=0
+}

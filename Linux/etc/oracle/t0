@@ -1,0 +1,17 @@
+ORA_NLS=$ORACLE_HOME/ocommon/nls/admin/data
+export ORA_NLS
+
+PATH=/usr/bin:/usr/ucb:/etc:$ORACLE_HOME/bin:/usr/ccs/bin:/usr/ccs/lib:/usr/local/bin:/usr/sbin
+LD_LIBRARY_PATH=$ORACLE_HOME/lib
+ 
+export PATH LD_LIBRARY_PATH
+ 
+echo ORACLE_BASE  = $ORACLE_BASE
+echo ORACLE_HOME  = $ORACLE_HOME
+echo ORACLE_SID   = $ORACLE_SID
+echo NLS_LANG     = $NLS_LANG
+echo ORA_NLS      = $ORA_NLS
+
+id
+
+sqlplus /nolog < t0.sql

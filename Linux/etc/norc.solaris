@@ -1,0 +1,28 @@
+
+# Solaris		Wed Feb 15 13:44:54 EST 2012
+
+:PATH=/bin:/usr/bin:/sbin:/usr/sbin:/usr/ucb
+
+alias -pacct=-ls -t /var/adm/*acct* /var/*acc* /var/log/account/*acct*
+#alias -logs=-gs lss /var/log /var/adm
+
+alias =ps=ps -ef
+alias =psg=ps -ef | grep
+alias =nsg=netstat -an | grep 
+alias =arp=arp -an
+alias =ping=ping
+alias =crashps=echo p | crash
+alias =df=df -k
+alias =di=df -oi
+alias =procinfo=psrinfo -v
+alias =rpcinfo=rpcinfo ; rpcinfo -p
+alias =locale=locale
+alias -coreadm=-cat /etc/coreadm.conf
+alias =isainfo=isainfo -bv ; isainfo -kv ; isainfo -nv ; isalist
+alias =alwaysdothis=-gs autodothis.solaris
+alias =surveydothis=-gs surveydothis.solaris
+alias =autorpc=-scan brpc 127.0.0.1 one
+alias =route=netstat -rn
+
+alias =pse=ps -ef | egrep
+alias =psgv=ps -ef | egrep -v 

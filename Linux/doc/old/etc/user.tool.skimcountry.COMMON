@@ -1,0 +1,282 @@
+################ SKIMCOUNTRY #########################
+############### PARSING  ###################################################################
+
+
+### vi Search/Replace commands ###
+### ProjectName - self explanatory
+### Date field - today's date, used for output files
+### Host - hostname of the box (not IP address)
+### Cryptkey - encryption key (use output from below md5sum command)
+
+md5sum /current/down/tcpdump.raw
+
+mx
+:%s/PROJECTNAME/PROJECTNAME/g
+:%s/DDMonYY/DDMonYY/g
+:%s/HOST/HOST/g
+:%s/CRYPTKEY/CRYPTKEY/g
+'x 
+
+### Save the encryption key locally:
+
+echo CRYPTKEY > /current/down/cryptkey.skimcountry.DDMonYY
+
+####### Prepare files containing numbers to search for:
+
+# if files containing the numbers to search available:
+mkdir /current/down/argfiles
+cd /current/down/argfiles
+mz
+cp /mnt/zip*/arg* /current/down/argfiles
+        #or
+cp /mnt/zip*/PROJECTNAME/arg* /current/down/argfiles
+
+ls -altr
+
+### Prep the argfiles:
+### make sure the files are ASCII and contain NO EMPTY LINES!!
+### make sure the last line does not contain a null character at the end
+###	(vi the file, add a carriage return to the last line, then delete the empty
+###	line and save)
+### "file" results:
+### 	This will not work: ASCII text, with CRLF line terminators
+### 	This WILL: 	    ASCII text
+cat arg*
+file arg*
+dos2unix arg*
+file arg*
+
+# if no data media is provided: 
+# locally, create a file of numbers to grep for with each number on a separate line
+#       make sure there are NO EMPTY LINES!!!!
+# Format of each type of argument:
+# p123456789 - phone number
+# s123456789 - IMSI
+# e123456789 - IMEI
+# c123/456   - Cell/LAC (no leading 0's)
+
+cd /current/down/argfiles
+vi /current/down/argfiles/argfile1.txt
+
+########## To look at CDR directories try the following:
+
+### Use the following commands to determine the location of current
+### CDR data storage;  Once you identify the location of the data, you'll
+### use the head/tail commands to determine the date ranges being saved.
+### These date ranges will be used as args in the skimcountry commands.
+
+
+### Typical file locations per project:
+
+########################## wrathhatch:
+# HOST  172.16.1.36
+
+# active directories:
+-lt /var/archive/output_billing
+
+# this script should point to the backup directory location:
+-vget /var/archive/output_billing/MoveData.sh
+
+# backup directories:
+-lt /u01/oradata/output_billing/
+-lt /u01/oradata/output_billing/0-9AugData/output_billing
+-lt /u01/oradata/output_billing/AugData/output_billing
+
+
+
+# get time ranges of active directories:
+ls -latr /var/archive/output_billing/isb/*ama | head -10
+ls -latr /var/archive/output_billing/isb/*ama | tail -10
+
+ls -latr /var/archive/output_billing/isb2/*ama | head -10
+ls -latr /var/archive/output_billing/isb2/*ama | tail -10
+
+ls -latr /var/archive/output_billing/isb/*ama | wc -l
+
+ls -latr /var/archive/output_billing/fsd1/*ama | head -10
+ls -latr /var/archive/output_billing/fsd1/*ama | tail -10
+
+ls -latr /var/archive/output_billing/fsd2/*ama | head -10
+ls -latr /var/archive/output_billing/fsd2/*ama | tail -10
+
+ls -latr /var/archive/output_billing/fsd3/*ama | head -10
+ls -latr /var/archive/output_billing/fsd3/*ama | tail -10
+
+ls -latr /var/archive/output_billing/fsd4/*ama | head -10
+ls -latr /var/archive/output_billing/fsd4/*ama | tail -10
+
+
+### to pull a complete directory listing to the ops box:
+ls -latr /var/archive/output_billing/isb >L:/current/down/list_isb
+
+
+##########################  SKIMCOUNTRY ########################################################
+###############################################################################################
+
+
+
+### Now, encrypt the ascii list locally... first make sure you have the encryption tool:
+cd /current/down/argfiles
+which cryptTool.v1.0.Linux2.4.18-14.targetdl
+
+### If cryptTool not in PATH, change your PATH or insert full path in command
+
+### to encrypt one at a time...skip to next comment to encrypt all at once:
+cryptTool.v1.0.Linux2.4.18-14.targetdl -i argfile1.txt -o argfile1.enc -k CRYPTKEY -b
+cryptTool.v1.0.Linux2.4.18-14.targetdl -i argfile2.txt -o argfile2.enc -k CRYPTKEY -b
+
+file argfile*.enc
+
+### to encrypt all at the same time:
+for i in argfile* ; do cryptTool.v1.0.Linux2.4.18-14.targetdl -i $i -o `basename $i .txt`.enc -k CRYPTKEY -b ; done
+
+ls -l
+file argfile*.enc
+
+
+
+### Tips for running the SKIMCOUNTRY 3.2
+
+### DO NOT _APPEND_ to the local file if using encryption - (no >>L: or >>T: )!!!!
+###     per each argfile, create .enc1, .enc1.more, .enc1.more2, etc if additional
+###             passes are needed for the date range
+### DO NOT use -o if also using >L: or >T: (mixed output corrupts the decryption)
+### The phone list is deleted automatically now
+
+
+### Useful options:
+-k 		encryption key 
+-o 		print filenames being parsed
+-P 		encrypted phone list
+-p 		plaintxt phone list
+-r		DO NOT remove phone list after reading in
+-z		unix list of files to parse
+-w		do not encypt the output list (not recommended since file is created on target)
+
+
+### Suggested -z options:
+### this looks in subdirs, so use caution in backup dir (can be good AND bad): 
+### Also circumvents "parameter list too long" problem with wildcards with 'ls'
+	-z "find /share/a1338/ne_q3ic/nb/convert/output -name '0506132*dF*' -print"
+
+### works, but only for smaller ranges  (command line arglist gets long)
+	-z "ls -1rt /share/a1338/ne_q3ic/nb/convert/output/05110[3-6]*dF*"
+
+
+##### NOTE: MUST CORRELATE NUMBERS IN ENCRYPTED TASKING FILENAMES (i.e. argfile1.enc)
+##### TO OUTPUT FILENAMES (cdrhits*.enc1, cdrhits*.enc1.more, cdrhits*.enc1.more2, etc.)
+
+##### NOTE2: GO FROM MOST RECENT TIME TO (PROBABLY CURRENT DATE) AS FAR BACK AS TIME ALLOWS
+
+
+### benchmarking:
+# phonelist had 44 numbers
+# 3 day pull took 38 minutes over ALL directories
+# 1 day average pull took 10-13 minutes
+
+### file name extensions: 
+# GCDR = Nor
+# usd = Sie
+
+
+
+######## Upload the parser (SKIMCOUNTRY) and called it crond
+# put up the parser tool
+
+mkdir /tmp/.scsi
+-cd /tmp/.scsi
+
+-put /current/up/skimcountry.v1.2.SunOS5.9.targetdl crond
+
+        # or
+
+-put /mnt/zip*/skimcountry.v1.2.SunOS5.9.targetdl crond
+
+
+#####  Upload the encrypted phone list as adm, then run the parser:
+
+############ argfile 1
+
+-put /current/down/argfiles/argfile1.enc adm
+./crond -k CRYPTKEY -P adm -z "find /var/archive/output_billing -name 'MSC*06082[2-4]*ama' -print" >T:/current/down/cdrhits.skimcountry.HOST.DDMonYY.enc1
+-beep 15
+
+### Run again if needed for same tasking
+
+-put /current/down/argfiles/argfile1.enc adm
+./crond -k CRYPTKEY -P adm -z "find /var/archive/output_billing -name 'MSC*06082[0-1]*ama' -print" >T:/current/down/cdrhits.skimcountry.HOST.DDMonYY.enc1.more
+-beep 15
+
+
+
+############ argfile 2
+
+-put /current/down/argfiles/argfile2.enc adm
+./crond -k CRYPTKEY -P adm -z "find /var/archive/output_billing -name 'MSC*06082[2-4]*ama' -print" >T:/current/down/cdrhits.skimcountry.HOST.DDMonYY.enc2
+-beep 15
+
+-put /current/down/argfiles/argfile2.enc adm
+./crond -k CRYPTKEY -P adm -z "find /var/archive/output_billing -name 'MSC*06082[0-1]*ama' -print" >T:/current/down/cdrhits.skimcountry.HOST.DDMonYY.enc2.more
+-beep 15
+
+
+
+######
+###### to parse other vendor files:
+######
+
+#./crond -k CRYPTKEY -P adm -z "ls -1rt /var/archive/output_billing/*/MSC*20060629*usd*ama"  > .mcftpl38755
+
+
+######
+#####  when it's done running, decrypt the file (-d -c options)
+######
+
+
+cd /current/down
+ls -latr cdr*enc*
+
+# to decrypt individually:
+
+cryptTool.v1.0.Linux2.4.18-14.targetdl -i cdrhits.skimcountry.HOST.DDMonYY.enc1 -o cdrhits.skimcountry.HOST.DDMonYY.txt1 -k CRYPTKEY -d -c
+
+cryptTool.v1.0.Linux2.4.18-14.targetdl -i cdrhits.skimcountry.HOST.DDMonYY.enc2 -o cdrhits.skimcountry.HOST.DDMonYY.txt2 -k CRYPTKEY -d -c
+
+
+# or decrypt all at one time (once all are written fully)
+
+cd /current/down
+for i in cdrhits*enc* ; do n="`echo $i | sed \"s,enc,txt,g\"`" ; cryptTool.v1.0.Linux2.4.18-14.targetdl -i $i -o $n -k CRYPTKEY -d -c ; done
+
+ls -latr cdr*txt*
+
+######
+######	If you need to stop the parser before it completes:
+### Control-C the nopen window containing the parser command
+### ps -ef |grep crond
+### if the parser command is still "running", then kill the process:
+### kill -9 <PID> 
+### You'll still be able to decrypt the partially completed data pull
+
+
+
+######
+######  copy DECRYPTED data to appropriate zip device for the analyst
+######
+ls -l cdr*txt*
+mz
+cp cdr*txt* /mnt/zip*/PROJECTNAME
+ls -l /mnt/zip*/PROJECTNAME
+uz
+
+
+
+#### target cleanup
+
+-rm adm crond
+-cd /tmp
+-rm .scsi
+-burnBURN
+
+### You're done!
+

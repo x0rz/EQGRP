@@ -1,0 +1,25 @@
+#!/bin/sh
+PORTS=`echo $* | tr -dc '0-9 '`
+if [ ! "$PORTS" ] ; then
+	cat <<EOF
+Usage: $0 PORTNUM [PORT2 .. [PORTN] ]
+
+This tool is useful when waiting for callbacks. It watches for ESTABLISHED sessions
+on one or more ports in the local netstat -an (tying up this window until one comes).
+When it sees any session on any of the ports provided, it runs "beeps 180", which will
+beep/blink this window for 180 seconds (like this window just did for one second).
+
+v 1.0.0.1
+
+EOF
+	beeps 2
+	exit 1
+fi
+PORTS=`echo $PORTS | tr " " "|"`
+while [ 1 ] ; do 
+	netstat -an | egrep ":($PORTS) .*ESTABLISHED" && break
+	#echo "netstat -an | egrep \":($PORTS) .*ESTABLISHED\" && break"
+	sleep 2
+done
+beeps 180
+	

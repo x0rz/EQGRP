@@ -1,0 +1,42 @@
+#!/bin/bash
+# seedcalc - calculate SEED environment var for stoic
+
+usage()
+{  
+  echo "USAGE:"
+  echo "$PROG hostname"
+  echo
+  echo "Calculates value for SEED environment variable for use with using "
+  echo "the Ctrl binary with STOICSURGEON.  The hostname must be output from "
+  echo "the \"uname -n\" command.  Uses the following algorithm:"
+  echo
+  echo "echo -n hostname | rev | tr -d '\n' | md5sum | cut -f1 -d' '"
+  echo
+  echo "### OR, if rev is not available ###"
+  echo
+  echo "echo -n hostname  | sed '/\n/!G;s/\(.\)\(.*\n\)/&\2\1/;//D;s/.//' | tr -d '\n' | md5sum | cut -f1 -d' '"
+  echo
+  version
+  exit
+}
+
+version()
+{
+  echo "$PROG version $VER"
+}
+
+PROG=`basename $0`
+VER="1.0.0.1"
+
+# Print usage if no options
+if [ ! "$1" ]; then
+  usage
+fi
+
+# Use rev if there to reverse hostname, if not use sed
+if [ ! "`which rev 2>/dev/null`" ]; then
+  echo -n $1 | rev | tr -d '\n' | md5sum | cut -f1 -d' '
+else
+  echo -n $1 | sed '/\n/!G;s/\(.\)\(.*\n\)/&\2\1/;//D;s/.//' | tr -d '\n' | md5sum | cut -f1 -d' '
+fi
+

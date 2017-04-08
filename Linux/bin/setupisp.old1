@@ -1,0 +1,160 @@
+#!/bin/bash
+
+. /etc/rc.d/init.d/functions
+VER=2.5.1.1
+
+ISP_INFOFILE=/tmp/isp_info
+ISP_LOG=/tmp/isp_log
+
+# called as resetisp, this program assumes /tmp/isp/* exist already (saves slow floppy reads)
+rm -f  /usr/local/bin/resetisp
+rm -f  /usr/local/bin/redial
+ln -sf /usr/local/bin/setupisp /usr/local/bin/resetisp
+ln -sf /usr/local/bin/setupisp /usr/local/bin/redial
+
+if [ "`ifconfig ppp0 2>/dev/null | grep addr`" ] ; then
+    if [ ! "`basename $0`" = "redial" ] ; then
+	ifconfig ppp0
+	[ "$BOOTUP" = "color" ] && $SETCOLOR_WARNING
+	echo "You already have a ppp0 interface -- press return to exit."
+	if [ "$UNATTENDED" ] ; then
+	    echo -n "ABORTING (UNATTENDED=$UNATTENDED)"
+	    exit 1
+	else
+	    echo -n "(Maybe you need to run \"phone stop\"?)"
+	    [ "$BOOTUP" = "color" ] && $SETCOLOR_NORMAL
+	    read ans
+	    exit 1
+	fi
+    fi
+fi
+cd /tmp
+
+[ "$1" = "-v" ] && echo "`basename $0` version $VER" && exit
+[ "$1" = "-h" ] && echo -e "Usage: See source\n\n`basename $0` version $VER\n" && exit
+[ "${1:0:1}" = "-" ] && echo -e "${COLOR_FAILURE}BAD OPTION!\n$COLOR_NORMAL\nUsage: See source\n\n`basename $0` version $VER\n" && exit
+
+
+if [ ! -e "/tmp/isp/Systems.usethis" -a ! -e "/tmp/isp.justdoit" ] ; then
+    if [ "$1" -o "`basename $0`" = "resetisp" -o "`basename $0`" = "redial" ] ; then
+	echo -e "\aUsing existing /tmp/isp/* files -- BE SURE YOU HAVE THAT FLOPPY/TOKEN!!"
+	grep DESC /tmp/isp/xisprc
+	if [ ! -e "/tmp/isp/Systems" ] ; then
+	    echo -e "\aUnable to continue--no existing /tmp/isp/* files. Try just \"setupisp\"."
+	    exit 
+	fi
+    else
+	TAR=`tar tvf /dev/fd0 2>/dev/null | egrep "Systems|secret|resolv.conf" | wc -l`
+	if [ $TAR == 3 ] ; then
+	    echo "*"
+	    echo "* ISP floppy found in drive already."
+	    echo "*"
+	else
+	    echo "*"
+	    echo "* Insert ISP floppy and hit <ENTER>"
+	    echo "*"
+	    read ANS
+	fi
+	rm -rf /tmp/isp
+	mkdir /tmp/isp
+	tar -C /tmp/isp -xvf /dev/fd0
+    fi
+    until [ -e "/tmp/isp/Systems" ] ; do
+	rm -rf /tmp/isp/*
+	[ "$BOOTUP" = "color" ] && $SETCOLOR_WARNING
+	echo -n "Seems to be the wrong floppy! Put in ISP Floppy and hit return."
+	[ "$BOOTUP" = "color" ] && $SETCOLOR_NORMAL
+	read ans
+	tar -C /tmp/isp -xvf /dev/fd0
+    done
+    if [ ! -e "/tmp/isp/Systems.orig" ] ; then
+	cp -fp /tmp/isp/Systems /tmp/isp/Systems.orig
+    fi
+    
+    RND=$(expr $RANDOM % $(cat /tmp/isp/Systems | wc -l))
+    
+    echo "*"
+    echo "* Editting phone number file"
+    echo "*"
+    
+    usleep 333333 2>/dev/null
+    vi +${RND} +/pp /tmp/isp/Systems
+    
+else 
+    if [ ! -e "/tmp/isp/Systems.orig" ] ; then
+	cp -fp /tmp/isp/Systems /tmp/isp/Systems.orig
+    fi
+    echo "*"
+    echo "* Using prebuilt /tmp/isp/Systems.usethis:"
+    echo "*"
+    cat /tmp/isp/Systems.usethis
+    cp -fp /tmp/isp/Systems.usethis /tmp/isp/Systems
+fi
+echo "*"
+echo "* Building /etc/wvdial.conf"
+echo "*"
+
+USERNAME="$(grep ^NAME: /tmp/isp/xisprc | cut -d\  -f2)"
+PASSWORD="$(cat /tmp/isp/secret)"
+#NUMBER="$(grep -v ^\# /tmp/isp/Systems | grep -v '^$' | cut -d\  -f5)"
+NUMBER=$(grep -v ^\# /tmp/isp/Systems | grep -v '^$' | sed s/.*\ //)
+CITY=$(grep -v "^$" /tmp/isp/Systems | grep -B 1 "^[^#]" 2>/dev/null|tr "#" "," | cut -f 2,3 -d "," | head -1)
+NUMBER2=$(echo $NUMBER | cut -f 2 -d "," | sed "s/^1-//" )
+ISP=$(grep ^DESCR /tmp/isp/xisprc | awk '{print $2}'|cut -f 1 -d "/")
+
+#rm -rf /tmp/isp
+
+
+cat << EOF > /etc/wvdial.conf.new
+[Dialer Defaults]
+Modem = /dev/ttyS0
+Baud = 115200
+Init1 = ATZ
+Init2 = ATQ0 V1 E1 S0=0 &C1 &D2 S11=55 +FCLASS=0
+Auto Reconnect = off
+Phone = $NUMBER
+Username = $USERNAME
+Password = $PASSWORD
+EOF
+
+if [ "$NUMBER2" = "" ] ; then
+    echo "*"
+    echo "*  ABORTING!! No phone number in resulting /tmp/isp/Systems"
+    echo "*"
+    echo "*  wvdial.conf would have been (see /etc/wvdial.conf.new):"
+    cat /etc/wvdial.conf.new | sed "s/Password = .*/Password = ********/"
+    exit
+else
+    rm -f /etc/wvdial.conf
+    mv /etc/wvdial.conf.new /etc/wvdial.conf
+    [ ! -e "/etc/wvdial.conf" ] && echo "ERROR: cannot create /etc/wvdial.conf" && exit 1
+fi
+
+echo "*"
+echo "* Dialing ISP with these settings in /etc/wvdial.conf"
+echo "*"
+cat /etc/wvdial.conf | sed "s/Password = .*/Password = ********/"
+
+cp ${ISP_INFOFILE}.old1 ${ISP_INFOFILE}.old2 2>/dev/null
+cp $ISP_INFOFILE ${ISP_INFOFILE}.old1 2>/dev/null
+cat << EOF > $ISP_INFOFILE
+$ISP
+$CITY
+$NUMBER2
+EOF
+date -u >> $ISP_LOG
+cat << EOF >> $ISP_LOG
+$ISP
+$CITY
+$NUMBER2
+EOF
+
+echo "*"
+echo "* Detailed ISP Information from ${ISP_INFOFILE}"
+echo "*"
+cat $ISP_INFOFILE
+
+if [ -x "/usr/local/bin/clocksync.pl" ] ; then
+  /usr/local/bin/clocksync.pl &
+fi
+exec wvdial

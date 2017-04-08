@@ -1,0 +1,3 @@
+#NOGS
+-nohist \-ps > T:/current/tmp/.bips
+-nohist -lsh [ "$GSOPTIONS" ] && egrep "$GSOPTIONS" /current/tmp/.bips | tee /current/tmp/.bips.r  ; [ -s /current/tmp/.bips.r ] && echo -en "Matches:\t" && cat /current/tmp/.bips.r | wc -l  ; rm /current/tmp/.bips*

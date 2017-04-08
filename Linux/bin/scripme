@@ -1,0 +1,334 @@
+#!/usr/bin/env perl
+# $Id: scripme,v 1.16 2006/03/17 18:33:27 ident Exp $
+use File::Basename;
+require "getopts.pl";
+#use Time::HiRes qw( sleep );
+#$hold = "-hold" ; # for debugging
+#`echo INTERFACE=$ENV{INTERFACE} > /tmp/runningscripme` ;
+#`echo DEBUG=$ENV{DEBUG} >> /tmp/runningscripme` ;
+#`env >> /tmp/runningscripme` ;
+$opdir = "/current" ;
+$opbin = "$opdir/bin" ;
+$opetc = "$opdir/etc" ;
+$opdown = "$opdir/down" ;
+$VER="2.0.2.4" ;
+$rand = $$ ;
+# ===============
+$prog = basename ${0};
+$winnum = keys %xtermargs ;
+$optsaregood = &Getopts( "hFvHVDt:dX:lcks") ;
+&setusagestrings ; # do this again after seeing if there is an override file
+&usage if ($opt_h or $opt_H);
+
+# Some housekeeping: If $bashver properly set by Makefile,
+# and we are root ($> == 0),
+# and if $bashver is > the one in /etc on op box, then
+# we upgrade the ones in /etc with the ones from $opetc
+# (Makefile swaps out the first uppercase bashrcversion below
+# with a sed, but misses the second due to the dot.)
+$newbashver = "2.1.0.1";
+unless (!$newbashver or $newbashver eq "BASH"."RCVERSION" or $>) {
+  my ($etcbashver) = `grep BASHRCVER= /etc/bashrc` =~ /BASHRCVER=(\S*)/;
+  if (!$etcbashver or (verval($etcbashver))[1] < (verval($newbashver))[1]) {
+    rename("/etc/bashrc","/etc/bashrc.$$.old");
+    rename("/etc/bashrc-u","/etc/bashrc-u.$$.old");
+    `cp $opetc/bashrc* /etc 2>/dev/null ; touch -r $opetc/bashrc /etc/bashrc /etc/bashrc-u 2>/dev/null ; chmod 644 /etc/bashrc* 2>/dev/null`;
+    if ($debug) {
+      print STDERR "$prog just updated /etc/bash and /etc/bashrc\n".
+	"ls -al /etc/bashrc*\n".
+	  `ls -al /etc/bashrc*`;
+    }
+  }
+}
+
+$display = ":0" ;
+$display = $ENV{DISPLAY} if ( $ENV{DISPLAY} =~ /:/ ) ;
+
+if ($opt_v) {
+  print "$prog version $VER\n";
+  exit;
+}
+$wintype = "none" ;
+$wintype = uc $opt_t if $opt_t ;
+
+# %xtermargs determines how many scripted xterms are brought up and their
+# size, color, name, etc.
+open (OUT,"> $opetc/scripme.master.$rand") ||
+  die "Cannot open  $opetc/scripme.master.$rand for write" ;
+print OUT <<"EOF";
+#!/usr/bin/env perl
+%xtermargs = 
+(1,"$hold -geometry 80x24+0+0",
+ 2,"$hold -geometry 95x55+588+0",
+ 3,"$hold -geometry 80x20+0+344",
+ 4,"$hold -geometry 80x24+0-47",
+ 5,"$hold -geometry 95x15+587-46",
+ "TCPDUMP",
+ "-display $display $hold -geometry 179x14-0-0",
+ "OPSCRIPT",
+ "-display $display $hold -geometry 95x56+1280+0",
+ "UNSCRIPTED1","$hold -geometry 80x30-0+344",
+ "UNSCRIPTED2","$hold -geometry 80x24-0+0",
+);
+%xtermargsmaster = %xtermargs ;
+
+# %xtermcommands contains the command issued to each window type
+%xtermcommands = 
+("TCPDUMP",
+ "tcpdump -l -n -n -i $ENV{INTERFACE}",
+ "SCRIPT",
+ "/usr/bin/script -af $opdown/script", # scripme.pl appends his \$\$
+ "OPSCRIPT",
+ "vi `ls $opetc/opscript.txt $opdir/op*/etc/opscript.txt 2>/dev/null`",
+ "UNSCRIPTED1","/bin/bash",
+ "UNSCRIPTED2","/bin/bash",
+);
+\@types = ("EXPLOIT") ;
+push(\@types,"$wintype") unless ("$wintype" eq "none") ;
+foreach (\@types) {
+  \$autorun{\$_} = \$_;
+  \$xtermcommands{\$_} = "\$ENV{EXPLOIT_SCRIPME}";
+}
+
+%xtermcommandsmaster = %xtermcommands ;
+
+1;
+EOF
+close(OUT) ;
+require "$opetc/scripme.master.$rand" ;
+
+if ($debug) {
+  print "\$xtermcommands{$_} = $xtermcommands{$_}\n" foreach (keys %xtermcommands) ;
+}
+
+# must do this one before the overrides below in case they
+# have their own in there.
+
+$defxargs="-display $display +cm  +cn -sk -sb -sl 15000 -bg gray80 -fg black" ;
+
+
+if (-f "$opetc/scripme.override" and -s _) {
+  if (-r "$opetc/scripme.override") {
+    require "$opetc/scripme.override" ;
+    $override++ ;
+    $winnumoverride = keys %xtermargs ;
+    $normally=" normally";
+  } else {
+    &usage("Cannot read $opetc/scripme.override -- are you root?") ;
+  }
+  # we always want to write either .exploit or .default
+  open (OUT,"> $opetc/scripme.exploit.$rand") ||
+    die "Cannot open  $opetc/scripme.exploit.$rand for write" ;
+  print OUT "\n\$xtermcommands{EXPLOIT} = \"\$ENV{EXPLOIT_SCRIPME}\" ;
+return 1 ;\n" ;
+  close (OUT) ;
+} else { # then make sure it is gone, not empty
+  unlink("$opetc/scripme.override") ;
+}
+`cp $opetc/scripme.master.$rand $opetc/scripme.default.$rand` &&
+    die "Cannot cp $opetc/scripme.master.$rand to scripme.default.$rand" ;
+
+&setusagestrings ;
+
+&usage("bad option(s)") if (! $optsaregood );
+
+$debug = "-d" if ($opt_d or $opt_D) ;
+$debug = "-D" if ($opt_D) ;
+$verbose = "-V" if $opt_V ;
+$shminusc = "-c" if $opt_c ;
+
+if ($wintype eq $autorun{$wintype} and ! "$ENV{EXPLOIT_SCRIPME}") {
+  die "Type $wintype requires setting EXPLOIT_SCRIPME first" ;
+}
+
+( "`which scripme.pl 2>/dev/null`") ||
+  die "scripme.pl must be in path but is not there";
+
+(-d "$opdown" and -w _) or die "$opdown must exist and be writable" ;
+
+if (! $opt_F) {
+  if ($ARGV[$#ARGV] and $ARGV[$#ARGV] > 0 and $ARGV[$#ARGV] <= 20) {
+    @c = (1..int $ARGV[$#ARGV]) ;
+    pop @ARGV ;
+  } else {
+    @c = (1) ;
+  }
+} elsif ($ARGV[$#ARGV] and $ARGV[$#ARGV] > 0 and $ARGV[$#ARGV] <= 20) {
+  @c = (1..int $ARGV[$#ARGV]) ;
+  pop @ARGV ;
+} else {
+  unless ($wintype eq "none") {
+    @c = ($wintype) ;
+  } else {
+    @c = sort keys(%xtermargs) ;
+  }
+}
+
+$xargs = $opt_X ;
+if ($opt_s) {
+  my $geom="";
+  print "\nClick on any window to use that window's size:" ;
+  chomp($geom = `xwininfo | grep geometry`) ;
+  print "\n\n";
+  $geom =~ s/.*geometry (\d*x\d*).*/\1/ ;
+  $xargs .= " -geometry $geom";
+}
+$hold = "-hold" if ($debug and ! $opt_l) ;
+$killwindow = " -k" if $opt_k ;
+#$hold = "-hold" ;
+print "DBG: Starting foreach \$c (@c)\n" if ($debug);
+foreach $c (@c) {
+print "DBG: inside with \$c=$c and \@c=(@c)\n" if ($debug);
+  if (! ($kidpid = fork) ) {
+    $ENV{"WINTYPE"} = $c ;
+    my $name = $c ;
+    if ($c =~ /^\d/) {
+      $name = "#$c SCRIPTED WINDOW" ;
+#      $c = "SCRIPT" ;
+    } else {
+      $name = "$c WINDOW" ;
+    }
+    $name = "UNSCRIPTED WINDOW" if ($c =~ /^UNSCRIPTED/ ) ;
+    $name = "OPSCRIPT EDITOR" if ($c eq "OPSCRIPT") ;
+    $name = "TCPDUMP SCRIPTED WINDOW" if ($c eq "TCPDUMP") ;
+#    sleep 0.3 ;
+#    &docmd("xterm $hold -name \"$name\" -title \"$name\" $xtermargs{$c} $defxargs $xargs -e \"/usr/local/bin/scripme.pl\"") ;
+print "DBG: Running:
+    exec(\"RAND=$rand xterm $hold -name \"$name\" -title \"$name\" $defxargs $xtermargs{$c} $xargs -e scripme.pl$killwindow\") ;
+" if ($debug);
+    close(STDIN);
+    close(STDOUT);
+    close(STDERR);
+    exec("RAND=$rand xterm $hold -name \"$name\" -title \"$name\" $defxargs $xtermargs{$c} $xargs -e scripme.pl$killwindow") ;
+  } else {
+    print "window $c started with ppid $kidpid\n" if ($verbose and (! ($debug eq "-d")) ) ;
+  }
+}
+unless (fork) {
+  close STDIN ;
+  close STDOUT ;
+  close STDERR ;
+  sleep 10 ;
+  `rm -f $opetc/scripme.*.$rand 2>/dev/null` ;
+  exit ;
+}
+
+# end main logic
+
+sub verval {
+  local($verstr) = @_ ;
+  local(@tmp,$vernum);
+  $verstr =~ s/[a-z]//gi ;
+  # process ver string with multiple dots (no one rev greater than 999 please)
+  # First two numbers are before decimal, the rest after
+  @tmp = split (/\./, $verstr);
+  $vernum = shift(@tmp) + 1000 ;
+  my $frac = -1 ;
+  while (@tmp) {
+    $frac++ ;
+    if ($frac > 0) {
+      $vernum = $vernum + (shift(@tmp)/(1000**$frac));
+    } else {
+      $vernum = 1000 * $vernum + shift(@tmp);
+    }
+  }
+  return () unless $verstr ;
+  return ($verstr,$vernum) ;
+}#verval
+
+sub docmd () {
+  # if second argument given, echo command executed with print statement
+  local($command,@junk) = @_;
+  $ENV{DEBUG} = 1 if ($debug) ;
+  print "\n[$prog]# " if ($verbose || $debug || @junk);
+  print "$command\n" if ($verbose || $debug || @junk);
+  system($command) unless ($debug and (! ($debug eq "-D")) ) ;
+  `echo oops > /tmp/oops` if  ($debug and (! ($debug eq "-D")) ) ;
+} # end sub docmd
+
+sub usage() {
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  if ($opt_H) {
+    print "$usagetext_long" ;
+  } else {
+    print "$usagetext_short" ;
+  }
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  exit;
+} # end sub usage
+
+sub dbg {
+  warn "@_\n";
+}#dbg
+
+sub setusagestrings {
+
+  $usagetext_short = "
+Usage: $prog [-hH] [-X\"other-xterm-args\"] [#]
+ -h|-H   Print this|a longer usage statement. The longer one applies to
+         scrubhands' or exploit scripts' use of $prog.
+
+  -X     other-xterm-args can be any string of valid arguments to xterm
+         (see xterm(1) for valid arguments), including the hyphen(s)
+         (to use custom window sizes or colors, for example).
+
+$prog starts # bash xterms, each scripted in $opdown/script.\$\$,
+and with cwd of $opbin. Default is 1 scripted xterm (and # is
+ignored if it is greater than 20).
+
+$prog version $VER
+";
+
+  $usagetext_long = "
+Usage: $prog [options] [-X\"other-xterm-args\"] [# | -t wintype]
+   -H  print this LONGER usage statement (-h is a shorter one)
+
+   -F  This option should only be used by scrubhands or by other
+       automation scripts. With -F, the number and type of xterms
+       started are determined by scripme.\* files in $opetc.
+
+   -V  show xterm commands executed to stdout
+
+   -k  close xterm when its process is done
+
+   -d  show but do not execute the xterm commands
+
+   -c  call \$EXPLOIT_SCRIPME via \"sh -c '$EXPLOIT_SCRIPME'\" (this
+       is ignored unless -t wintype is used)
+
+   -X  other-xterm-args can be any string of valid arguments to xterm
+       (see xterm(1) for valid arguments), including the hyphen(s)
+
+   -s  use the size from some other window for this new one. User is
+       prompted to click the window whose size we want.
+
+   -t  bring up only one window of type wintype, which can be either
+       TCPDUMP or SOMETHINGELSE. If SOMETHINGELSE, the environment
+       variable EXPLOIT_SCRIPME must contain the desired command line,
+       and the script name with script.somethingelse.\$\$. (Choice of
+       string \"SOMETHINGELSE\" up to user.)
+
+$prog -F$normally brings up $winnum windows scripted in $opdown/. One
+running \"tcpdump -n -n\", on the environment variable \$INTERFACE, scripted
+to tcpdump.raw, and the others running bash, scripted to script.\$\$.  Or,
+if the optional \"#\" argument is used, # scripted bash windows. (# is
+ignored if it is greater than 20.)
+";
+  $usagetext_long .= "
+FYI, \$INTERFACE is currently set to INTERFACE=$ENV{INTERFACE}." if $ENV{INTERFACE} ;
+  $usagetext_long .= "
+If your op is built with the file $opetc/scripme.override, it can
+contain a table of your preferences for window location, size, color,
+etc. See $opetc/scripme.example to design your own .override file.
+";
+  if ($override) {
+    $usagetext_long .= "
+In fact, the op now in $opdir does have a $opetc/scripme.override
+file, with $winnumoverride windows.
+";
+  }
+  $usagetext_long .= "
+$prog version $VER
+";
+
+} # end sub setusagestrings

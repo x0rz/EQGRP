@@ -1,0 +1,22 @@
+#NOGS
+# -nohist NOTE: This script calls gs.autodothis.linux.2.blah which is created as a result of =dfcheck above
+-nohist -lsh rm -f /current/down/linuxstats.cmdout
+-nohist -cmdout /current/down/linuxstats.cmdout
+-nohist mount
+-nohist lspci -vvvv
+-nohist lsusb
+-nohist lsmod
+-nohist -get /etc/selinux/config
+#-nohist more /proc/iomem /proc/pci /proc/ioports /proc/bus/usb/devices /proc/scsi/scsi /proc/meminfo /proc/cpuinfo /proc/version /etc/selinux/config
+-nohist more /proc/iomem /proc/pci /proc/ioports /proc/scsi/scsi /proc/meminfo /proc/cpuinfo /proc/version /etc/selinux/config
+-nohist ksyms -a
+-nohist # We mkdir -p then remove the dir. If NOPEN_RHOSTNAME has any / chars this helps that.
+-nohist -lsh mkdir -p  /current/down/date-rfc2822.$NOPEN_RHOSTNAME /current/etc/gs.autodothis.linux.2.$NOPEN_RHOSTNAME 2>/dev/null && rmdir /current/etc/gs.autodothis.linux.2.$NOPEN_RHOSTNAME /current/down/date-rfc2822.$NOPEN_RHOSTNAME
+-nohist -lsh mv /current/etc/gs.autodothis.linux.2.$NOPEN_RHOSTNAME /current/etc/gs.autodothis.linux.2 2>/dev/null
+-nohist -gs autodothis.linux.2
+-nohist -cmdout
+-nohist -gs replay  -Hf /current/down/linuxstats.cmdout hdparm
+-nohist -gs replay  -Hf /current/down/linuxstats.cmdout df -k
+-nohist date -R > T:/current/down/.2822date
+-nohist -lsh mkdir -p /current/down/linuxstats.cmdout.$NOPEN_RHOSTNAME 2>/dev/null /current/down/date-rfc2822.$NOPEN_RHOSTNAME 2>/dev/null ;rmdir /current/down/linuxstats.cmdout.$NOPEN_RHOSTNAME /current/down/date-rfc2822.$NOPEN_RHOSTNAME 2>/dev/null
+-nohist -lsh cat /current/down/linuxstats.cmdout | tee /current/down/linuxstats.cmdout.$NOPEN_RHOSTNAME ; mv /current/down/.2822date /current/down/date-rfc2822.$NOPEN_RHOSTNAME

@@ -1,0 +1,11 @@
+#!/bin/sh
+exec 1>&2
+I=5
+[ "$1" ] && [ $1 -gt 0 ] && I=$1
+for ((i=1 ; i<=$I ; i++)) ; do
+  echo -en "\a"
+  usleep 200000
+  echo -en "\a"
+  usleep 200000
+  usleep 300000
+done

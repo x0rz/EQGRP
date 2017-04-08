@@ -1,0 +1,146 @@
+#!/usr/bin/env perl
+$VER="1.0.0.1" ;
+myinit() ;
+my ($mtime,$atime) = ();
+if ($args =~ s/^\s*(\d+)(:\d+){0,1}\s+(\/)/$3/ ) {
+  $mtime=$1;
+  if (length($2)) {
+    $atime=$2;
+    $atime =~ s/^:+//;
+  } else {
+    $atime=$mtime;
+  }
+} else {
+  # Loop while we have date/times
+  while (1) {
+    my ($monstr,$monnum,$mday,$year,$hrmin,$sec,$therest,$mon,$thistime) = ();
+    if ($args =~
+	s/(\d+)\/(\d+)(\/\d+){0,1}\s+(\d+:\d+)(:\d+){0,1}\s+(.*)// ) {
+      ($monnum,$mday,$year,$hrmin,$sec,$therest) = 
+	($1,$2,$3,$4,$5,$6);
+      $year =~ s/^\/+//;
+      $monstr = $mons[$monnum-1];
+    } elsif ($args =~
+	     s/(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)\s+(\d+:\d+)(:\d+){0,1}(\s+\d+){0,1}(.*)//i ) {
+      ($monstr,$mday,$hrmin,$sec,$year,$therest) = 
+	($1,$2,$3,$4,$5,$6);
+      $monstr = ucfirst lc $monstr;
+    }#endif which format
+    if ($sec eq "") {# randomize $sec if not given
+      ($sec) = padto(2,int(rand(60)));
+      $sec = ":$sec";
+    }
+    # it is epochseconds() that decides to use current year if
+    # none found in string.
+    if ($monstr and $mday and $hrmin) {
+      ($thistime) = epochseconds("$monstr $mday $hrmin$sec $year");
+    } else {
+      $atime = $mtime if ($mtime and !$atime);
+      last;
+    }
+    $args = $therest;
+    if (!$mtime) {
+      $mtime = $thistime;
+      next;
+    }
+    $atime = $thistime;
+    last;
+  }#while
+}#endif epochseconds or some ascii date format
+
+# this if forces epochtime of both to be > 0 which is fine
+mydie("Malformed or missing date/time(s)")
+  unless ($mtime and $atime) ;
+
+mydie("Missing time with date \"$1\"")
+  if ($args =~ /^\s*((\d+)\/(\d+))/ or
+      $args =~ /^\s*((Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+))/
+     );
+
+unless ($args =~ /\S/) {
+  my $mtimestr = gmtime($mtime);
+  my $atimestr = gmtime($atime);
+  mydie("Missing filename(s). Times given are:\n\n\t-touch -t $mtime:$atime\n\n".
+	"which translate to mtime: $mtimestr\n".
+	"               and atime: $atimestr\n",
+	$COLOR_NOTE);
+}
+#} elsif ($args =~ /(\/.*)$/) { # this section not used
+#  my $reffile = $1;
+#  ($output,$nopenlines,@output) = doit("-touch $reffile $file");
+#  if ($output) {
+#    return ($output,$nopenlines,@output) ;
+#  } else {
+#    progprint("-touch line FAILED! Does $reffile exist?",$COLOR_FAILURE,"pause3");
+#    next;
+#  }
+#  mydie();
+#}
+$args =~ s/^\s+//;
+(@files) = split(/\s+/,$args);
+$socket = pilotstart(quiet) unless $debug;
+foreach $file (@files) {
+  if ($debug) {
+    $commands .= "-touch -t $mtime:$atime $file\n";
+  } else {
+    doit("-touch -t $mtime:$atime $file");
+  }
+}
+if ($debug) {
+  my $what = "THIS COMMAND";
+  $what = "THESE COMMANDS" if @files > 1;
+  progprint("\n\nDBG:$COLOR_FAILURE NOT RUNNING$COLOR_NOTE $what:\n$COLOR_NORMAL".
+	    "\n$commands");
+}
+close($socket);
+
+sub myinit {
+  $willautoport=1;
+  require "../etc/autoutils" ;
+  $prog = "-gs asciitouch" ;
+  $vertext = "$prog version $VER\n" ;
+  mymydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless $nopen_rhostname;
+  mymydie("bad option(s)") if (! Getopts( "hvd" ) ) ;
+$usagetext = "
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"-gs grepout\" is used.
+
+";
+  $gsusagetext="Usage: $prog [-d] DATETIME [/path/file1 [/path/file2 ... ]]
+
+  OPTION:
+
+     -d    DEBUG mode. Compute and show the -touch line but do not do it.
+
+  Uses NOPEN's builtin \"-touch -t epochmtime:epochatime\" syntax to touch
+  the mtime and atime of the files on the command line with the DATETIME
+  given. File arguments cannot contain spaces.
+
+  If the file argument is omitted, the times are shown as in the format
+  \"-touch -t epochmtime:epochatime\".
+
+  The DATETIME can be in any of these formats:
+
+      <epochtime>:<epochtime>                            (mtime:atime)
+      <epochtime>                                        (used for both)
+      M/D[/[CC]YY] H:M[:S]  M/D[/[YY]YY] H:M[:S]         (mtime  atime)
+      M/D[/[CC]YY] H:M[:S]                               (used for both)
+      Mon D H:M[:S][ [CC]YY]  Mon D H:M[:S][ [CC]YY]     (mtime  atime)
+      Mon D H:M[:S][ [CC]YY]                             (used for both)
+
+  In the M/D format, local GMT year assumed if not given, and seconds are
+  randomized if left off.
+
+  ${COLOR_FAILURE}NOTE: This WILL change the ctime to the current time.$COLOR_NORMAL
+
+";
+  usage() if ($opt_h or $opt_v or !@ARGV) ;
+  $debug = " -d" if $opt_d ;
+  $origargs = "@ARGV"; # -d not there anymore
+  $args = $origargs;
+}#myinit

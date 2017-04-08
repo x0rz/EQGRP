@@ -1,0 +1,330 @@
+#!/bin/bash
+VER=1.0.2.4
+## 19 JUL 2006
+# shell script to find ZIP or USB (or some future) media for scrubhands
+# (or operator) to use for tarball/data transfer.
+##
+export MNTPNT1="/mnt/zip"
+export MNTPNT2="/mnt/zip2"
+export MNTPNT3="/mnt/zip3"
+
+findzipdev() {
+    # Make /dev/sd[ab]4 block devices with mknod
+    for L in a b c d e f g h; do
+	if [ ! -b /dev/sd${L}4 ] ; then
+	    mknod /dev/sd${L}4 b 8 4 2>/dev/null
+	    chown root:disk /dev/sd${L}4 2>/dev/null
+	    chmod 660 /dev/sd${L}4 2>/dev/null
+	fi
+    done
+
+    # We find some device to mount on ${THISMNT} if nothing there already.
+    # By "some" we mean first a thumb drive if it is there, or a ZIP disk
+    # if we can find one.
+    
+
+    export MNTPNT1="/mnt/zip"
+    export MNTPNT2="/mnt/zip2"
+    export MNTPNT3="/mnt/zip3"
+    export ALLMNTS="$MNTPNT1 $MNTPNT2 $MNTPNT3"
+    export LASTMNT=`echo $ALLMNTS | sed "s/.* //g"`
+
+    # Our /mnt/zip* devices
+    DEV1=`mount | grep " on $MNTPNT1 " | head -1 | sed "s/ .*//g"`
+    DEV2=`mount | grep " on $MNTPNT2 " | head -1 | sed "s/ .*//g"`
+    DEV3=`mount | grep " on $MNTPNT3 " | head -1 | sed "s/ .*//g"`
+
+    # Other non /mnt/zip* devices
+    OTHDEV1=`mount | grep -v " on $MNTPNT1" | grep "^/" | head -1 | sed "s/ .*//g"`
+    OTHDEV2=`mount | grep -v " on $MNTPNT1" | grep "^/" | head -2 | tail -1 | sed "s/ .*//g"`
+    [ "$OTHDEV2" = "$OTHDEV1" ] && OTHDEV2=""
+    OTHDEV3=`mount | grep -v " on $MNTPNT1" | grep "^/" | head -3 | tail -1 | sed "s/ .*//g"`
+    [ "$OTHDEV3" = "$OTHDEV2" -o "$OTHDEV3" = "$OTHDEV1" ] && OTHDEV3=""
+    MNT1=`mount | grep " on $MNTPNT1 " | head -1 | sed "s/.* on //g" | sed "s/ .*//g"`
+    MNT2=`mount | grep " on $MNTPNT2 " | head -1 | sed "s/.* on //g" | sed "s/ .*//g"`
+    MNT3=`mount | grep " on $MNTPNT3 " | head -1 | sed "s/.* on //g" | sed "s/ .*//g"`
+    [ "$DEBUG" ] && echo DBG::::DEV1=$DEV1 DEV2=$DEV2 DEV3=$DEV3 OTHDEV1=$OTHDEV1 OTHDEV2=$OTHDEV2 OTHDEV3=$OTHDEV3
+    if [ $UNMOUNT == 0 -a "$DEV1" -a  "$DEV2" -a  "$DEV3" ] ; then
+	    # Do nothing if third/last ${MNTPNTx} already mounted
+	    if [ ! "$QUIET" ] ; then
+		echo "MAX of three mounts already done with findzip/mz"
+		mount | grep $MNTPNT1
+	    fi
+return 1
+	    exit 1
+    fi
+    for TRYMNT in $ALLMNTS LAST ; do
+	[ "$DEBUG" ] && echo DBG::::DBG TRYMNT=$TRYMNT LASTMNT=$LASTMNT
+	mount | grep -q " on $TRYMNT " && continue
+#	else
+	FIRSTUSBDEV=`mount | grep " on $MNTPNT1 "`
+	SECONDUSBDEV=`mount | grep " on $MNTPNT2 "`
+	THIRDUSBDEV=`mount | grep " on $MNTPNT3 "`
+	[ "$SECONDUSBDEV" = "$FIRSTUSBDEV" ] && SECONDUSBDEV=""
+	[ "$DEBUG" ] && echo DBG::::FIRSTUSBDEV=$FIRSTUSBDEV SECONDUSBDEV=$SECONDUSBDEV THIRDUSBDEV=$THIRDUSBDEV
+	if [ $UNMOUNT -gt 0 ] ; then
+	    if [ "$THIRDUSBDEV" ] ; then
+		umount $DEV3
+		RESULT=$?
+		rmdir $ALLMNTS 2>/dev/null
+		test $RESULT == 0 && return 0
+		umount $DEV3
+		RESULT=$?
+		rmdir $ALLMNTS 2>/dev/null
+		return $RESULT
+	    elif [ "$SECONDUSBDEV" ] ; then
+		umount $DEV2
+		RESULT=$?
+		rmdir $ALLMNTS 2>/dev/null
+		test $RESULT == 0 && return 0
+		umount $DEV2
+		RESULT=$?
+		rmdir $ALLMNTS 2>/dev/null
+		return $RESULT
+	    elif [ "$FIRSTUSBDEV" ] ; then
+		umount $DEV1
+		RESULT=$?
+		rmdir $ALLMNTS 2>/dev/null
+		test $RESULT == 0 && return 0
+		umount $DEV1
+		RESULT=$?
+		rmdir $ALLMNTS 2>/dev/null
+		return $RESULT
+	    else
+		# OK, we're good nothing mounted
+		return 0
+	    fi
+	fi
+	# ASSERT: We are mounting UNMOUNT==0
+	[ "$DEBUG" ] && echo -e "DBG:::: Here with:\nMNTPNT1=$MNTPNT1 MNTPNT2=$MNTPNT2 MNTPNT3=$MNTPNT3\nFIRSTUSBDEV=$FIRSTUSBDEV\nSECOND=$SECONDUSBDEV THIRD=$THIRDUSBDEV\nUNMOUNT=$UNMOUNT"
+    
+	# look for mountable USB device with tarball first
+#	USBDEVS=`grep -i "Attached scsi removable disk" /var/log/messages | sed "s/.* disk //g" | sed "s/ .*//g" | sort -u`
+	USBDEVS=`egrep "sd[abcdefgh]: sd[abcdefgh][0-9]" /var/log/messages | sed "s/.* sd.: sd\([abcdefgh]\)[0-9].*/sd\1/g" | uniq`
+	[ "$DEBUG" ] && echo DBG:::: egrep \"sd[abcdefgh]: sd[abcdefgh][0-9]\" /var/log/messages \| sed \"s/.* sd.: sd\\\([abcdefgh]\\\)[0-9].*/sd\\1/g\" \| uniq
+	[ "$DEBUG" ] && echo DBG:::: "USBDEVS=$USBDEVS"
+	export THISMNT=$MNTPNT1
+	for USBDEV in $USBDEVS ZIPONLY ; do
+	[ "$DEBUG" ] && echo DBG:::: "USBDEV=$USBDEV USBDEV2=$USBDEV2"
+	    if [ ! "$USBDEV" = "ZIPONLY" ] ; then
+		[ "$DEBUG" ] && echo DBG:::: 0: USBDEV=$USBDEV USBMNT=$USBMNT
+		USBMNT=`grep "${USBDEV}: $USBDEV" /var/log/messages | tail -1 | awk '{print \$7}'`
+		[ "$USBMNT" ] || USBMNT=${USBDEV}1
+		USBDEV=/dev/$USBMNT
+		[ "$DEBUG" ] && echo DBG:::: 1: USBDEV=$USBDEV USBMNT=$USBMNT USBDEV2=$USBDEV2 FIRSTUSBDEV=$FIRSTUSBDEV
+		[ "$USBDEV" = "$OTHDEV1" -o "$USBDEV" = "$OTHDEV2" -o "$USBDEV" = "$OTHDEV3" ] && continue
+		[ "$USBDEV" = "$DEV1" -o "$USBDEV" = "$DEV2" -o "$USBDEV" = "$DEV3" ] && continue
+	    fi
+	    [ "$DEV1" ] && THISMNT=$MNTPNT2
+	    [ "$DEV2" ] && THISMNT=$MNTPNT3
+	    # Make $THISMNT dir if needed
+	    if [ ! -d $THISMNT ] ; then
+		if [ -e $THISMNT ] ; then
+		    usage exit "FATAL ERROR: ${THISMNT} should be a directory: `ls -al ${THISMNT}`"
+		fi
+		mkdir -p $THISMNT 2>/dev/null
+	    fi
+	    for dev in $USBDEV LAST ; do
+		[ "$dev" = "LAST" ] && break
+		[ "$dev" = "$DEV1" -o "$dev" = "$DEV2" -o "$dev" = "$DEV3" ] && continue
+		[ "$dev" = "$OTHDEV1" -o "$dev" = "$OTHDEV2" -o "$dev" = "$OTHDEV3" ] && continue
+		[ "$DEBUG" ] && echo DBG:::: trying mount $dev $THISMNT
+		mount $dev ${THISMNT} 2>/dev/null && break
+	    done
+	    if [ "$dev" = "LAST" ] ; then
+		for ltr in a b c d e f g h ; do
+		    for dev in /dev/sd${ltr}4 /dev/sd${ltr}1 /dev/sd${ltr} /dev/hd${ltr}4 /dev/hd${ltr}1 /dev/hd${ltr} LAST ; do
+			[ "$dev" = "LAST" ] && break
+			[ "$dev" = "$OTHDEV1" -o "$dev" = "$OTHDEV2" -o "$dev" = "$OTHDEV3" ] && continue
+			[ "$dev" = "$DEV1" -o "$dev" = "$DEV2" -o "$dev" = "$DEV3" ] && continue
+			[ "$DEBUG" ] && echo DBG:::: second trying mount $dev $THISMNT
+			mount $dev ${THISMNT} 2>/dev/null && break
+		    done
+		[ "$dev" = "LAST" ] || break
+		done
+	    fi
+	    [ "$DEBUG" ] && echo DBG:::: dev=$dev
+	    if [ "$dev" = "LAST" ] ; then
+		rmdir $THISMNT 2>/dev/null
+		continue
+	    fi
+	    mount | grep -q " on ${THISMNT} " && break
+	done
+	# Return OK (0) if mounted
+	break
+    done
+    [ "$DEBUG" ] && echo DBG:::: DBG: THISMNT=$THISMNT FIRSTUSBDEV=$FIRSTUSBDEV SECOND=$SECONDUSBDEV THIRD=$THIRDUSBDEV
+    export MNTPNT=$MNT1
+    [ "$MNT2" ]  &&  export MNTPNT=$MNT2
+    [ "$MNT3" ]  &&  export MNTPNT=$MNT3
+    mount | grep -q " on ${THISMNT} " && return 0
+    # Return err if not
+    return 1
+}
+
+# Here, if we see that we were called as something other than "findzip"
+# We just exit. This allows other scripts to source this one to get
+# findzipdev().
+#
+UNMOUNT=0
+if [ ! "`echo $0 | egrep \"uz$|findzip|mz$\"`" ] ; then
+#    exit 1
+    return
+fi
+if [ "`echo $0 | egrep \"uz|unfindzip\"`" ] ; then
+    UNMOUNT=1
+fi
+
+# Since we were not sourced then, we define our own PROG, VER and usage()
+PROG=`basename ${0}`
+
+usagetext="
+Usage: $PROG [-u] [-q]
+
+findzip tries to find a removable USB drive, using recent log entries
+in /var/log/messages to find the right device. If it cannot, it
+proceeds to try and find a ZIP drive. It can mount up to three distinct
+devices in this manner.
+
+Run with the -u option (or alternatively as the softlink unfindzip),
+it attempts to unmount the device it most recently mounted. When it
+unmounts the device, the mount point directory is also removed.
+
+If it finds one not already mounted, it is mounted as $MNTPNT1 or
+$MNTPNT2 or $MNTPNT3, whichever is first available. Then, this
+is output to stdout for those that are currently mounted, and the
+final line will be the most recently mounted mount point.
+
+             export MNTPNT1=/mnt/zip
+             export MNTPNT2=/mnt/zip2
+             export MNTPNT3=/mnt/zip3
+             export MNTPNT=(varies)
+
+The quiet (-q) option will suppress informational and error messages
+to stderr, so you will see only the appropriate lines as above. In
+non-quiet mode, you will see a \"ls -alrt\" output for each mounted
+device.
+
+$PROG returns 0 on success, 1 otherwise.
+
+You must be root to run $PROG.
+
+$PROG is a bash script, and other scripts can source $PROG to
+import (but not run) the function findzipdev. See $PROG source for
+more detail. When the script runs findzipdev() it will then have
+the MNTPNT* definitions for those that are mounted.
+"
+
+usage() {
+    [ "$1" = "exit" ] && EXIT=1 && shift
+    if [ "$1" = "-h" ] ; then
+	shift
+	[ "$ERRSTR" ] || ERRSTR="\nNOTE: \a THE NEW WAY REQUIRES NO UU*CODE NOR ANY E=\"ratpreargs\"!!!!"
+	echo -e "$usagetext"
+    fi
+    # We want -v output to be just two digits, so scrubver is #.#
+    # and suitever can have whole #.#.#.# in it.
+    if [ "$1" = "-v" ] ; then
+	shift
+    fi
+    echo "$PROG version $VER"
+    ERRSTR="${*}"
+    if [ "$ERRSTR" ] ; then
+	echo -e "\a${ERRSTR}"
+    fi
+    [ "$EXIT" ] && exit
+} # end usage
+
+
+MYDIR=`dirname $0`
+if [ ! -e "$MYDIR/unfindzip" ] ; then
+    ln -sf findzip $MYDIR/unfindzip
+    ln -sf findzip $MYDIR/mz
+    ln -sf findzip $MYDIR/uz
+fi
+
+QUIET=""
+while getopts hvqu optvar ; do
+  case "$optvar" in
+  v|h) usage exit -$optvar ;;
+  q)  QUIET="#QUIET " ;;
+  u)  UNMOUNT=1 ;;
+  *)  usage exit "Argument not recognized: $1"        ;;
+  esac
+done
+shift `expr $OPTIND - 1`
+
+ROOT=`id -u`
+
+if [ $ROOT != 0 ] ; then
+    [ "$QUIET" ] || echo You must be root 1>&2
+    exit 1
+fi
+findzipdev
+RESULT=$?
+[ "$DEBUG" ] && echo DBG:::: after first call to findzipdev RESULT=$RESULT QUIET=$QUIET UNMOUNT=$UNMOUNT MNTPNT1=$MNTPNT1
+if [ $UNMOUNT == 1 ] ; then
+    for mnt in $ALLMNTS ; do
+	if [ -d $mnt ] ; then
+	    MORE=""
+	    mount | grep -q " on ${mnt} " && MORE="This device is still mounted"	
+	    [ "$MORE" ] && echo "$MORE"
+	    echo ls -arlt $mnt 1>&2
+	    ls -arlt $mnt 1>&2
+	else
+	    echo $mnt unmounted and removed
+	fi
+    done
+    exit $RESULT
+fi
+[ "$DEBUG" ] && echo DBG:::: DBG: THISMNT=$THISMNT
+if [ ! "$THISMNT" ] ; then
+    [ "$DEBUG" ] && echo DBG:::: in secondfindzipdev
+    sleep 2
+    findzipdev
+    RESULT=$?
+fi
+[ "$DEBUG" ] && echo DBG:::: RESULT=$RESULT QUIET=$QUIET MNTPNT1=$MNTPNT1 MNTPNT2=$MNTPNT2 MNTPNT3=$MNTPNT3
+if [ ! "$QUIET" ] ; then
+    for mnt in $ALLMNTS ; do
+	[ "$DEBUG" ] && echo DBG:::: DBG mnt=$mnt
+	[ "$mnt" = "$THISMNT" ] && continue
+	if [ -d "$mnt" ] ; then
+	    echo ls -arlt $mnt 1>&2
+	    ls -arlt $mnt 1>&2
+	fi
+    done
+    # Show all mounted /mnt/zip* devices if not quiet mode regardless of whether 
+    # we just mounted
+    if [ "$THISMNT" -a -d "$THISMNT" ] ; then
+	echo ls -arlt $THISMNT 1>&2
+	ls -arlt $THISMNT 1>&2
+    fi
+    mount | grep "/mnt/zip" 1>&2
+fi
+# We show THISMNT last here since it's the most recently mounted
+if [ "$THISMNT" -a -d $THISMNT ] ; then
+    # We export MNTPNT as the most recently mounted one
+    export MNTPNT=$THISMNT
+fi
+if [ $RESULT != 0 ] ; then
+    [ "$DEBUG" ] && echo DBG:::: we in result not 0 but $RESULT
+    if [ "$FIRSTUSBDEV" ] ; then
+	MORE=" second"
+    fi
+    if [ "$SECONDUSBDEV" ] ; then
+	MORE=" third"
+    fi
+    if [ ! "$QUIET" ] ; then
+	echo no$MORE ZIP or USB media found 1>&2
+    fi
+fi
+if [ -d "$MNTPNT1" ] ; then
+  echo export MNTPNT1=$MNTPNT1
+  [ "$MNTPNT" ] || export MNTPNT=$MNTPNT1
+fi
+[ -d "$MNTPNT2" ] && echo export MNTPNT2=$MNTPNT2
+[ -d "$MNTPNT3" ] && echo export MNTPNT3=$MNTPNT3
+[ "$MNTPNT" ] && echo export MNTPNT=$MNTPNT
+df -h | grep zip && df -h | grep Avail
+exit $RESULT

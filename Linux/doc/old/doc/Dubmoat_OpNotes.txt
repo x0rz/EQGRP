@@ -1,0 +1,25 @@
+Slackware 7.0.0
+No standard release.
+
+OpenSSH_2.5.2p2
+Red Hat 7.1 (Seawolf)
+SHA1(7e413f2bcc711e83f135520491eb3a84d215d08c)
+DUBMOAT v1.0.0.6
+
+OpenSSH_3.4p1
+Red Hat 8.0 (Psyche)
+SHA1(53138c98ada1f6850ea41f480b896f10cb988183)
+DUBMOAT v1.0.0.4
+
+OpenSSH_3.5p1
+Red Hat 9 (Shrike)
+SHA1(19c427e5ecd9cd91d7226fdc7531593e59f6074b)
+DUBMOAT v1.0.0.1
+
+OpenSSH_3.7.1p2
+SuSE Linux 9.0 (i586)
+SHA1(3f2c421cc2c3769232ce23a878a7af55cb3373e5)
+DUBMOAT v1.0.0.7
+
+EOF
+

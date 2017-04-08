@@ -1,0 +1,77 @@
+#!/usr/bin/env perl
+# 23 MAR 2001 v1.0
+# 04 APR 2003 v2.0
+# 21 JAN 2004 v2.1 $gotone > 0 return value
+# 26 MAY 2006 v2.0.2.2 allow "." just before IP so cmdout/ files have IPs in them
+#
+# grepip dumps out valid IPs from its input, one per line
+# OPTIONS:
+#     -d    show dupes
+#     -s    show output sorted by IP
+#
+$VER="2.0.2.2";
+myinit() ;
+
+while (<>) {
+IP:  while( /(^|[^\d])((\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3}))($|[^.\d])/g ) {
+    foreach $octet ($3,$4,$5,$6) {
+      next IP if ($octet < 0 or $octet > 255) ;
+    }
+    $gotone++ ;
+    unless ($shown{$2}++ and !$showdupes) {
+      if ($sortthem) {
+	push(@ips,$2) ;
+      } else {
+	print "$2\n" unless $quiet;
+      }
+    }
+  }
+}
+if ($sortthem) {
+  foreach $ip (sort ipsort @ips) {
+    print "$ip\n" unless $quiet;
+  }
+}
+exit ($gotone > 0) ;
+sub ipsort {
+  local (@aoctets) = split(/\./,$a) ;
+  local (@boctets) = split(/\./,$b) ;
+  for (0..3) {
+    return $aoctets[$_] <=> $boctets[$_] unless $aoctets[$_] == $boctets[$_] ;
+  }
+  return 0 ;
+}
+sub usage {
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  print $usagetext unless $opt_v ;
+  print $vertext ;
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  exit;
+}
+sub myinit {
+  use File::Basename ;
+  require "getopts.pl";
+  $prog = basename $0 ;
+  $| = 1;
+
+  $vertext = "$prog version $VER\n" ;
+  $usagetext="
+Usage: $prog [-h]                    (prints this usage statement)
+
+$prog - A script that pulls and lists (one per line) all dotted
+	octet IPs from STDIN or from files given as parameters.
+
+  -q    Quiet - no output except errors and return value
+  -d    Duplicate IPs are not listed
+  -s    Show output sorted by IP
+
+$prog returns 0 if no IP is found, 1 if ANY IP is found.
+
+";
+  mydie("bad option(s)") if (! Getopts( "hvdsq" ) ) ;
+  $quiet = $opt_q;
+  usage if ($opt_h or $opt_v) ;
+  $showdupes = $opt_d ;
+  $sortthem++ if $opt_s ;
+} # end sub myinit
+

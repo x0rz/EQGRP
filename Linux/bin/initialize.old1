@@ -1,0 +1,285 @@
+#!/bin/bash
+#
+# Configures the nat box for operation
+#
+# Source function library.
+NC_IP_PORT=2
+NC_ISP_PORT=3
+TCPDUMP_FILE=/tmp/tcpdump_output
+IP_FILE=/tmp/ip_address
+IP_USED_FILE=/tmp/used_ips
+ISP_FILE=/tmp/isp_info
+VERSION=2.0.1.2
+
+. /etc/rc.d/init.d/functions
+
+flush ()
+{
+    /sbin/iptables -P INPUT ACCEPT
+    /sbin/iptables -P FORWARD ACCEPT
+    /sbin/iptables -P OUTPUT ACCEPT
+     
+    #
+    # reset the default policies in the nat table.
+    #
+    /sbin/iptables -t nat -P PREROUTING ACCEPT
+    /sbin/iptables -t nat -P POSTROUTING ACCEPT
+    /sbin/iptables -t nat -P OUTPUT ACCEPT
+     
+    #
+    # flush all the rules in the filter and nat tables.
+    #
+    /sbin/iptables -F
+    /sbin/iptables -t nat -F
+
+    #
+    # erase all chains that's not default in filter and nat table.
+    #
+    /sbin/iptables -X
+    /sbin/iptables -t nat -X
+     
+    #
+    # zero the packet and byte counters in all chains
+    #
+    /sbin/iptables -Z
+    /sbin/iptables -t nat -Z
+}
+
+usage()
+{ 
+    cat <<EOF
+Useage: {phone|lan} {start|stop|restart|reload|status} {lan:ip}
+        permphone start [destIP iface [gateway]]
+        permphone {stop|restart|reload|status}
+
+examples:
+    phone start
+    phone stop
+
+    permphone start
+    permphone start 12.34.56.78 eth0 42.42.42.1
+      (routes 12.34.56.78 via 42.42.42.1, out eth0)
+    permphone stop
+
+ppp ip address will be stored in $IP_FILE
+isp information will be stored in $ISP_FILE
+
+For permphone:
+  destIP: IP address for which to set up a static route
+   iface: interface for the static route
+ gateway: gateway for static route
+
+version $VERSION
+EOF
+
+[ "$1" ] || exit 1
+}
+
+if [ $# -lt 1 -o "${1:0:2}" = "-h" -o "$1" = "help" -o "${1:0:3}" = "--h" -o "${1:0:2}" = "-v" -o "${1:0:3}" = "--v" ] ; then
+    usage
+fi
+
+if [ ! -f /etc/ppp/ip-up.local ] ; then
+    echo 'missing ip-up.local'
+    exit 1
+fi
+
+#
+#    See how we were called, act accordingly.
+#
+
+case `basename $0` in
+    permphone)
+        case "$1" in
+            start)
+		HOST=$2
+		INTERFACE=$3
+		GATEWAY=$4
+		date -u
+                echo "Starting wvdial with permanent wvdial config file as follows:"
+                cat /etc/wvdial.perm.conf
+                wvdial --config /etc/wvdial.perm.conf &
+		waittime=0
+                until [ "`ifconfig ppp0 2>/dev/null | grep addr`" ]
+                do
+		  if [ $((waittime++)) -gt 300 ] ; then
+		    echo "BAILING! No ppp0 address for five minutes."
+		    exit 1
+		  fi
+                  sleep 1
+                done
+                sleep 2
+                IP=`/sbin/ifconfig ppp0 | grep "inet addr:" | cut -f2 -d":" | cut -f1 -d" "`
+                echo ${IP} > ${IP_FILE}
+                echo "`date -u` - dial complete, new IP is ${IP}" >> ${IP_USED_FILE}
+
+                #following no longer needed without separate dial/op boxes
+                #/usr/bin/nc -l -p ${NC_IP_PORT} < ${IP_FILE} &
+
+                echo "Your IP is ${IP}"
+
+                # Take care of a requested static route
+                if [ $# -ge 2 ] ; then
+                  routecmd="route add -host $HOST"
+                  if [ $# -ge 3 ] ; then
+                    routecmd="$routecmd dev $INTERFACE"
+                    if [ $# -ge 4 ] ; then
+                      routecmd="$routecmd gw $GATEWAY"
+                    fi
+                    $routecmd
+                    exitstatus=$?
+                    if [ $exitstatus = "0" ] ; then
+                      echo "route to $HOST thru interface $INTERFACE successfully added"
+                    elif [ $exitstatus = "7" ] ; then
+                      echo "route to $HOST thru interface $INTERFACE already exists"
+                    else
+                      echo "error adding route to $HOST thru interface $INTERFACE"
+                      sleep 3
+                    fi
+                  else
+                    echo "need to specify interface with static route, BAILING with no route added"
+                    exit 1
+                  fi
+                fi
+
+                # Set up default route to ppp0 if wanted/needed
+                if [ ! "`route -n | grep "^0.0.0.0" | grep ppp0`" ] ; then
+                    [ "$BOOTUP" = "color" ] && $SETCOLOR_WARNING
+                    echo 'You have no default route to ppp0!!'
+                    [ "$BOOTUP" = "color" ] && $SETCOLOR_NORMAL
+                    echo -n "Setting default route to ppp0 manually..."
+                    route del default
+                    route add default ppp0
+                    echo "done"
+                    netstat -rn
+                fi
+                for INTF in eth0 eth1 ; do
+                    ETHIP=`/sbin/ifconfig $INTF 2>/dev/null | grep "inet addr:" | cut -f2 -d":" | cut -f1 -d" "`
+                    [ "$ETHIP" ] || continue
+		    for PPPINTF in ppp0 ppp1 ; do
+			echo -e "\n\nAdding iptables rule denying traffic from $INTF out $PPPINTF via this command:\n\n"
+			RULE="/sbin/iptables -I OUTPUT --out-interface $PPPINTF -s $ETHIP -j DROP"
+			echo -e "\t$RULE\n\n"
+			$RULE || echo "CANNOT ADD RULE"
+		    done
+                done
+                /sbin/iptables -L OUTPUT -n -v
+                ;;
+              stop)
+                echo -n 'Stopping pppd: '
+                killproc pppd
+                echo
+                ;;
+              reload|restart)
+                ${0} stop
+                ${0} start
+                ;;
+              status)
+                /usr/local/sbin/ids_start status
+                ;;
+              *)
+                usage
+        esac
+        ;;
+
+    phone)
+        case "$1" in
+            start)
+                echo -n "
+Starting wvdial (see vi xterm just started): "
+		cat /dev/null > /tmp/clocksync.log
+                /usr/X11R6/bin/xterm -e /usr/local/sbin/setupisp &
+
+                until [ "`ifconfig ppp0 2>/dev/null | grep addr`" -o ! "`ps -ef | grep setupisp | grep -v grep`" ]
+                do
+                  sleep 1
+                done
+                echo ""
+                [ "`ifconfig ppp0 2>/dev/null | grep addr`" ] || exit 
+                echo_success
+                echo ""
+
+                IP=`/sbin/ifconfig ppp0 | grep "inet addr:" | cut -f2 -d":" | cut -f1 -d" "`
+                echo ${IP} > ${IP_FILE}
+
+                echo "Your IP is ${IP}"
+                if [ ! "`route -n | grep "^0.0.0.0" | grep ppp0`" ] ; then
+                    [ "$BOOTUP" = "color" ] && $SETCOLOR_WARNING
+                    echo 'You have no default route to ppp0!!'
+                    [ "$BOOTUP" = "color" ] && $SETCOLOR_NORMAL
+                    echo -n "Do you want to set default to ppp0? [Y] "
+                    read ans
+                    if [ ! "$ans" -o "$ans" = "y" -o "$ans" = "Y" ] ; then
+                        route del default
+                        route add default ppp0
+                        echo "OK. Route added"
+                        netstat -rn
+                    else
+                        echo "OK. not adding route.  good luck"
+                    fi
+                fi
+                ;;
+              stop)
+                #echo -n "stopping nc"
+                #kill -9 `pidofproc /usr/bin/nc`
+                #killproc /usr/bin/nc
+                echo
+                echo -n 'Stopping pppd: '
+                killproc pppd
+                echo
+                ;;
+              reload|restart)
+                ${0} stop
+                ${0} start
+                ;;
+              status)
+                /usr/local/sbin/ids_start status
+                ;;
+              *)
+                usage
+        esac
+        ;;
+    lan)
+        case "$1" in
+            start)
+                echo "option deprecated..."
+                exit 1
+                if [ $# -ne 2 ] ; then
+                    echo 'You must at least specify an IP address when starting on a lan.'
+                    usage
+                fi
+                echo ${2} > ${IP_FILE}
+                #/usr/bin/nc -l -p ${NC_IP_PORT} < ${IP_FILE} &
+
+                echo 'configuring lan'
+                /bin/bash /usr/local/sbin/nat_scrubhands ${2} 
+                echo 'Starting nat'
+                /usr/local/sbin/nat_start eth0
+                /usr/local/sbin/ids_start start eth0 ${2} ${TCPDUMP_FILE}
+                ;;
+            stop)
+                echo "option deprecated..."
+                exit 1
+                echo -n 'stopping nc'
+                killproc /usr/bin/nc
+                echo
+                echo 'Stopping nat'
+                flush
+                /usr/local/sbin/ids_start stop ${TCPDUMP_FILE}
+                ;;
+            reload|restart)
+                $0 stop
+                $0 start
+                ;;
+            status)
+                /usr/local/sbin/ids_start status
+                ;;
+            *)
+                usage
+        esac
+        ;;
+    *)
+        usage
+esac
+
+exit 0

@@ -1,0 +1,114 @@
+#!/bin/bash
+VER=1.0.0.2
+if [ "${1:0:1}" = "/" ] ; then
+    DIR="$1"
+    shift
+else
+    DIR=/current/down
+fi
+NAM1=$1
+shift
+NAM2=$1
+
+die() {
+    ERR=1
+    if [ "$1" -a ! "`echo $1 | tr -d '0-9'`" ] ; then
+	ERR=$1
+	shift
+    fi
+    echo -e "$*"
+    exit $ERR
+    exit
+    exit
+}
+
+rmemptydirs() {
+    STR="$1"
+    [ "$STR" ] || STR=$NAM1
+    if [ "$STR" ] ; then
+	COUNT=0
+	OLDCOUNT=`find . -type d | grep "$STR" | wc -l`
+	while [ $OLDCOUNT -gt 0 ] ; do
+	    rmdir -v `find . -type d | grep "$STR"` 2>/dev/null
+	    COUNT=`find . -type d | grep "$STR" | wc -l`
+	    [ $COUNT -lt $OLDCOUNT ] || break
+	    OLDCOUNT=$COUNT
+	done
+    fi
+}
+
+usage() {
+  cat <<EOF
+Usage:    mergetargets [DIR] HOSTNAME.WRONGIP  HOSTNAME.RIGHTIP
+
+This program starts in DIR (which defaults to /current/down) and
+renames all files and directories beneath there containing HOSTNAME.WRONGIP
+to ones containing HOSTNAME.RIGHTIP.
+
+If a filename already exists in a HOSTNAME.RIGHTIP directory, the old file
+is prefaced with the string "extra."
+
+mergetargets v. $VER
+EOF
+  exit
+}
+
+if [ "$NAM1" -a "$NAM2" ] ; then
+    echo -e "\n\n"
+    echo -e "Moving/renaming all $NAM1"
+    echo -e "                 to $NAM2\n"
+    echo -e "in and beneath $DIR\n\n"
+else 
+  usage
+fi
+
+cd $DIR || die 2 Cannot cd to $DIR
+
+rmemptydirs
+
+find . | grep -q "$NAM1" || die 3 There are no $NAM1 files/dirs
+
+for dir in `find . -type d | grep "$NAM1"` ; do
+    [ -d "$dir" ] || continue
+    NEW=`echo "$dir" | sed "s/$NAM1/$NAM2/g"`
+    if [ ! -e "$NEW" ] ; then
+	mkdir -vp "$NEW" && touch -r "$dir" "$NEW"
+    fi
+    if [ -d "$NEW" ] ; then
+	for file in `cd "$dir" ; ls -A` ; do
+	    [ -f "$dir/$file" ] || continue
+	    EXT=""
+	    while [ -e "$NEW/$EXT$file" ] ; do
+		EXT="extra.$EXT"
+	    done
+	    echo DOING: mv -v "$dir/$file" "$NEW/$EXT$file"
+	    mv -v "$dir/$file" "$NEW/$EXT$file" || break
+	done
+    else
+	die 8 Required new directory $NEW exists as a file already, rename it and try again.
+echo WTF
+    fi
+done
+
+rmemptydirs
+
+find . -type d | grep "$NAM1" && die 9 A directory rename failed, uparrow and try again.
+
+
+
+find . -type f | grep "$NAM1" | while read file ; do
+    NEWDIR=`dirname "$file" | sed "s/$NAM1/$NAM2/g"`
+    NEWNAME=`basename "$file" | sed "s/$NAM1/$NAM2/g"`
+    EXT=""
+    while [ -e "$NEWDIR/$EXT$NEWNAME" ] ; do
+	EXT="extra.$EXT"
+    done
+    [ -d "$NEWDIR" ] || mkdir -vp "$NEWDIR"
+    [ -d "$NEWDIR" ] || die 4 "Cannot make NEWDIR=$NEWDIR="
+    mv -v "$file" "$NEWDIR/$EXT$NEWNAME" || die 5 Failed:  mv -v $file $EXT$NEW
+done
+
+rmemptydirs
+
+
+echo done

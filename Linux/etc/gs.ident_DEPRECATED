@@ -1,0 +1,7 @@
+#NOGS
+-ls /etc/*release* -nohist
+-cat /etc/*release* -nohist
+-get /etc/*release* -nohist
+-ls /usr/lib/setup/slack-version-* -nohist
+-cat /usr/lib/setup/slack-version-* -nohist
+-get /usr/lib/setup/slack-version-* -nohist

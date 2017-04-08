@@ -1,0 +1,934 @@
+#!/bin/bash
+#Fri Jul 19 17:49:33 GMT 2013
+
+# GLOBALS
+VER=1.5.0.1
+Directory="/home/black/tmp/"
+PUSHEDDIR=/root/PUSHED/
+NOTPUSHEDDIR=/root/NOTPUSHED/
+DONEDIR=${Directory}DONE/
+OUTDIR=/tmp
+
+suite=$(cat \/suite.txt 2>/dev/null)
+dbgfile=/root/dammit
+PROG=`basename $0`
+ANS=
+PROMPT=
+COLOR_SUCCESS="\\033[1;32m"
+COLOR_FAILURE="\\033[1;31m"
+COLOR_WARNING="\\033[1;33m"
+COLOR_NORMAL="\\033[0;39m"
+COLOR_NOTE="\\033[0;34m"
+
+
+[ -d "/current/tmp" ] && OUTDIR=/current/tmp
+
+# this allows clearing dbgfile variable to turn off debug.
+[ "$dbgfile" ] && touch "$dbgfile"
+[ -f "$dbgfile" ] || dbgfile=""
+
+# Functions must be defined before they are called
+dbg() {
+  [ "$dbgfile" ] && echo -e "DBG: `date`: $*" >> $dbgfile
+}
+
+waitgoodbye() {
+        C=0
+        while true ; do
+                grep -q "221 Goodbye" $OUTFILE && note FTP SESSION COMPLETE && break
+                sleep 2
+                C=$(((C+2)%45))
+                [ $C -lt 2 ] && note "$COLOR_FAILURE\nSTILL WAITING for FTP session to $HOST as USERNAME=$USERNAME to complete$COLOR_NORMAL"
+        done
+}
+
+waitlogin() {
+        C=0
+        while true ; do
+                grep -q "530 Login incorrect" $OUTFILE && note INVALID LOGIN TRYING AGAIN && killall ftp && break
+                grep -q "230 Login successful" $OUTFILE && note LOGIN SUCCESSFUL && break
+                sleep 2
+                C=$(((C+2)%45))
+                [ $C -lt 2 ] && note "$COLOR_FAILURE\nSTILL HUNG trying to connect to $HOST as USERNAME=$USERNAME$COLOR_NORMAL"
+        done
+}
+
+reuse() {
+    if [ "$REUSE" ] ; then
+        FILE=$1
+        if [ "$FILE" ] ; then
+            if [ -f "$FILE" -a -f "$FILE.md5" ] ; then
+                MD5=`cat $FILE.md5 | awk '{print $1}'`
+                [ -x /current/bin/getopdata ] &&  \
+                    /current/bin/getopdata setvar fg_reuse.$MD5. $FILE
+            fi
+        fi
+    fi
+}
+
+notered() {
+    # Use only for errors.
+    # Logs output in $ERRFILE also
+    if [ "$1" = "-n" ] ; then
+      N=$1
+      shift
+    fi
+    echo -e $N "\a$COLOR_FAILURE${*}$COLOR_NORMAL" | tee -a $ERRFILE
+    [ "$dbgfile" ] && echo -e $N "\a$COLOR_FAILURE${*}$COLOR_NORMAL" >> $dbgfile
+    sleep 1
+    unset N
+}
+
+note() {
+    unset SAYIT ERR
+    [ "$QUIET" ] || SAYIT=yes
+    [ "$1" = "LOUD" ] && SAYIT=yes && shift
+    [ "$1" = "ERR" ] && ERR=yes && shift
+    if [ "$SAYIT" ] ; then
+        if [ "$1" = "-n" ] ; then
+            N=$1
+            shift
+        fi
+        if [ "$ERR" ] ; then
+            [ "$dbgfile" ] && echo -e $N "$COLOR_NOTE${*}$COLOR_NORMAL"  >> $dbgfile
+            echo -e $N "$COLOR_NOTE${*}$COLOR_NORMAL"  1>&2
+        else
+            echo -e $N "$COLOR_NOTE${*}$COLOR_NORMAL"  
+            [ "$dbgfile" ] && echo -e $N "$COLOR_NOTE${*}$COLOR_NORMAL"  >> $dbgfile
+        fi
+        unset N
+    fi
+}
+
+die() {
+  notered "$*\n"
+  # If clicked to start, we pause before exiting (closing terminal window)
+  unset QUIET
+  if [ "$CLICKEDON" ] ; then
+    while [ ! "$NOXWAIT" ] ; do
+        note Hit RETURN to exit
+        read blah
+        [ "$blah" ] && \
+            note "\n\nI said hit RETURN....not $blah....\n\n" && \
+            sleep 1 && \
+            continue
+        break
+    done
+  fi;
+  exit 1
+}
+ 
+CLICKEDON=`pschain 2>&1 | egrep "gnome-terminal.*Desktop|popup"`
+
+
+usage() {
+  if [ "$1" != "-v" ] ; then
+    USTR="$PROG [OPTIONS] [dir|path-to-file] [ds|slow|fast|emerg]"
+    [ "$EGGMODE" ] && USTR="$PROG [EGGFILE]"
+    [ "${PROG:5:6}" = "what" ] && USTR="$PROG [OPTIONS] [dir|path-to-file] [ds|slow|fast|emerg]
+       $PROG [egg] EGGFILE"
+    cat <<EOF
+Usage: $USTR
+
+If a directory "dir" is provided, only that location examined for *.bz2
+files. Otherwise, $PROG looks for ALL ${Directory}*/*bz2 files. 
+
+If a full path to a file is given, push that file and only that file
+(implies NOZIP mode).  However, if that file contains special characters,
+the file will be packaged into a tar archive with a safe file name and 
+pushed that way.
+
+OPTIONS (case sensitive, any order)
+
+ MIDOP    With the argument "MIDOP", force MIDOP mode, i.e., still mid-op,
+          do not move directories around.
+
+ NOMOD    No pushed files will get the infix/suffix -L-##-YYYYMMDD-HHMM
+          (where ## is the suite #). Default DOES do that.
+
+ NOZIP    With "NOZIP" option, any *.bz2 files found in an op directory
+          are pushed as is rather than put inside a .zip file first.
+
+ REUSE    With "REUSE" option, the file pushed and its MD5 checksum will be
+          labeled in subsequent freshstep_tracker_ records sent as a file to
+          be reused on a later op. FG will then know not to rescan that file.
+
+ FORCE    With the "FORCE" argument, the prompt about whether to
+          push is skipped, but only in EGGMODE or when a single file
+          is being sent. (Implies NOZIP mode also.)
+
+ NOXWAIT  Use with FORCE if you want the popped xterms to disappear when done.
+          Useful for unattended runs.
+
+ QUIET    Less output is shown.
+
+DEFAULT MODE:
+For each such directory in which one or more *bz2 files exists, all *bz2
+files in that directory, as well as any ./down/op.done.by* files there,
+will be put in a single .zip file in that location, then that .zip file
+will be pushed to the monkey.
+
+If any are found, you are asked which you want to push forward. Those 
+are pushed (inside their .zip files unless NOZIP was used) and then
+moved to $PUSHEDDIR. Any you do not push are moved to $NOTPUSHEDDIR.
+
+If you are still mid-op, $PROG exits after pushing. If your op is over,
+$PROG will move your OP directory in $Directory to
+$DONEDIR.
+
+In egg mode, the source file EGGFILE is required and it is pushed to a
+different directory destination. ("copy-egg FILE" is the same as
+"copy-what FILE egg").
+
+EOF
+    [ "${PROG:5:6}" = "what" ] && cat <<EOF
+If no mode (ds, fast, slow, emerg or egg) is given on command line, the defaultis slow.
+
+If $PROG is called via a link called copy-MODE, for a valid mode, it
+works in that mode.
+
+EOF
+  fi
+  echo $PROG v. $VER
+  exit 1
+}
+
+getanswer() {
+    [ "$*" ] && PROMPT="$*"
+    [ "$PROMPT" ] || PROMPT="What is your our answer?"
+    [ "$DEFAULT" ] && PROMPT="$PROMPT [$DEFAULT] "
+    echo -en "$PROMPT"
+    read ANS
+    [ ! "$ANS" ] && ANS=$DEFAULT
+    unset DEFAULT PROMPT
+}
+
+namemod() {
+    name=$1
+    [ "$NEVERMOD" ] && NOMOD=yes
+    if [ "$NOMOD" ] ; then
+        name2=$name
+    else
+        myday="$day"
+        if [ ! "$suite" ] && grep -q Getopts.*H /current/bin/getopdata ; then
+            [ "$suite" ] || suite=`/current/bin/getopdata -H viacopy-$WHICHPATH 2>/dev/null`
+        fi
+        if [ ! "$suite" ] && grep -q Getopts.*H /usr/local/bin/scrubhands ; then
+            [ "$suite" ] || suite=`getopdata -H viacopy-$WHICHPATH 2>/dev/null`
+        fi
+        [ "$suite" ] || suite=`cat /root/suiteloc.txt 2>/dev/null`;
+        mysuite="$suite"
+        [ "$day" ] || myday=$(date +%G%m%d-%H%M)
+        [ "$suite" ] || mysuite=SUITEUNKNOWN
+        # we only remove the timestamp right before extension (.), if any
+        # First with 4 digit time
+        name2=`echo $name | sed "s/[_\-]*[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]\-[0-9][0-9][0-9][0-9]\././g"`
+        # Now with 6 digit time
+        name2=`echo $name | sed "s/[_\-]*[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]\-[0-9][0-9][0-9][0-9][0-9][0-9]\././g"`
+        # Remove a -L-## anywhere
+        name2=`echo $name2 | sed "s/-*[WL]\-[0-9]*//g"`
+        if [ "$name" != "$name2" ] ; then
+            name2=`echo $name2 | sed "s/\.\.*/./g"`
+            note ERR "Removing old date (only last one) and suite information from name:"
+            note ERR "was=$name"
+            note ERR "now=$name2"
+            name=$name2
+        fi
+        # Now inject $day before the extension.
+        if echo $name | grep -q ".tar.bz2$" ; then
+            name2=`echo $name | sed "s/\.tar\.bz2$/\-L\-$mysuite\-$myday.tar.bz2/"`
+        elif echo $name | grep -q "\.." ; then
+            name2=`echo $name | sed "s/\(.*\)\.\([^\.]*\)$/\1-L-$mysuite-$myday.\2/g"`
+        elif echo $name | grep -q ".zip$" ; then
+            name2=`echo $name | sed "s/\.zip$/-L-$mysuite-$myday.zip/"`
+        elif echo $name | grep -q ".bz2$" ; then
+            name2=`echo $name | sed "s/\.bz2$/-L-$mysuite-$myday.bz2/"`
+        else
+            name2=`echo $name | sed "s/$/-L-$mysuite-$myday/"`
+        fi
+    fi
+    unset myday mysuite
+    echo $name2
+}
+
+
+
+
+# ARG: Remaining args may be speed and/or dir/file.
+# defaults to slow.
+# Anything else, we call usage
+EGGMODE=""
+export WHICHPATH=""
+LOOPCOUNT=0
+ORIGARGS="$*"
+NOZIP=""
+[ "$NEVERMOD" ] || NEVERMOD=""
+if [ "${PROG:5:4}" != "what" ] ; then
+    STR="${PROG:5:6}"
+    [ "$STR" = "egg" -o \
+        "$STR" = "ds" -o \
+        "$STR" = "slow" -o \
+        "$STR" = "fast" -o \
+        "$STR" = "emerg" ] && WHICHPATH=$STR
+fi
+
+[ "$WHICHPATH" = "egg" ] && EGGMODE=yes
+[ "$WHICHPATH" ] || WHICHPATH=slow
+
+
+# Set this to try alternate creds/site
+[ "$ALT" ] || ALT=""
+export ALT
+
+while [ "$1" ] ; do
+    LOOPCOUNT=$((LOOPCOUNT+1))
+    NOMOD=""
+    LC1=`echo "$1" | tr 'A-Z' 'a-z'`
+
+    if echo "$LC1" | grep -q freshstep_tracker ; then
+        NOMOD=yes
+    fi
+
+    [ "$LC1" = "-v" ] && usage -v
+    [ "$LC1" = "-h" ] && usage
+    [ "${LC1:0:3}" = "alt" ] && ALT=yes && shift && continue
+    [ "$LC1" = "reuse" ] && REUSE=yes && shift && continue
+    [ "$LC1" = "nozip" ] && NOZIP=yes && shift && continue
+    [ "$LC1" = "nomod" ] && NEVERMOD=yes && shift && continue
+    [ "$LC1" = "quiet" ] && QUIET=yes && shift && continue
+    [ "$LC1" = "midop" ] && FORCEMIDOP=yes && MIDOP=yes && shift && continue
+    [ "$LC1" = "force" ] && FORCEPUSH=yes && NOZIP=yes && shift && continue
+    [ "$LC1" = "noxwait" ] && NOXWAIT=yes && shift && continue
+    if [ ! "$WHICHPATH" ] ; then
+        if [ "$LC1" = "egg" -o \
+            "$LC1" = "ds" -o \
+            "$LC1" = "slow" -o \
+            "$LC1" = "fast" -o \
+            "$LC1" = "emerg" ] ; then
+            WHICHPATH=$LC1 && shift && continue
+        fi
+    else
+        if [ "$LC1" = "egg" -o \
+            "$LC1" = "ds" -o \
+            "$LC1" = "slow" -o \
+            "$LC1" = "fast" -o \
+            "$LC1" = "emerg" ] ; then
+            # If $LC1 is same as copy-$STR, never mind, if different die horribly.
+            [ "$LC1" = "$WHICHPATH" ] || \
+                die "Use either \"copy-what $1\" or \"copy-$WHICHPATH\", not \"copy-$WHICHPATH $1\""
+        fi
+    fi
+    # Optional first arg, if a dir or a file, is our ONETARG to process
+    if [ -d "$1" -o -f "$1" ] ; then
+        # Note this ignores all files/dirs on command line except LAST ONE
+        ONETARG=$1
+        if echo "$ONETARG" | grep -q freshstep_tracker ; then
+            NOMOD=yes
+        fi
+    else
+        notered "Ignoring unrecognized options (not a file or directory): $1"
+    fi
+    # Infinite loops are bad, as are too many args. 
+    [ $LOOPCOUNT -gt 9 ] && die "Too many arguments: $ORIGARGS"
+    shift
+done
+
+
+
+if [ "$WHICHPATH" = "egg" ] ; then
+        PATHNUM=1
+elif [ "$WHICHPATH" = "ds" ] ; then
+        PATHNUM=2
+elif [ "$WHICHPATH" = "slow" ] ; then
+        PATHNUM=3
+elif [ "$WHICHPATH" = "fast" ] ; then
+        PATHNUM=4
+elif [ "$WHICHPATH" = "emerg" ] ; then
+        PATHNUM=5
+else
+        usage
+fi
+
+# We save this off to try as we alternate back and forth on failure later
+TRYPATHNUM=$PATHNUM
+
+export PATHNUM TRYPATHNUM
+
+# ASSERT: WHICHPATH IS SET AND ACCURATELY MATCHES EXACTLY ONE OF THESE
+
+
+ERRFILE="/tmp/copy-${WHICHPATH}.err"
+
+note "\n\n$PROG v.$VER in $WHICHPATH mode"
+note "\n\nCalled as: $0 $ORIGARGS"
+#----------- Data extraction script ------
+day=$(date +%G%m%d-%H%M)
+
+#---------------------------- gzip the files 
+
+
+[ -f "$ONETARG" ] && ONEFILEONLY=yes && NOZIP=yes && FORCEMIDOP=yes
+[ "$FORCEMIDOP" ] && MIDOP=yes
+
+
+[ "$EGGMODE" -a "$ONETARG" -a ! -e "$ONETARG" ] && die Egg $ANS does not exist
+[ "$FORCEPUSH" -a ! "$ONETARG" ] && die FORCEPUSH can only be used on a single file
+[ "$FORCEPUSH" -a ! -f "$ONETARG" ] && die FORCE push can only be used on a single file
+[ "$FORCEPUSH" -a ! "$EGGMODE$ONEFILEONLY" ] && die FORCE push can only be used on a single file or in EGGMODE
+
+
+FILENAMEFIX=`basename "$ONETARG" | tr -d -- '-a-zA-Z0-9:._' | sed "s,\n$,,g"`
+
+if [ -f "$ONETARG" -a "$FILENAMEFIX" ] ; then
+        ls -al "$ONETARG"
+        OLDTARG="$ONETARG"
+        note "\n\nThis file has odd characters. We are packaging it in a tar archive and sending that."
+        echo "$ONETARG" | grep -q / || ONETARG=./$ONETARG
+        TARTARG=`dirname "$ONETARG"`/FILE_IS_INSIDE_`basename "$ONETARG" | tr -dc -- '-a-zA-Z0-9:._'`.tar
+        tar cvf $TARTARG "$ONETARG"
+        mv -v "$OLDTARG" ~/PUSHED/`basename "$ONETARG"`.tarpushed
+        ONETARG=$TARTARG
+fi
+
+
+mkdir -p $DONEDIR $PUSHEDDIR $NOTPUSHEDDIR || \
+ die Cannot mkdir $DONEDIR $PUSHEDDIR $NOTPUSHEDDIR 
+
+# Check to make sure the directory is valid before scanning through it
+if [ ! -d $Directory ]; then
+        die "Sorry but $Directory is an invalid directory"
+fi
+
+# Are we mid-op still?
+if [ ! "$FORCEMIDOP" ] ; then
+    ps -efwwwwwwwwww | grep -v grep 2>/dev/null | egrep -q "tcpdump.raw|script -af"  && MIDOP=yes
+
+    [ "$EGGMODE" ] && MIDOP=yes
+
+    if [ "$MIDOP" -a ! "$EGGMODE$FORCEPUSH" ] ; then
+        TESTMIDOP=`ps -efwwwwwwwwww | grep -v grep 2>/dev/null | egrep "OP-DETAILS|script .*script"`
+        if [ ! "$TESTMIDOP" ] ; then
+            DEFAULT=Y getanswer "\n\n\nThere are no scripted windows, is your op done?"
+            if [ "${ANS:0:1}" = "n" -o "${ANS:0:1}" = "N" ] ; then
+                note "\n\nYour pushed data will end up in /root/PUSHED, your op data"
+                note "will remain in /current/*"
+            else
+                MIDOP=""
+            fi
+        fi
+    fi
+fi
+
+cd $Directory
+
+DIRLIST=""
+# Prepare for our for statement
+TARGEXT=.bz2
+ONEDIR=""
+OPSDIRS=`ls -1 | egrep -v "pcaps|DONE"`
+[ "$ONETARG" ] && OPSDIRS="$ONETARG"
+PLURAL=s
+
+if [ "$EGGMODE" ] ; then
+    if [ ! "$ONETARG" ] ; then
+        DEFAULT=ABORT getanswer "Enter full pathname of the egg:"
+        [ "$ANS" = "ABORT" ] && die
+        FP=$ANS
+        FN=`basename $ANS 2>/dev/null`
+        if [ ! "$FP" -o ! -f $FP ] ; then
+            die "Egg \"$FP\" does not exist"
+        fi
+        LEN=`echo $FN | wc -c`
+        if [ "$FN" != "ABORT" -a $LEN -lt 12 ] ; then
+            DEFAULT="" getanswer "Your filename is pretty short, you should\nenter some identifying string to append to it:"
+            if [ "$ANS" ] ; then
+                ANS=`echo "$ANS" | tr -- '/ ' '-_'`
+note COPYING:                cp -pv $FP ${FP}_$ANS
+                cp -pv $FP ${FP}_$ANS
+                FP="${FP}_$ANS"
+                FN="${FN}_$ANS"
+            fi
+        fi
+        ONETARG="$FP"
+    fi
+    [ -f "$ONETARG" ] || die "In egg mode, required argument must be a file"
+    OPSDIRS="`dirname $ONETARG`"
+    TARGEXT="`basename $ONETARG`"
+    [ -d "$OPSDIRS" ] || die "In egg mode, required argument must be a file"
+    [ -f "$OPSDIRS/$TARGEXT" ] || die "In egg mode, required argument must be a file"
+    PLURAL=""
+else
+     if [ -d "$ONETARG" ] ; then
+        OPSDIRS="$ONETARG"
+        ONEDIR="$ONETARG"
+        FORCEPUSH=""
+     elif [ -f "$ONETARG" ] ; then
+        PLURAL=""
+        OPSDIRS=`dirname "$ONETARG"`
+        TARGEXT=`basename "$ONETARG"`
+        FORCEPUSH=yes
+     fi
+
+fi
+
+
+
+[ "$EGGMODE" ] || \
+    note "\n\n\nProcessing $TARGEXT file$PLURAL."
+[ "$MIDOP$EGGMODE$ONEFILEONLY" ] || note "\n\nFiles you DO NOT PUSH will be put in $NOTPUSHEDDIR\n\n"
+
+[ "$FORCEPUSH" ] && \
+    note "\n\nFORCE PUSHING, no prompts to confirm it."
+
+[ "$EGGMODE" ] && \
+    note "\n\nProcessing egg file $TARGEXT."
+
+[ "$ONEFILEONLY" ] && \
+    note "\n\nProcessing ONLY the file $ONETARG."
+
+# Set FTP variables
+[ "$HOST" ] || HOST=10.0.139.12
+USERNAME=anonymous
+PASSWD=anonymous
+
+DESTDIR=$WHICHPATH
+PUTWHAT=*.zip
+[ "$NOZIP$FORCEPUSH" ] && PUTWHAT=*$TARGEXT
+OUTFILE="$OUTDIR/copy-${WHICHPATH}.out"
+# If the file /current/etc/.oprc or failing that /root/.oprc is non-empty, reset vars from it.
+# E.g., that file can contain a different HOST for the FTP server. 
+# DO NOT put anything like WHICHPATH in there tho, that would be silly.
+RCFILE=/root/.oprc
+if [ -s /current/etc/.oprc ] ; then
+    RCFILE=/current/etc/.oprc
+    diff /current/etc/.oprc /root/.oprc >/dev/null  || cp -pv /current/etc/.oprc /root/.oprc
+fi
+if [ -s $RCFILE ] ; then
+    [ `grep USERNAME $RCFILE 2>/dev/null | wc -l` -lt 5 ] && die "This script requires "
+    . $RCFILE
+fi
+
+
+FOUNDSOME=
+PUSHEDSOME=
+# Begin our for statement
+for OPDIR in $OPSDIRS ; do
+        # Check if $FILE is a directory
+        if [ -d $OPDIR ]; then
+                # Check if the directory is readable
+                if [ -r $OPDIR ]; then
+                        # Previous failed pushes may have stranded .md5 or op.done.by* files here we wipe them
+                        rm -vf $OPDIR/*.md5 $OPDIR/op.done.by*
+                        # Move these aside, they gets in the way
+                        TEST=`ls -al $OPDIR/uls_*bz2 $OPDIR/{jscanner*,FW*}.zip 2>/dev/null | wc -l`
+                        if  [ $TEST -gt 0 ] ; then
+                             THIS=this
+                             ITGETS="it gets"
+                             [ $TEST -gt 1 ] && THIS=these ITGETS="they get"
+                             note moving $THIS aside $ITGETS in the way:
+                             mkdir -p $OPDIR/opzips
+                             mv -v $OPDIR/uls_*bz2 $OPDIR/{jscanner*,FW*}.zip $OPDIR/opzips 2>/dev/null
+                        fi
+
+                        # Put the op.done.by* files in $OPDIR, crushing any there unless $NOZIP
+                        if [ ! "$NOZIP" ] ; then
+                            note Including this inside .zip file:
+                            /bin/cp -v $OPDIR/down/op.done.by* $OPDIR 2>/dev/null
+                        fi
+                        INLIST=""
+
+                        TARBALLS=`cd $OPDIR ; ls -d *$TARGEXT 2>/dev/null`
+                        #[ "$EGGMODE" ] && TARBALLS=$ONETARG
+                        [ "$EGGMODE" ] && TARBALLS=$TARGEXT
+
+                        note TARBALLS= set to: $TARBALLS
+
+                        [ ! "$TARBALLS" ] && notered "Op dir $OPDIR has no *$TARGEXT files, skipping it" && continue
+                        TARGETNAME=""
+                        for name in $TARBALLS ; do
+                            NOMOD=""
+                            if echo "$name" | grep -q freshstep_tracker ; then
+                                NOMOD=yes
+                            fi
+
+
+                            name2=`namemod $name`
+                            if [ "$name2" -a ! "$name" = "$name2" ] ; then
+                                note Modifying file name $name to add suite/date:
+                                echo "RUNNING: (cd $OPDIR ; mv -v $name $name2)"
+                                (cd $OPDIR ; mv -v $name $name2)
+                                name=$name2
+                                # We leave TARGEXT the same if ONEDIR is set
+                                # may be several files here, all *$TARGEXT files
+                                [ "$ONETARG" -a ! "$ONEDIR" ] && TARGEXT=$name2
+                            fi
+                            MORE=" and/or op.done.by* file(s)"
+                            [ "$ONEFILEONLY$EGGMODE" ] && MORE=""
+                            note "\n\n\n$TARGEXT$MORE found in $OPDIR:"
+                            # Here we do an ls within $OPDIR, it makes more sense to the user
+                            (cd $OPDIR ; ls -alht `basename $name` op.done.by* 2>/dev/null)
+                            [ "$FORCEPUSH" ] || DEFAULT=Y getanswer "\nDo you want to PUSH above file(s) to ${WHICHPATH}monkey?"
+                            [ "$FORCEPUSH" ] && ANS=y
+                            if [ "${ANS:0:1}" = "y" -o "${ANS:0:1}" = "Y" ] ; then
+                                [ "$INLIST" ] || DIRLIST="$DIRLIST $OPDIR"
+                                INLIST=yes
+                                note LOUD "\n\nPUSHING $name via $WHICHPATH"
+                            else
+                                note LOUD "\n\nNOT PUSHING $name via $WHICHPATH"
+                                if [ ! "$MIDOP$EGGMODE$ONEFILEONLY" ] ; then
+                                    note LOUD "Moving $name to $NOTPUSHEDDIR"
+                                    ( cd $OPDIR ; mv -v $name $NOTPUSHEDDIR )
+                                fi
+                                continue
+                            fi
+                            FOUNDSOME="$FOUNDSOME $name"
+                            PUSHEDSOME="$PUSHEDSOME $name"
+                            if [ ! "$EGGMODE$ONEFILEONLY" ] ; then
+                                [ "$TARGETNAME" ] && TARGETNAME=${TARGETNAME}_
+                                # Remove anything after the first IP address
+                                TARGETNAME=${TARGETNAME}`basename $name | sed "s/\(\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/g"`
+#                                TARGETNAME=${TARGETNAME}`basename $name | sed "s/\..*//g"`
+                            fi
+                        done
+
+                        if [ ! "$EGGMODE" -a ! "$NOZIP" -a "$FOUNDSOME" ] ; then
+                            # Done with one or more *$TARGEXT files in $OPDIR, zip them up into
+                            # $ZIPNAME, move *$TARGEXT into $PUSHEDDIR.
+                            OPFILES=`cd $OPDIR ; ls op.done.by* 2>/dev/null`
+                            [ "$TARGETNAME" ] && TARGETNAME="${TARGETNAME}_"
+                            ZIPNAME=${TARGETNAME}`echo $OPFILES | tr " " "_"`.zip
+                            ZIPNAME=`namemod $ZIPNAME`
+#`basename $OPDIR | sed "s/$TARGETNAME.*//g"`_
+#`date +%Y%m%d-%H%M%S`
+
+                            note Putting `cd $OPDIR ; echo *$TARGEXT` and $OPFILES into $ZIPNAME:
+                            note with "++ cd $OPDIR ; zip -n bz2 $ZIPNAME $OPFILES *$TARGEXT ++"
+                            (cd $OPDIR
+                                zip -n bz2 $ZIPNAME $OPFILES *$TARGEXT || \
+                                    die zip command failed: zip -n bz2 $ZIPNAME $OPFILES *$TARGEXT
+                                ( cd $OPDIR ; mv *$TARGEXT $PUSHEDDIR )
+                                note -n "md5sum:\n    "
+                                md5sum $ZIPNAME | tee $ZIPNAME.md5
+                                reuse $ZIPNAME
+                            )
+                        elif [ "$NOZIP" -a "$FOUNDSOME" ] ; then
+                            # Need .md5 files, one per *$TARGEXT being pushed
+                            (cd $OPDIR
+                                pwd
+                                ls -alrt *$TARGEXT
+                                for OPFILE in *$TARGEXT ; do
+                                    md5sum $OPFILE | tee $OPFILE.md5
+                                    reuse $OPFILE
+                                done
+                            )
+                        fi
+                else
+                        die "(Non-Readable Directory): $OPDIR"
+                fi
+        else
+            note Ignoring file $OPDIR in $Directory
+        fi
+# End of our for statement
+done
+
+
+
+
+
+if [ ! "$FOUNDSOME" ] ; then
+    note "\n\nThere were NO $TARGEXT files pushed from $Directory*\n\n"
+    note "The FTP server currently has these files in $DESTDIR:\n\n"
+    TRYCOUNT=0
+    while true ; do
+        { 
+ftp -inv<<EOFFTP | tee $OUTFILE
+
+open $HOST
+
+user $USERNAME $PASSWD
+ls $DESTDIR
+ls
+bye
+
+EOFFTP
+        } &
+        waitlogin
+
+        # We drop out of here if no login failure
+        egrep -qi "login.*failed|530 login incorrect" $OUTFILE || break
+        
+        # We also drop out if we tried a bunch already
+        TRYCOUNT=$((TRYCOUNT+1))
+        [ $TRYCOUNT -gt 10 ] && break
+
+
+        # About to try again, move this aside
+        mv -v $OUTFILE $OUTFILE.`date +%F-%H%M%S`
+
+        # OK, we try more times as both passwords.
+        # Alternate between 0 and $TRYPATHNUM if that is not 0
+        if [ $PATHNUM == 0 ] ; then
+                PATHNUM=$TRYPATHNUM
+                ALT=""
+        elif [ ! "$ALT" -a  "${ALTPASSWD[PATHNUM]}" -a "${ALTHOST[PATHNUM]}" -a "${ALTUSERNAME[PATHNUM]}" ] ; then
+                ALT=yes
+        else
+                PATHNUM=0
+                ALT=""
+        fi
+        . $RCFILE
+        LEN=`echo -n "$PASSWD" | wc -c`
+        note "\n\nTrying again, TRYCOUNT=$TRYCOUNT, with PATHNUM=$PATHNUM and USERNAME=$USERNAME, $LEN character password\n\n"
+    done
+    waitgoodbye
+
+    grep -q -- -L-$suite $OUTFILE && \
+        note "\n\nOf those, these are your suite=$suite file(s):\n\n"
+    grep -- -L-$suite $OUTFILE || \
+        note "\n\nNONE OF THOSE ARE YOUR suite=$suite files.\n\n"
+    rm -f $OUTFILE
+fi
+
+#-------  Copy the zipped files to the destination  -----------------------------
+# More than one? Let them know that is not normal
+if [ `echo $DIRLIST | wc -w` -gt 1 ] ; then
+    notered "\n\n\nThere is more than one op directory in $Directory:\n\n"
+    ls -l $Directory | egrep -v "pcaps|DONE"
+    echo -e "\n\nNormally there should only be one. The older one is probably"
+    echo -e "not your op, but may be someone elses lost data\n\n"
+    getanswer "Hit ENTER to continue"
+fi
+
+
+
+if [ `echo $DIRLIST | wc -w` -gt 1 ] ; then
+    DIRSLEFT=`echo "$DIRLIST" | sed "s/^[^ ]* //g"`
+else
+    DIRSLEFT=""
+fi
+
+rm -f $ERRFILE
+
+if [ "$EGGMODE" ] ; then
+    DESTDIR=imps
+    PUTWHAT=$TARGEXT
+fi
+
+[ "$ONEFILEONLY" ] && PUTWHAT=$TARGEXT
+
+for OPDIR in $DIRLIST ; do
+    cd $OPDIR 
+    note pushing from $OPDIR
+
+    EXT=`basename $OPDIR`
+    OUTFILE="$OUTDIR/copy-${WHICHPATH}.$EXT.log"
+
+    note "\n\nSending data now with the following FTP commands
+(results will also be saved in $OUTFILE):\n\n
+
+open $HOST
+
+user $USERNAME /xxxxx
+cd $DESTDIR
+pwd
+binary
+mput $PUTWHAT
+mput *.md5 
+ls
+bye
+
+"
+    PUSHEDFILES=`ls $PUTWHAT *.md5 2>/dev/null`
+
+    [ "$DEBUGONLY" ] && die "DEBUG ONLY: PUSHEDFILES=$PUSHEDFILES= MIDOP=$MIDOP= NOZIP=$NOZIP= FORCEPUSH=$FORCEPUSH="
+
+    # quietly move aside $OUTFILE if there already
+    mv $OUTFILE $OUTFILE.`date +%Y%m%d-%H%M%S` 2>/dev/null
+
+    while true ; do
+        if [ "$QUIET" ] ; then
+             { 
+ftp -inv<<EOFFTP >> $OUTFILE
+
+open $HOST
+
+user $USERNAME $PASSWD
+cd $DESTDIR
+pwd
+binary
+mput $PUTWHAT
+mput *.md5
+ls
+bye
+
+EOFFTP
+            } &
+        else
+            { 
+ftp -inv<<EOFFTP | tee -a $OUTFILE
+
+open $HOST
+
+user $USERNAME $PASSWD
+cd $DESTDIR
+pwd
+binary
+mput $PUTWHAT
+mput *.md5
+ls
+bye
+
+EOFFTP
+            } &
+
+        fi
+        waitlogin
+
+        # We drop out of here if no login failure
+        egrep -qi "login.*failed|530 login incorrect" $OUTFILE || break
+
+        # We also drop out if we are tried a bunch already
+        TRYCOUNT=$((TRYCOUNT+1))
+        [ $TRYCOUNT -gt 13 ] && break
+
+        # About to try a second time, move this aside
+        mv -v $OUTFILE $OUTFILE.`date +%F-%H%M%S`
+
+        # OK, we try more times with several passwords.
+        # Alternate between 0 and $TRYPATHNUM if that is not 0, and 
+	# also try $TRYPATHNUM with ALT set if that has all three args defined.
+        if [ $PATHNUM == 0 ] ; then
+                PATHNUM=$TRYPATHNUM
+		ALT=""
+	elif [ ! "$ALT" -a  "${ALTPASSWD[PATHNUM]}" -a "${ALTHOST[PATHNUM]}" -a "${ALTUSERNAME[PATHNUM]}" ] ; then
+		ALT=yes
+        else
+                PATHNUM=0
+		ALT=""
+        fi
+        . $RCFILE
+        LEN=`echo -n "$PASSWD" | wc -c`
+        note "\n\nTrying again, TRYCOUNT=$TRYCOUNT, with PATHNUM=$PATHNUM and USERNAME=$USERNAME, $LEN character password\n\n"
+    done
+    waitgoodbye
+
+    sleep 1
+
+    rm -f /tmp/.mysuccess*
+    for PUSHEDFILE in $PUSHEDFILES ; do
+        # This file stays if this file succeeds
+        touch /tmp/.mysuccess.$$
+
+        # Need to see if the $OUTFILE above has our file remotely or not
+        MYSIZE=`stat --format=%s $PUSHEDFILE`
+        note "\n\nChecking arrival of $MYSIZE byte file:"
+        note "Pertinent FTP output is:\n"
+        note "  egrep -v \"local:|remote:\" $OUTFILE | grep \"$PUSHEDFILE$\""
+        egrep -v "local:|remote:" $OUTFILE | grep "$PUSHEDFILE$" || rm /tmp/.mysuccess.$$
+        egrep -v "local:|remote:" $OUTFILE | grep "$PUSHEDFILE$" | \
+            while read PERMS DIG1 DIG2 DIG3 SIZE MON DAY TIME FILENAME ; do
+                note LOUD "   $PUSHEDFILE"
+                if [ "$FILENAME" = "$PUSHEDFILE" ] ; then
+                    if [ "$SIZE" = "$MYSIZE" ] ; then 
+                        note LOUD    "ARRIVED SUCCESSFULLY        [       OK     ]"
+                        PUSHEDFILE=""
+                    else
+                        rm -f /tmp/.mysuccess*
+                        [ "$QUIET" ] && notered "   $PUSHEDFILE"
+                        notered "DID NOT ARRIVE SUCCESSFULLY [  WRONG  SIZE  ]"
+                    fi
+                fi
+            done
+        # Did one of those fail?
+        if [ ! -f /tmp/.mysuccess.$$ ] ; then
+            notered  $PUSHEDFILE
+            notered "  DID NOT ARRIVE SUCCESSFULLY [  FAIL  ]"
+            notered "  DID NOT ARRIVE SUCCESSFULLY [  FAIL  ]"
+            notered "  DID NOT ARRIVE SUCCESSFULLY [  FAIL  ]"
+        fi
+    done
+    rm -f /tmp/.mysuccess.$$
+
+    cd $Directory
+
+    # Print end status message.
+    if [ ! -s "$ERRFILE" ] ; then
+        note LOUD "\n\nThe FTPd files were:\n===================="
+
+        ls $OPDIR/$PUTWHAT $OPDIR/*.md5
+    fi
+    
+    filelist=$(ls $OPDIR/$PUTWHAT)
+    note "\n\nFTP finished\n============\n\n\n"
+
+    s=""
+    is=is
+    has=has
+    count=`ls -1 $OPDIR/$PUTWHAT | wc -l`
+    [ $count -gt 1 ] && s="s" && S="S" && is=are && has=have
+
+    if [ ! -s "$ERRFILE" ] ; then
+        if [ ! "$EGGMODE" ] ; then
+            note LOUD "\nMoving PUSHED files to $PUSHEDDIR:\n===================" 
+            mv -v $OPDIR/$PUTWHAT $OPDIR/*.md5 $PUSHEDDIR
+            if [ ! "$MIDOP" -a ! -s "$ERRFILE" ] ; then
+                note LOUD "\nMoving DONE dirs to $DONEDIR:\n===================" 
+                BASEDIR=`basename $OPDIR`
+                # We only move $OPDIR if ONEDIR is not set
+                # (move files only in that case)
+                if [ ! "$ONEDIR" ] ; then
+                    if [ -e $DONEDIR/$BASEDIR ] ; then
+                        NUM=0
+                        while [ -e $DONEDIR/$BASEDIR.$NUM ] ; do
+                            NUM=$((NUM+1))
+                        done
+                        mv -v $OPDIR $DONEDIR/$BASEDIR.$NUM
+                    else
+                        mv -v $OPDIR $DONEDIR
+                    fi
+                fi
+            fi
+            
+            note LOUD "\n\nThe following FILE$S $is now archived to $PUSHEDDIR"
+            note LOUD "and $has been sent to the ${WHICHPATH}monkey folder:\n\n"
+            
+            echo "$filelist" 
+        fi
+    fi
+
+    [ "$DIRSLEFT" ] && getanswer "\n\n\n\nHit RETURN to continue with remaining dirs:\n\n" && \
+      ls -l | egrep -v "pcaps|DONE"
+
+    if [ `echo $DIRSLEFT | wc -w` -gt 1 ] ; then
+        DIRSLEFT=`echo "$DIRSLEFT" | sed "s/^[^ ]* //g"`
+    else
+        DIRSLEFT=""
+    fi
+done
+
+# We die here if op is not over yet, this one requires RETURN
+#[ "$MIDOP" ] && [ "$CLICKEDON" ] && \
+#    getanswer "We are still mid op, you may proceed....hit RETURN to exit"  && \
+#    die done
+# We die here if op is not over yet, this one does not
+
+[ "$FORCEPUSH" ] && MIDOP="" && \
+    die "We are still mid op, exiting....\n\n"
+
+[ "$MIDOP" ] && \
+    die "We are still mid op, you may proceed....\n\n"
+
+# If any still here, they are the ones we skipped pushing for
+# so .bz2 files were moved above to $NOTPUSHEDDIR and we now move 
+# dirs (without .bz2 files) to $DONEDIR.
+if [ ! -s "$ERRFILE" ] ; then
+    for OPDIR in $OPSDIRS ; do
+        [ -d $OPDIR ] || continue
+        mv -v $OPDIR $DONEDIR
+    done
+else
+    die "$COLOR_FAILURE $PROG encountered errors. Notify the staff. $COLOR_NORMAL"
+fi
+
+die $PROG done
+

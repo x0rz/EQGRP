@@ -1,0 +1,20 @@
+PITCHIMPAIR___Son-Goki.sun-ip.or.jp___150.27.1.11___20020503-112843() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.6 
+    #
+    set host Son-Goki.sun-ip.or.jp
+    set ip 150.27.1.11
+    set hostType "Solaris26"
+    set len 476
+    set cv0 e4f95c71
+    set cv1 ac5eafb8
+    set cv2 e1fa9cca
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

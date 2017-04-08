@@ -1,0 +1,145 @@
+#!/usr/bin/env perl
+$VER = "1.0.3.3";
+myinit() ;
+if (-s "$ARGV[0]") {
+  open(IN, "< $ARGV[0]") || die "Unable to open $ARGV[0]: $!\n" ;
+  @input = <IN> ;
+  close(IN);
+  shift ;
+} else {
+  @input = split(/\n/,`ps -ef$www`) ;
+}
+push(@ARGV,$$) unless @ARGV;
+foreach $target (@ARGV) {
+  my $int = int($target);
+  if ("$target" eq "$int") {
+    push(@targets,$target);
+  } else {
+    foreach $line (@input) {
+      ($uid,$pid,$ppid,$c,$stime,$tty,$time,@cmd) = split(/\s+/,$line);
+      $cmd = "@cmd" ;
+      if ( $cmd =~ /$target/ and $pid != $$) {
+	push (@targets,$pid) ;
+      }
+    }
+  }
+}
+$didit{"1"}++ ;
+$didit{"0"}++ ;
+my %multiplewarned=();
+while (@targets) {
+  $target = shift(@targets) ;
+  $didit{$target}++;
+  foreach $line (@input) {
+    chomp ($line);
+    $line =~ s/^\s+// ;
+    ($uid,$pid,$ppid) = split(/\s+/,$line);
+    next unless ($target eq $pid) ;
+    unless ($scriptcheck) {
+      print "$line\n";
+    } else {
+      my $newscript = "";
+      if ($line =~ /script.*-a{0,1}f\s*(.*)/) {
+	$newscript=$1;
+	$newscript = "typescript" unless $newscript;
+      } elsif ($line =~ /\S+\s+(\d+)\s+.*perl.*scripme.pl/) {
+	my $scripmepid = $1;
+	$newscript = $1
+	  if `find /proc/$scripmepid/fd -ls | egrep "/down/tcpdump|/down/script"`
+	    =~ /(\S+)\s*$/;
+      }
+      if ($newscript) {
+	if ($scriptfile and basename($scriptfile) ne basename($newscript)) {
+	  warn "Multiple different/nested scripts being written to:\n$newscript\n"
+	    unless $multiplewarned{$newscript}++;
+	} else {
+	  $scriptfile = $newscript;
+	  unless ($scriptfile =~ /^\//) {
+	    $scriptfile = "/current/down/$scriptfile"
+	      if (-f "/current/down/$scriptfile");
+	  }
+	}
+      }
+    }
+    unless ($ENV{NOPPID}) {
+      push (@targets,$ppid) unless $didit{$ppid}++ ;
+    } else {
+      dbg("Not getting ppids\n") unless ($justonce++ or $scriptcheck);
+    }
+    last ; # got this guy now get his folk
+  }
+}
+if ($scriptcheck and -f $scriptfile) {
+  while (1) {
+    my $tmpfile = $scriptfile;
+    if ($tmpfile =~ m,/([^/]+)/+\.\./+([^/]+)/,) {
+      my ($rmdir,$dir) = ($1,$2);
+      $scriptfile =~ s,$rmdir/\.\./$dir,$dir,;
+    }
+    last if $scriptfile eq $tmpfile;
+  }
+  print "$scriptfile\n" if ($scriptfile);
+
+}
+sub usage() {
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  print $usagetext if $opt_h;
+  print $vertext ;
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  exit;
+}#usage
+sub myinit {
+  use File::Basename ;
+  require "getopts.pl";
+  $prog = basename $0 ;
+  $vertext = "$prog version $VER\n" ;
+  $| = 1;
+  # This will make sure /usr/local/bin/scriptcheck is a link to pschain
+  unlink("/usr/local/bin/scriptcheck");
+  symlink("pschain","/usr/local/bin/scriptcheck");
+  mydie("bad option(s)") if (! Getopts( "hvs" ) ) ;
+  $scriptcheck = ($opt_s or $0 =~ /scriptcheck$/);
+  $www="";
+  if ($^O =~ /linux/i) {
+    $www="www";
+  }
+  if (!$scriptcheck) {
+    $usagetext="
+Usage: $prog -h                         (prints this usage statement)
+       $prog [ file ] [ list ]
+       $prog [-s]
+
+$prog looks in the current \"ps -ef$www\" listing (or in \"file\") for the
+pid(s) and/or program(s) given in \"list\" (space delimited), and shows
+that entry, and each ancestor pid's entry, back to pid 1 (init). If the
+\"list\" contains any non-integer entries, ps entries matching that are
+traced back. An empty list results is looking for $prog's own pid.
+
+Given -s as an argument (or run as \"scriptcheck\"), this script outputs
+nothing if run from an UNSCRIPTED window, and the script name if it is
+a scripted window. The return value in either case is 0.
+
+";
+  } else {
+    my $more = "
+$prog is identical to pschain. See \"pschain -h\" for that usage.";
+    if ($prog eq "pschain") {
+      $prog = "pschain -s";
+      $more = "
+If called as \"scriptcheck\", the behavior is the same as \"$prog\".";
+    }
+    $usagetext="
+Usage: $prog -h                     (prints this usage statement)
+
+$prog uses a system call to \"ps -ef\" to trace back its own PID to
+find if some ancestor pid is a \"script -af\" command. If it is, the
+script name is output.
+$more
+
+";  }
+  usage if ($opt_h or $opt_v) ;
+  die("No arguments allowed (@ARGV) in scriptcheck mode") if @ARGV and $scriptcheck;
+} # end sub myinit
+sub dbg {
+  print("DBG: @_\n");
+}#dbg

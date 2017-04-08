@@ -1,0 +1,20 @@
+
+# FreeBSD	Thu Oct 27 10:57:10 EDT 2011
+
+:PATH=/sbin:/usr/sbin:/bin:/usr/bin
+
+alias -pacct=-ls -t /var/adm/*acct* /var/*acc* /var/log/account/*acct*
+
+alias =ps=ps auxww
+alias =psg=ps auxww | grep
+alias =nsg=netstat -an | grep 
+alias =arp=arp -an
+alias =ping=ping -c 1
+alias =df=df
+alias =locale=
+alias =alwaysdothis=
+alias -elevate=-lsh echo -n Please insert another token..... 1>&2 ; sleep 6 ; echo .
+alias =autorpc=-scan rpc 127.0.0.1 one
+alias =di=df -i
+alias =pse=ps auxww | egrep
+alias =psgv=ps auxww | egrep -v 

@@ -1,0 +1,72 @@
+#!/usr/bin/env perl
+##
+$VER="1.0.0.1" ;
+$| = 1 ;
+myinit() ;
+unlink("$opetc/.putfilesout");
+(%putfiles,@targetfiles) = ();
+putfiles($showls);
+# End with true value as we may someday require this script elsewhere.
+1;
+
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  # $calleddirect is set if 
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs putfiles @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog = "-gs putfiles" ;
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless $nopen_rhostname;
+  }
+  clearallopts();
+  mydie("bad option(s)") if (! Getopts( "hv" ) ) ;
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"$prog\" is used.
+
+";
+  $gsusagetext="Usage: $prog
+
+$prog shows a list of remote files, one per line, that were either
+touched (with touch or -touch) or -put there during this op. If relative
+paths were used to do so and the remote working directory at the time
+was not what it is now, the location of that file on target may not
+match this output.
+
+If there were any, $prog then tries an -ls on target for those files,
+alerting the operator (and requiring acknowledgement) if any appear to
+still be there.
+
+$prog funcationality may also be used in other auto* perl scripts
+by calling the putfiles() subroutine found in autoutils. Doing so will
+modify the global variables (\%putfiles,\@targetfiles) as per the comments
+in the putfiles() subroutine.
+
+OPTIONS
+
+  -h       show this usage statement
+  -v       show version number
+
+";
+#  -l       attempt a -ls of each file put up this op
+  usage() if ($opt_h or $opt_v) ;
+#  $showls = $opt_l;
+  # how old putfiles
+  $socket = pilotstart(quiet) unless $socket;
+} #myinit

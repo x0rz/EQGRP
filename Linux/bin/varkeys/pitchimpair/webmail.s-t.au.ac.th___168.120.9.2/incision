@@ -1,0 +1,5 @@
+PITCHIMPAIR___webmail.s-t.au.ac.th___168.120.9.2___20020507-121447() {
+    ## INCISION Version:4.8.2 OS:sparc-sun-solaris2.8 
+    export TARG_AYT="31755052 1ca39d1f 7b15448a"
+    [ "$UTC_OFFSET" ] || export UTC_OFFSET=840
+}

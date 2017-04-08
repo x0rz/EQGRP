@@ -1,0 +1,99 @@
+#!/usr/bin/env python
+VERSION = '1.0.0.4'
+
+import os
+import sys
+import string
+import shlex
+import traceback
+import autoutils
+from autoutils import COLOR
+from autoutils import OptParser
+
+WIDTH = {
+    'PID'  :  6,
+    'CMD'  : 35,
+}
+
+class autopsproc:
+    def __init__(self):
+        self.nopen = autoutils.autoutils()
+        self.nopen.connect()
+        self.options = None
+        self.version = VERSION
+	
+        sys.stdout = sys.stderr
+
+    def main(self, argv):
+
+        epilog = '\npsproc version %s\n' % self.version
+        parser = OptParser(usage='usage: -gs psproc', epilog=epilog)
+        opts, args = self.nopen.parseArgs(parser, argv[1:])        
+    
+        if not self.nopen.connected:
+            self.nopen.connect()
+        
+        if "Linux" not in self.nopen.nopen_serverinfo:
+            self.nopen.doprint(self.nopen.COLOR_FAILURE, "BAIL: -gs psproc is not supported on this:\n\n%s\n" % self.nopen.nopen_serverinfo)
+            return self.nopen.finish()
+
+        output, nopenlines, outputlines = self.nopen.doit("which lsof; echo $?")
+        if int(outputlines[1]):
+            self.nopen.doprint(self.nopen.COLOR_FAILURE, "BAIL: -gs psproc requires lsof\n")
+            return self.nopen.finish()
+
+        lsof = {}
+        ps = {}
+
+        output, nopenlines, outputlines = self.nopen.doit("-pid")
+        mypid = output.split()[2]
+
+        output, nopenlines, outputlines = self.nopen.doit("ps --no-headers -eo pid,pgid | grep %s" % mypid)
+        mypgid = output.split()[1]
+
+        output, nopenlines, ps_out = self.nopen.doit("ps --no-headers -eo pid,pgid,cmd")
+        for line in ps_out:
+            line = line.split()
+            pid = line[0]
+            pgid = line[1]
+            if pgid != mypgid and pgid > "1":
+                ps[pid] = line[2].strip('-:')
+
+        output, nopenlines, lsof_out = self.nopen.doit("lsof -Pn -F n -d txt")
+        i = 0
+        while i < len(lsof_out):
+            pid = lsof_out[i][1:]
+            txt = lsof_out[i+1][1:]
+            lsof[pid] = txt
+            i += 2
+
+        print string.rjust("PID", WIDTH["PID"]), string.ljust("CMD", WIDTH["CMD"]), string.ljust("LSOF", 0)
+        for pid in ps:
+            ps_cmd = ps[pid]
+            try:
+                lsof_txt = lsof[pid]
+                if os.path.isabs(ps_cmd):
+                    ps_cmd_cmp = os.path.realpath(ps_cmd)
+                    lsof_txt_cmp = lsof_txt
+                else:
+                    ps_cmd_cmp = ps_cmd
+                    lsof_txt_cmp = lsof_txt.split('/')[-1]
+                if ps_cmd_cmp != lsof_txt_cmp:
+                    print string.rjust(pid, WIDTH["PID"]), string.ljust(ps_cmd, WIDTH["CMD"]), string.ljust(lsof_txt, 0)
+            except:
+                print string.rjust(pid, WIDTH["PID"]), string.ljust(ps_cmd, WIDTH["CMD"]), string.ljust("(not in LSOF output)", 0)
+        
+        return self.nopen.finish()
+
+if __name__ == '__main__':
+
+    try:
+        # re-set the argv b/c NOPEN will do weird things with splitting args
+        argv = shlex.split(' '.join(sys.argv))
+        autopsproc().main(argv)
+    except Exception, e:
+        print '\n\n%sUnhandled python exception: %s%s\n\n' % \
+            (COLOR['bad'], str(e), COLOR['normal'])
+        print '%sStack trace:\n' % COLOR['fail']
+        traceback.print_exc()
+        print COLOR['normal']

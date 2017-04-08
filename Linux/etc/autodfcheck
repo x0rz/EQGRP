@@ -1,0 +1,122 @@
+#!/usr/bin/env perl
+##
+$VER="1.3.0.8" ;
+# nopen seems happier with stderr in lsh runs
+#select STDERR ;
+$| = 1 ;
+myinit() ;
+
+# Skip it if the file /current/down/df.skipcheck.$nopen_rhostname exists.
+dodfcheck() unless (-e "$opdown/df.skipcheck.$nopen_rhostname");
+
+1;
+
+sub dodfcheck {
+#TODO:  CHANGE THIS to autoutils, with autoport, use variables 
+#       make it OS specific?
+#         move the which prtvtoc from autdone to here?
+
+# 
+#
+# NOTE: Every run of dfcheck writes this file, but only those hosts
+#       that actually ARE Linux boxes (where =alwaysdothis calls
+#       gs.autodothis.linux) will do the stuff.
+  my $dfcmd = "=df";
+  if (-s "$opdown/df.usethis.$nopen_rhostname") {
+    chomp(my $cmd = readfile("$opdown/df.usethis.$nopen_rhostname"));
+    if ($cmd =~ m,^df,) {
+      $dfcmd = $cmd;
+    } else {
+      return 1;
+    }
+  }
+  if ($linuxtarget) {
+    open(DFOUT,"> $opetc/gs.autodothis.linux.2.$nopen_rhostname") ||
+      die "Unable to open $opetc/gs.autodothis.linux.2.$nopen_rhostname" ;
+    print DFOUT "#NOGS\n";
+  }
+  # Always do $dfcmd -l
+  ($output,$nopenlines,@output) = doitwrite("$dfcmd -l") ;
+  @commands = ();
+  # We do full df here for posterity if $autodone
+  if ($autodone or !$output or $output =~ /invalid option/i) {
+    #push(@commands,"$dfcmd >T:$opdown/dfcheck.$nopen_rhostname");
+    push(@commands,$dfcmd);
+    preservefile("$opdown/dfcheck.$nopen_rhostname");
+  }
+  my $warnings = "";
+  foreach $cmd (@commands) {
+    ($output,$nopenlines,@output) = doitwrite("$cmd");
+    writefile("$opdown/dfcheck.$nopen_rhostname",$output);
+    foreach (@output) {
+      if ($linuxtarget and /^\s*(\/dev\/[a-z]+)\d+\s+/ and ! $hddone{$1}++ ) {
+        print DFOUT "-nohist hdparm -I $1\n" ;
+      }
+      next if (/cdrom/); # No worries if CD is 100%
+      if (($pct) = /\s(\d+)\%/ and $pct > $maxpct) {
+        $warnings .= "$_\n" unless $warned{$_}++;
+      }#if
+    }#foreach (@output)
+  }#foreach $cmd (@commands)
+  close(DFOUT) if $linuxtarget;
+
+  # Do warnings last so more visible
+  chomp($warnings);
+  mywarn("\nAlmost FULL partitions:\n$warnings",$COLOR_FAILURE)
+    if $warnings;
+    
+  return 1;
+}
+
+# End with true value as we require this script elsewhere.
+1;
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs dfcheck @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog =~ s/^auto/-gs /;
+    $| = 1;
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+  $autodone++ if ("@ARGV" =~ /autodone/) ;
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"-gs dfcheck\" is used.
+
+";
+  $gsusagetext="Usage: -gs dfcheck [-h] [ NN ]
+
+-gs dfcheck calls $opetc/autodfcheck [ NN ], which shows$COLOR_FAILURE in red$COLOR_NORMAL
+all lines in the \"df -k\" output with capacity percentage
+more than NN%, which defaults to 90%.
+
+";
+  mydie("bad option(s)") if (! Getopts( "hv" ) ) ;
+  usage() if ($opt_h or $opt_v) ;
+  #default
+  $maxpct = 90 ;
+  while ( my $arg = shift @ARGV ) {
+    $maxpct = int($arg) if ($arg and $arg == int($arg) and $arg > 0) ;
+  }
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+} #myinit

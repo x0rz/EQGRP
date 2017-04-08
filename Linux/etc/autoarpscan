@@ -1,0 +1,211 @@
+#!/usr/bin/env perl 
+##
+use List::Util qw(shuffle);
+$VER="1.1.0.1";
+setusage();
+$| = 1 ;
+myinit() ;
+@followip = ();
+import autoutils;
+
+
+
+
+my ($clientver,$histfile,$cmdoutfile,$localcwd,$nhome,$localpid,$localppid,
+    $serverver,$targetwdir,$targetos,$targetcwd,$targetpid,$targetppid,$targetport)
+  =  parsestatus(force);
+
+#see if arping is in our path:
+mydie("Can't find arping binary.") if (!(whichbin("arping")));
+
+offerabort( "${COLOR_FAILURE}CONFIRMING:\n$COLOR_NORMAL$prog is about to run with the options:\n".
+"  Start IP Address: $startIP\n".
+"  End IP Address: $endIP\n".
+"  Ethernet Interface: $outInterface\n".
+"  Interval Time: $btime\n".
+"If settings are not correct, abort now.\n");
+
+($output,$nopenlines,@output) = doit("-ifconfig");
+mydie("Interface is invalid.") unless grep /$outInterface/,@output;
+@arpstuff=arpScan();
+
+if ($elevate) {
+  $numberping=@followip;
+  offerabort("Do you want to continue on to ping?? We will be pinging $numberping boxes......");
+  @pingresult=pingscan();
+}
+
+dolocalecho("@arpstuff\n\n", @pingresult);
+
+# Called via do so must end with 1;
+1;
+
+
+sub arpScan {
+  ($output,$nopenlines,@output) = doit("-ifconfig");
+	for ($i=0; $i < @output; $i++){
+		$line = @output[$i];
+		if  (@output[$i] =~ $outInterface) { 
+			$i++;
+			@tsource = split(" ",$output[$i]);
+			$source = @tsource[1];
+			last;
+		}
+	}	
+	my @ipArray = genAddrArray ($startIP, $endIP);
+	my ($alow,$ahigh) = split /-/, $btime;
+  my @hitoutput = ();
+
+  mydie("Interval time is invalid:\n".
+  "  Low: $alow\n  High: $ahigh\n") if ($alow <= 0 || $ahigh <= 0);
+  
+	foreach $arpIP (@ipArray) {
+		my $atime = randInt($alow, $ahigh);
+		($output,$nopenlines,@output) = doit("arping -I $outInterface -c 1 $arpIP");
+    sleep($atime);
+		foreach $line (@output){
+			
+			if ($line =~ /([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}/){
+        			push(@hitoutput,"\n");
+        			push(@hitoutput,$line); 
+				@ip = split(" ", $line);
+				push(@followip,@ip[3]);
+
+  	    		} 
+		}
+	}
+
+ return @hitoutput;
+}
+
+ 
+
+
+
+sub pingscan {
+  @shuffleip=shuffle(@followip);
+  foreach $pingip (@shuffleip) {
+    my $atime = randInt($alow, $ahigh);
+    ($output,$nopenlines,@output) = doit("-ping -r $pingip -l $source");
+    sleep($atime);
+    @sout=split(/\s+/,$output);
+    shift(@sout);
+    $output=join(" ",@sout);
+    if ($output =~ "Reply") {
+    	push(@pingresult,"$output\n"); 
+    }
+  }
+  return @pingresult;
+}
+
+sub genAddrArray {
+	
+	my ($sIP, $eIP) = @_ ;
+	my @a = ();	
+	my ($s1,$s2,$s3,$s4) = split /\./, $sIP ;
+	my ($e1,$e2,$e3,$e4) = split /\./, $eIP ;
+	
+	mydie("Start and end are outside a single Class C.") if (!($e1 == $s1) or !($e2 == $s2) or !($e3 == $s3));
+	
+	$sNetwork = join('.',$s1,$s2,$s3);
+	
+	#generate array from start and end octets
+	for ( $i = $s4 ; $i <= $e4 ; $i++) {
+		push(@a,join('.',$sNetwork,$i));
+	}
+	
+	return shuffle(@a);
+	
+}
+
+sub randInt {
+
+  my ( $low, $high ) = @_;
+  # right order
+  ($low,$high) = ($high,$low) if $low > $high;
+  return $low + int(rand($high - $low + 1 ));
+
+}
+
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0 unless $calledviarequire;
+  $stoiccmd = "called as: -gs arpscan @ARGV";
+  if ($willautoport and $socket) {
+    $stoiccmd = "in $prog, called as: arpscan(@ARGV)";
+    dbg("via require autoarpscan ARGV=(
+".join("\n",@ARGV)."
+) prog=$prog");
+    #    progprint("$prog called -gs arpscan @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $prog = "-gs arpscan";
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $vertext = "$prog version $VER\n" ;
+  }
+  clearallopts();
+  $vertext = "$prog version $VER\n" ;
+  mydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			    -e $nopen_mylog);
+
+  my $origoptions = "@ARGV";
+  mydie("bad option(s)") if (! Getopts( "vt:s:e:i:hp" ) ) ;
+  
+  ###########################################################################
+  # PROCESS ARGUMENTS
+  ###########################################################################
+
+	
+  usage() if ($opt_h or $opt_v);
+	
+	mydie("Interface, Start, and End addresses must be specified (-i/-s/-e).") if (!($opt_s && $opt_e && $opt_i));
+
+	if ($opt_p){
+		$elevate=1;
+        }	
+	if (!$opt_t){
+		$btime = "1-6";
+	} else {
+		$btime = $opt_t;
+	}
+	$startIP = $opt_s;
+	$endIP = $opt_e;
+	$outInterface = $opt_i; 
+	
+	#mydie("-t $opt_t must be a valid positive time")
+	#	unless($btime > 0 );
+
+	
+  # Connect to autoport, we need status and more interactively.
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+	
+}
+
+
+sub setusage {
+	$usagetext="\n\nUsage:  $prog \n".
+"NOT CALLED DIRECTLY\n".
+"$prog is run from within a NOPEN session via when \"$prog\" is used.\n";
+
+	$gsusagetext="\n\nUsage:  $prog [-t TIME-TIME] -s IP -e IP -i INTERFACE\n".  
+"	$prog will arp scan a range of IP addresses in random order, with a random interval.\n".
+"	-t TIME-TIME        The time interval arp is passed. Randomly pick a number within\n".
+"	               the given range to get the arp interval. Example: 1-4 NOTE: Default is 1-6\n".
+"	-s IP          Start IP address of the range to scan.\n".
+"	-e IP          End IP Address of the range.\n".
+"	-i INTERFACE   The interface used to arp out. \n\n".
+"	-p 		Elevate to ping following successful arp(Will give you the chance to abort if taarget list is too large)\n".
+"NOTE: Start and end IP addresses must fall within the same Class C.\n\n".
+"Usage:  $prog [-t TIME-TIME] -s IP -e IP -i INTERFACE\n\n";
+}

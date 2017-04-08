@@ -1,0 +1,20 @@
+PITCHIMPAIR___mail.a-1.net.cn___210.77.147.84___20010313-132258() {
+    #
+    # RETICULUM Version:6.4 OS:sparc-sun-solaris2.7 Options:I,O 
+    #
+    set host mail.a-1.net.cn
+    set ip 210.77.130.6
+    set hostType "Solaris27"
+    set len 476
+    set cv0 085e33b7
+    set cv1 959eb53e
+    set cv2 6e20550c
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

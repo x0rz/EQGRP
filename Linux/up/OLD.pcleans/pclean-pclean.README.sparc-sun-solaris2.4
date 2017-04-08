@@ -1,0 +1,24 @@
+
+
+See usage statement for options and general usage (pclean -help).
+
+Compiles and runs on Solaris 2.5.1 - 2.8 (sparc & x86)
+
+Bugs/warnings:
+==============
+- pclean itself WILL show up in pacct file, so you should rename it 
+  to something that'll blend in 
+
+- pclean MAY append null entries at the end of the pacct file.
+  This problem may occur on systems where lots of processes are 
+  getting written to the pacct file.
+  (When you delete entries, pclean will tell you how to make sure
+   there are no null entries.)
+
+- Occasional problems with large pacct files ( > 3500000 entries):
+	- numerical listing may cause lseek() errors
+	- sometimes deletes the wrong entries 
+
+- Will not compile on systems that don't have pread/pwrite system calls
+  (e.g. hpux).
+

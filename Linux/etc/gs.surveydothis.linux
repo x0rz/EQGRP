@@ -1,0 +1,4 @@
+#NOGS
+-gs ident
+/sbin/ksyms -a >>T:/current/.k.tmp
+-lsh echo "[/sbin/ksyms -a]" >> /current/down/linuxstats.cmdout.$NOPEN_RHOSTNAME  ; cat /current/.k.tmp >> /current/down/linuxstats.cmdout.$NOPEN_RHOSTNAME ;  rm /current/.k.tmp

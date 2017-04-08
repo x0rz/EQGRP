@@ -1,0 +1,7 @@
+# $Id: bashrc-u,v 1.5 2006/06/06 23:21:57 ident Exp $
+BASHRCVER=2.0.1.2
+[ -e /etc/bashrc ] && . /etc/bashrc
+
+PS1="\[\\033[1;31m\]UNSCRIPTED \\$\h \W\a> \[\\033[0;39m\]"
+
+PROMPT_COMMAND='echo -ne "\033]0;${TERMTITLE}UNSCRIPTED WINDOW: ${PWD}\007"'

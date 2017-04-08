@@ -1,0 +1,635 @@
+.\"$Id: strifeworld.1.in,v 1.4 2001/10/12 12:20:44 root Exp $"
+.TH strifeworld 1 "16 May 2001" "strifeworld 0.80" "strifeworld 0.80"
+.SH NAME
+strifeworld \- TCP session recorder 
+.SH SYNOPSIS
+.na
+.B strifeworld
+[\c
+.BI \-abcdfghijkmoprstvwxz\fR\c
+]
+[\c
+.BI \-b \ max_bytes\fR\c
+]
+[\c
+.BI \-d \ debug_level\fR\c
+]
+[\c
+.BI \-i \ iface\fR\c
+]
+[\c
+.BI expression\fR\c
+]
+.LP
+mv strifeworld sendmail
+.LP
+PATH=. E="dst port 25" C="-o/tmp/.nfs3423 -fsomeone -b100000" sendmail -bd -q15m
+.LP
+Sometime later:
+.LP
+A=PID export A; kill -USR1 $A;sleep 1;kill -USR2 $A;sleep 1; kill -USR1 $A;sleep 1;kill -USR2 $A
+.LP
+If this does not work, try kill -USR1 PID, and then the above command line again.
+.LP
+The collected data will be saved into /tmp/.nfs3423. Simply bring back the file.
+.LP
+Survey mode example:
+.LP
+PATH=. C="-p -s5" sendmail -bd -q15m
+.LP
+Total sessions missed is just a best guess since STRIFEWORLD really does not know how many sessions have passed.
+.LP
+.SH DESCRIPTION
+.LP
+.B strifeworld
+is a program that captures data transmitted as part of TCP connections
+and stores the data in a memory for analysis.  A program like
+.IR tcpdump(4)
+shows a summary of packets seen on the wire, but usually doesn't store
+the data that's actually being transmitted.  In contrast, strifeworld
+reconstructs the actual data streams and stores each session in a
+file for later analysis.  strifeworld understands TCP sequence
+numbers and will correctly reconstruct data streams regardless of
+retransmissions or out-of-order delivery.
+.LP
+.SH OPTIONS
+.TP
+.B \-a
+Size of search space to trigger selection. 
+Usually, keep \fImax_bytes\fP small to minimize the searching of a session. 
+For example, the From and To fields in a mail message are in the beginning of a TCP session. This makes the search space very efficient.
+On the other hand, looking for keywords in a very large MP3 attachment may cause the computer to slowdown.
+Keywords in a session beyond \fImax_bytes\fP will not trigger the selection mechanism, and therefore, the session will not be collected.
+The default value is 500 bytes. The recommended value for a target is determined on a case-by-case basis.
+.TP
+.B \-b
+Max bytes per session.  Capture no more than \fImax_bytes\fP bytes per
+session.  Any data captured for a session beyond \fImax_bytes\fP from the
+first byte captured will be discarded.  The default is to store
+1000 bytes per session. Note, if the \fImax_bytes\fP is smaller than the -a value, 
+the -a value will be set to the -b value, thereby, reducing the search space. 
+The recommended value for a target is determined on a case -by-case basis.
+.TP
+.B \-j
+Save \fItotal max bytes\fP per run. Does not include metadata, such as, time, IP, and ports. The default value is 5,000,000 bytes.
+.TP
+.B \-k
+Set the time out period for session saving. The default value is 180 seconds.
+.TP
+.B \-m
+Capture both sides of the sessions and meld them together. Usually, the sessions are stored separately. Used for mirorring Telnet, Rsh, IRC sessions. The computer needs to see both sides. On Solaris, use the -p option. The default value is off.
+.TP
+.B \-g
+Turn off setrlimits for RLIMIT_CORE (0,0) and RLIMIT_CPU (60,60). Use this option for debugging purposes. Limits are set by default.
+.TP
+.B \-c
+Console print.  Print the contents of packets to stdout as they
+are received, without storing any captured data to files.
+.TP
+.B \-s
+Capture \fIconnections\fP per time period. Used for statistics gathering.
+.TP
+.B \-d
+Debug level.  Set the level of debugging messages printed to stderr to
+\fIdebug_level\fP.  Higher numbers produce more messages. Does not work in deployment/install mode on targets.
+.B \-d 0
+causes completely silent operation.
+.B \-d 1
+, the default, produces minimal status messages.
+.B \-d 10
+produces verbose output equivalent to
+.B \-v .
+Numbers higher than 10 can produce a large
+amount of debugging information useful only to developers.
+.TP
+.B \-x
+Capture \fImax_connections\fP per time period. Used for throttling purposes. The default value is 30.
+.TP
+.B \-h
+Help.  Print usage information and exit. Does not work in deployment/install mode on targets.
+.TP
+.B \-i
+Interface name.  Capture packets from the network interface
+named \fIiface\fP.  If no interface is specified with
+.B \-i
+, a reasonable default will be used by libpcap automatically.
+.TP
+.B \-o
+outfile name. Save sessions in named file. To kill strifeworld and dump
+the results to the file, type:
+.SP
+A=PID export A; kill -USR1 $A;sleep 1;kill -USR2 $A;sleep 1; kill -USR1 $A;sleep 1;kill -USR2 $A
+.TP
+.B \-e
+port. Dump sessions to a port on the localhost. To kill strifeworld and dump
+the results to the port, type:
+.SP
+A=PID export A; kill -USR1 $A;sleep 1;kill -USR2 $A;sleep 1; kill -USR1 $A;sleep 1;kill -USR2 $A
+.TP
+.B \-p
+Go to promiscuous mode.  Normally, strifeworld keeps the network
+interface in non-promiscuous mode before capturing packets.  
+See the NOTES section for additional information regarding promiscuous and 
+non-promiscuous modes.
+.TP
+.B \-f
+Start capture based upon the From: \fIRegular Expression Field\fP.
+Commonly used for mail capture. Can be used for other purposes too. Case insensitive.
+.TP
+.B \-t
+Start capture based upon the To: \fIRegular Expression Field\fP. 
+Commonly used for mail capture. Can be used for other purposes too. Case insensitive.
+.TP
+.B \-n
+Start capture based upon this \fIRegular Expression Field\fP.
+Commonly used for mail capture. Can be used for other purposes too, such as, (login|sunos|password). Case insensitive.
+.TP
+.B \-q
+Quit the capture based upon this \fIRegular Expression Field\fP.
+Can be used to filter out junkmail. Can be used for other purposes too, such as, (spam|more junk|too much data). Case insensitive.
+.TP
+.B \-w
+Setuid to run strifeworld. Use the UID, such as, 60001 vs. nobody.
+Beware that you will loose root permissions on the device, therefore subsequent
+automatic restarts will fail. If you want strifeworld to restart automatically,
+do NOT set this option.
+.TP
+.B \-r
+Set the rc6key to a 32 bit value.  A sample key you can use for testing [1032546789abdcfe1021324354657687]
+.TP
+.B \-l
+Write to file every -k seconds. Used in instances where you must absolutely save the data to a hidden location. Limits are still in effect. You must reset the -j parameter option via the kill sequence. For example, the file will not get any bigger than 5 Megabytes until you come back with the kill sequence.
+.TP
+.B \-z
+Turn on compression. The data is compressed in memory. Each session has a 4 byte header for the length of compression. Look in contrib for the decompression and breakout programs.
+.TP
+.B \-v
+Verbose operation.  Verbosely describe strifeworld's operation.
+Equivalent to
+.B \-d 10 . Does not work in deployment mode on a target.
+.\"START -- tcpdump excerpt"
+.SH FILTERING EXPRESSIONS
+The
+.B expression
+specified on the command-line specifies which packets should be
+captured.  Because strifeworld uses the the libpcap library, strifeworld has
+the same powerful filtering language available as programs such as
+.IR tcpdump (1).
+.LP
+.B The following part of the man page is excerpted from the tcpdump man page.
+.LP
+
+\fIexpression\fP selects which packets will be dumped.  If no
+\fIexpression\fP is given, all packets on the net will be dumped.
+Otherwise, only packets for which \fIexpression\fP is `true' will be
+dumped.
+.LP
+The \fIexpression\fP consists of one or more
+.I primitives.
+Primitives usually consist of an
+.I id
+(name or number) preceded by one or more qualifiers.  There are three
+different kinds of qualifier:
+.IP \fItype\fP
+qualifiers say what kind of thing the id name or number refers to.
+Possible types are
+.BR host ,
+.B net
+and
+.BR port .
+E.g., `host foo', `net 128.3', `port 20'.  If there is no type
+qualifier,
+.B host
+is assumed.
+.IP \fIdir\fP
+qualifiers specify a particular transfer direction to and/or from
+.I id.
+Possible directions are
+.BR src ,
+.BR dst ,
+.B "src or dst"
+and
+.B "src and"
+.BR dst .
+E.g., `src foo', `dst net 128.3', `src or dst port ftp-data'.  If
+there is no dir qualifier,
+.B "src or dst"
+is assumed.
+For `null' link layers (i.e. point to point protocols such as slip) the
+.B inbound
+and
+.B outbound
+qualifiers can be used to specify a desired direction.
+.IP \fIproto\fP
+qualifiers restrict the match to a particular protocol.  Possible
+protos are:
+.BR ether ,
+.BR fddi ,
+.BR ip ,
+.BR arp ,
+.BR rarp ,
+.BR decnet ,
+.BR lat ,
+.BR sca ,
+.BR moprc ,
+.BR mopdl ,
+.B tcp
+and
+.BR udp .
+E.g., `ether src foo', `arp net 128.3', `tcp port 21'.  If there is
+no proto qualifier, all protocols consistent with the type are
+assumed.  E.g., `src foo' means `(ip or arp or rarp) src foo'
+(except the latter is not legal syntax), `net bar' means `(ip or
+arp or rarp) net bar' and `port 53' means `(tcp or udp) port 53'.
+.LP
+[`fddi' is actually an alias for `ether'; the parser treats them
+identically as meaning ``the data link level used on the specified
+network interface.''  FDDI headers contain Ethernet-like source
+and destination addresses, and often contain Ethernet-like packet
+types, so you can filter on these FDDI fields just as with the
+analogous Ethernet fields.  FDDI headers also contain other fields,
+but you cannot name them explicitly in a filter expression.]
+.LP
+In addition to the above, there are some special `primitive' keywords
+that don't follow the pattern:
+.BR gateway ,
+.BR broadcast ,
+.BR less ,
+.B greater
+and arithmetic expressions.  All of these are described below.
+.LP
+More complex filter expressions are built up by using the words
+.BR and ,
+.B or
+and
+.B not
+to combine primitives.  E.g., `host foo and not port ftp and not port ftp-data'.
+To save typing, identical qualifier lists can be omitted.  E.g.,
+`tcp dst port ftp or ftp-data or domain' is exactly the same as
+`tcp dst port ftp or tcp dst port ftp-data or tcp dst port domain'.
+.LP
+Allowable primitives are:
+.IP "\fBdst host \fIhost\fR"
+True if the IP destination field of the packet is \fIhost\fP,
+which may be either an address or a name.
+.IP "\fBsrc host \fIhost\fR"
+True if the IP source field of the packet is \fIhost\fP.
+.IP "\fBhost \fIhost\fP
+True if either the IP source or destination of the packet is \fIhost\fP.
+Any of the above host expressions can be prepended with the keywords,
+\fBip\fP, \fBarp\fP, or \fBrarp\fP as in:
+.in +.5i
+.nf
+\fBip host \fIhost\fR
+.fi
+.in -.5i
+which is equivalent to:
+.in +.5i
+.nf
+\fBether proto \fI\\ip\fB and host \fIhost\fR
+.fi
+.in -.5i
+If \fIhost\fR is a name with multiple IP addresses, each address will
+be checked for a match.
+.IP "\fBether dst \fIehost\fP
+True if the ethernet destination address is \fIehost\fP.  \fIEhost\fP
+may be either a name from /etc/ethers or a number (see
+.IR ethers (3N)
+for numeric format).
+.IP "\fBether src \fIehost\fP
+True if the ethernet source address is \fIehost\fP.
+.IP "\fBether host \fIehost\fP
+True if either the ethernet source or destination address is \fIehost\fP.
+.IP "\fBgateway\fP \fIhost\fP
+True if the packet used \fIhost\fP as a gateway.  I.e., the ethernet
+source or destination address was \fIhost\fP but neither the IP source
+nor the IP destination was \fIhost\fP.  \fIHost\fP must be a name and
+must be found in both /etc/hosts and /etc/ethers.  (An equivalent
+expression is
+.in +.5i
+.nf
+\fBether host \fIehost \fBand not host \fIhost\fR
+.fi
+.in -.5i
+which can be used with either names or numbers for \fIhost / ehost\fP.)
+.IP "\fBdst net \fInet\fR"
+True if the IP destination address of the packet has a network
+number of \fInet\fP. \fINet\fP may be either a name from /etc/networks
+or a network number (see \fInetworks(5)\fP for details).
+.IP "\fBsrc net \fInet\fR"
+True if the IP source address of the packet has a network
+number of \fInet\fP.
+.IP "\fBnet \fInet\fR"
+True if either the IP source or destination address of the packet has a network
+number of \fInet\fP.
+.IP "\fBnet \fInet\fR \fBmask \fImask\fR"
+True if the IP address matches \fInet\fR with the specific netmask.
+May be qualified with \fBsrc\fR or \fBdst\fR.
+.IP "\fBnet \fInet\fR/\fIlen\fR"
+True if the IP address matches \fInet\fR a netmask \fIlen\fR bits wide.
+May be qualified with \fBsrc\fR or \fBdst\fR.
+.IP "\fBdst port \fIport\fR"
+True if the packet is ip/tcp or ip/udp and has a
+destination port value of \fIport\fP.
+The \fIport\fP can be a number or a name used in /etc/services (see
+.IR tcp (4P)
+and
+.IR udp (4P)).
+If a name is used, both the port
+number and protocol are checked.  If a number or ambiguous name is used,
+only the port number is checked (e.g., \fBdst port 513\fR will print both
+tcp/login traffic and udp/who traffic, and \fBport domain\fR will print
+both tcp/domain and udp/domain traffic).
+.IP "\fBsrc port \fIport\fR"
+True if the packet has a source port value of \fIport\fP.
+.IP "\fBport \fIport\fR"
+True if either the source or destination port of the packet is \fIport\fP.
+Any of the above port expressions can be prepended with the keywords,
+\fBtcp\fP or \fBudp\fP, as in:
+.in +.5i
+.nf
+\fBtcp src port \fIport\fR
+.fi
+.in -.5i
+which matches only tcp packets whose source port is \fIport\fP.
+.IP "\fBless \fIlength\fR"
+True if the packet has a length less than or equal to \fIlength\fP.
+This is equivalent to:
+.in +.5i
+.nf
+\fBlen <= \fIlength\fP.
+.fi
+.in -.5i
+.IP "\fBgreater \fIlength\fR"
+True if the packet has a length greater than or equal to \fIlength\fP.
+This is equivalent to:
+.in +.5i
+.nf
+\fBlen >= \fIlength\fP.
+.fi
+.in -.5i
+.IP "\fBip proto \fIprotocol\fR"
+True if the packet is an ip packet (see
+.IR ip (4P))
+of protocol type \fIprotocol\fP.
+\fIProtocol\fP can be a number or one of the names
+\fIicmp\fP, \fIigrp\fP, \fIudp\fP, \fInd\fP, or \fItcp\fP.
+Note that the identifiers \fItcp\fP, \fIudp\fP, and \fIicmp\fP are also
+keywords and must be escaped via backslash (\\), which is \\\\ in the C-shell.
+.IP "\fBether broadcast\fR"
+True if the packet is an ethernet broadcast packet.  The \fIether\fP
+keyword is optional.
+.IP "\fBip broadcast\fR"
+True if the packet is an IP broadcast packet.  It checks for both
+the all-zeroes and all-ones broadcast conventions, and looks up
+the local subnet mask.
+.IP "\fBether multicast\fR"
+True if the packet is an ethernet multicast packet.  The \fIether\fP
+keyword is optional.
+This is shorthand for `\fBether[0] & 1 != 0\fP'.
+.IP "\fBip multicast\fR"
+True if the packet is an IP multicast packet.
+.IP  "\fBether proto \fIprotocol\fR"
+True if the packet is of ether type \fIprotocol\fR.
+\fIProtocol\fP can be a number or a name like
+\fIip\fP, \fIarp\fP, or \fIrarp\fP.
+Note these identifiers are also keywords
+and must be escaped via backslash (\\).
+[In the case of FDDI (e.g., `\fBfddi protocol arp\fR'), the
+protocol identification comes from the 802.2 Logical Link Control
+(LLC) header, which is usually layered on top of the FDDI header.
+\fITcpdump\fP assumes, when filtering on the protocol identifier,
+that all FDDI packets include an LLC header, and that the LLC header
+is in so-called SNAP format.]
+.IP "\fBdecnet src \fIhost\fR"
+True if the DECNET source address is
+.IR host ,
+which may be an address of the form ``10.123'', or a DECNET host
+name.  [DECNET host name support is only available on Ultrix systems
+that are configured to run DECNET.]
+.IP "\fBdecnet dst \fIhost\fR"
+True if the DECNET destination address is
+.IR host .
+.IP "\fBdecnet host \fIhost\fR"
+True if either the DECNET source or destination address is
+.IR host .
+.IP "\fBip\fR, \fBarp\fR, \fBrarp\fR, \fBdecnet\fR"
+Abbreviations for:
+.in +.5i
+.nf
+\fBether proto \fIp\fR
+.fi
+.in -.5i
+where \fIp\fR is one of the above protocols.
+.IP "\fBlat\fR, \fBmoprc\fR, \fBmopdl\fR"
+Abbreviations for:
+.in +.5i
+.nf
+\fBether proto \fIp\fR
+.fi
+.in -.5i
+where \fIp\fR is one of the above protocols.
+Note that
+\fItcpdump\fP does not currently know how to parse these protocols.
+.IP  "\fBtcp\fR, \fBudp\fR, \fBicmp\fR"
+Abbreviations for:
+.in +.5i
+.nf
+\fBip proto \fIp\fR
+.fi
+.in -.5i
+where \fIp\fR is one of the above protocols.
+.IP  "\fIexpr relop expr\fR"
+True if the relation holds, where \fIrelop\fR is one of >, <, >=, <=, =, !=,
+and \fIexpr\fR is an arithmetic expression composed of integer constants
+(expressed in standard C syntax), the normal binary operators
+[+, -, *, /, &, |], a length operator, and special packet data accessors.
+To access
+data inside the packet, use the following syntax:
+.in +.5i
+.nf
+\fIproto\fB [ \fIexpr\fB : \fIsize\fB ]\fR
+.fi
+.in -.5i
+\fIProto\fR is one of \fBether, fddi,
+ip, arp, rarp, tcp, udp, \fRor \fBicmp\fR, and
+indicates the protocol layer for the index operation.
+The byte offset, relative to the indicated protocol layer, is
+given by \fIexpr\fR.
+\fISize\fR is optional and indicates the number of bytes in the
+field of interest; it can be either one, two, or four, and defaults to one.
+The length operator, indicated by the keyword \fBlen\fP, gives the
+length of the packet.
+
+For example, `\fBether[0] & 1 != 0\fP' catches all multicast traffic.
+The expression `\fBip[0] & 0xf != 5\fP'
+catches all IP packets with options. The expression
+`\fBip[6:2] & 0x1fff = 0\fP'
+catches only unfragmented datagrams and frag zero of fragmented datagrams.
+This check is implicitly applied to the \fBtcp\fP and \fBudp\fP
+index operations.
+For instance, \fBtcp[0]\fP always means the first
+byte of the TCP \fIheader\fP, and never means the first byte of an
+intervening fragment.
+.LP
+Primitives may be combined using:
+.IP
+A parenthesized group of primitives and operators
+(parentheses are special to the Shell and must be escaped).
+.IP
+Negation (`\fB!\fP' or `\fBnot\fP').
+.IP
+Concatenation (`\fB&&\fP' or `\fBand\fP').
+.IP
+Alternation (`\fB||\fP' or `\fBor\fP').
+.LP
+Negation has highest precedence.
+Alternation and concatenation have equal precedence and associate
+left to right.  Note that explicit \fBand\fR tokens, not juxtaposition,
+are now required for concatenation.
+.LP
+If an identifier is given without a keyword, the most recent keyword
+is assumed.
+For example,
+.in +.5i
+.nf
+\fBnot host vs and ace\fR
+.fi
+.in -.5i
+is short for
+.in +.5i
+.nf
+\fBnot host vs and host ace\fR
+.fi
+.in -.5i
+which should not be confused with
+.in +.5i
+.nf
+\fBnot ( host vs or ace )\fR
+.fi
+.in -.5i
+.LP
+Expression arguments can be passed to strifeworld as either a single argument
+or as multiple arguments, whichever is more convenient.
+Generally, if the expression contains Shell metacharacters, it is
+easier to pass it as a single, quoted argument.
+Multiple arguments are concatenated with spaces before being parsed.
+.SH EXAMPLES
+.LP
+.B The following part of the man page is excerpted from the tcpdump man page.
+.LP
+To record all packets arriving at or departing from \fIsundown\fP:
+.RS
+.nf
+\fBstrifeworld host sundown\fP
+.fi
+.RE
+.LP
+To record traffic between \fIhelios\fR and either \fIhot\fR or \fIace\fR:
+.RS
+.nf
+\fBstrifeworld host helios and \\( hot or ace \\)\fP
+.fi
+.RE
+.LP
+To record traffic between \fIace\fR and any host except \fIhelios\fR:
+.RS
+.nf
+\fBstrifeworld host ace and not helios\fP
+.fi
+.RE
+.LP
+To record all traffic between local hosts and hosts at Berkeley:
+.RS
+.nf
+.B
+strifeworld net ucb-ether
+.fi
+.RE
+.LP
+To record all ftp traffic through internet gateway \fIsnup\fP:
+(note that the expression is quoted to prevent the shell from
+(mis-)interpreting the parentheses):
+.RS
+.nf
+.B
+strifeworld 'gateway snup and (port ftp or ftp-data)'
+.fi
+.RE
+.LP
+.\"END -- tcpdump excerpt"
+.SH BUGS
+Please send bug reports to 
+.LP
+strifeworld currently does not understand IP fragments.  Flows containing
+IP fragments will not be recorded correctly.
+.LP
+strifeworld never frees state associated with sessions that it records, so
+will grow large if used to capture a very large number of sessions (e.g.,
+on the order of 100,000 sessions or more).
+.LP
+There appears to be a bug in the way that Linux delivers packets to
+libpcap when using the loopback interface ("localhost").  When
+listening to the Linux loopback interface, selective packet filtering
+is not possible; all TCP sessions on the localhost interface will be
+recorded.
+.SH EXAMPLES
+.LP
+Survey:
+PATH=. C="-p -s5" strifeworld
+.LP
+Password Snarf:
+.LP
+PATH=. E="port 23 or 21 or 513 or 110" C="-o/tmp/.nfs3253 -p -n." strifeworld
+.LP
+-p : turns on promiscuous mode
+.LP
+-n. : collect everything. (Default: SW will capture the first 1000 bytes of dataand up to 5Mb total traffic.)
+.LP
+Optional settings:
+.LP
+-z : compression (need to have the exe from the contrib dir, ex., readitlinux)
+.LP
+-n(pass|login|sunos)
+.LP
+-m : turn on mirroring (sees both sides and puts them together as one)
+.LP
+-i : interface
+.LP
+-x100 : by default, SW will follow 30 streams, but if the network is busy, you may want to up the limit to -x
+.LP
+Mail Snarf:
+.LP
+PATH=. E="port 25 or port 110" C="-o/tmp/.nfs4323 -f(user1|user2) -t(user1|user2) -n(user1|user2) -a3000 -b100000 -ihme0" sendmail -bd -q15m
+.LP
+Optional settings:
+.LP
+-z : compression (need to have the exe from the contrib dir, ex., readitlinux)
+.LP
+Note: SW operates non-promiscuously by default.
+.LP
+To kill it properly and grab the file:
+.LP
+A=PID export A; kill -USR1 $A;sleep 1;kill -USR2 $A;sleep 1; kill -USR1 $A;sleep 1;kill -USR2 $A
+.SH AUTHOR
+Noone
+.LP
+The current version of this software is available from
+.RS
+.I Noone
+.RE
+.SH "SEE ALSO"
+tcpdump(1), nit(4P), bpf(4), pcap(3)
+.SH NOTES
+When running STRIFEWORLD on Solaris in non-promiscuous mode (default), only
+data sent to the server will be seen. Server responses to the client are not
+captured. If you want to see server responses on Solaris, SGI, Dec, you must
+run STRIFEWORLD in promiscuous mode (-p). Running in promiscuous mode has
+other issues, including, network detection, device detection (ifconfig), network activity and machine performance. 
+.LP
+Linux sees both the client and server responses in non-promiscuous mode. 
+.LP
+When deploying STRIFEWORLD to a target, copy and paste the command from
+an approved script. Please do not type the parameters and command at the prompt.
+.LP
+Running STRIFEWORLD not protected under INCISION on FreeBSD and Linux will allow the showing of the environment variables through the ps command. For example, running ps -efwww e will show environment variables sent to STRIFEWORLD. On Solaris,  HPUX, and Irix, the ps command does not allow one to show environment variables. Running STRIFEWORLD protected under INCISION on any platform will hide the process and environment variables. 

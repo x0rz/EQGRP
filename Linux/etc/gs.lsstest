@@ -1,0 +1,3 @@
+#NOGS
+-lsh echo GSOPTIONS="$GSOPTIONS"  ; /current/etc/autolss $GSOPTIONS -nohist
+-gs /port -nohist

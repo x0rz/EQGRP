@@ -1,0 +1,253 @@
+#!/usr/bin/env python
+
+import os
+import re
+import sys
+import time
+import shlex
+import os.path
+import traceback
+
+import autoutils
+from autoutils import COLOR
+from autoutils import OptParser
+
+VERSION = '1.0.0.7'
+
+class autooracle:
+
+    def __init__(self):
+
+        self.nopen = autoutils.autoutils()
+        self.parser = self.get_arg_parser()
+        self.options = None
+        self.version = VERSION
+        self.env = {}
+
+        self.doprint = self.nopen.doprint
+
+        return
+
+
+    def getIDs(self, user=None, group=None):
+
+        if not user:
+            user = 'oracle'
+        if not group:
+            group = 'dba'
+
+        output,nopenlines,outputlines = self.nopen.doit("-lt /etc/passwd")
+        if len(outputlines) == 0:
+            print "Unable to locate /etc/passwd.  Can not continue"
+            return False
+
+        output,nopenlines,outputlines = self.nopen.doit("egrep \"^%s:\" /etc/passwd | awk -F: '{print $3\":\"$6;}'" % user)
+        if len(outputlines) == 0:
+            print "Unable to locate UID for user %s" % user
+            return False
+
+        self.env["uid"],self.env["home"] = output.split(":")
+
+        output,nopenlines,outputlines = self.nopen.doit("egrep \"^%s:\" /etc/group | awk -F: '{print $3;}'" % group)
+        if len(outputlines) == 0:
+            print "Unable to locate GID for %s group" % group
+            return False
+
+        self.env["gid"] = output
+
+        return True
+
+
+    def findPmon(self):
+
+        output,nopenlines,outputlines = self.nopen.doit('ps -ef | egrep \"ora_pmon|xe_pmon\" | grep -v "grep"')
+        if len(outputlines) == 0:
+            print "Can not locate pmon process"
+            return False
+        
+        self.env["ora_pmon_sid"] = output.split(" ")[0]
+        
+        return True
+
+
+    def findOracleHome(self, home=None, base=None, sid=None):
+
+        if "home" in self.env:
+            var = self.env["home"]
+            grepvars = []
+
+            if not home:
+                grepvars.append('ORACLE_HOME')
+            else:
+                self.env['oracle_home'] = home
+
+            if not base:
+                grepvars.append('ORACLE_BASE')
+            else:
+                self.env['oracle_base'] = base
+
+            if not sid:
+                grepvars.append('ORACLE_SID')
+            else:
+                self.env['oracle_sid'] = sid
+
+            grepvars = '|'.join(grepvars)
+
+            if grepvars != '':
+                output,nopenlines,outputlines = self.nopen.doit(
+                    'egrep -h "%s" %s/.cshrc %s/.profile %s/.bash_profile %s/.bashrc' % \
+                        (grepvars, var, var, var, var))
+
+                if len(outputlines) == 0:
+                    print "Can not locate ORACLE variables in %s" % self.env["home"]
+                    return False
+
+                regx = re.compile('^\s*(export\s+)?(%s)=([^;]+).*$' % grepvars)
+
+                for line in outputlines:
+                    ret = regx.match(line.strip())
+
+                    if ret != None:
+                        key = ret.group(2)
+                        val = ret.group(3)
+
+                        if key in ['ORACLE_HOME', 'ORACLE_BASE', 'ORACLE_SID']:
+                            key = key.lower()
+                            if not self.env.has_key(key):
+                                self.env[key] = val
+
+            if self.env.has_key('oracle_home') and self.env.has_key('oracle_base') and self.env.has_key('oracle_sid'):
+                if self.env['oracle_home'].find('$ORACLE_BASE') != -1:
+                    print 'REPLACING: $ORACLE_BASE => %s' % self.env['oracle_base']
+                    print 'Old value: ORACLE_HOME=%s' % self.env['oracle_home']
+                    self.env['oracle_home'] = re.sub('\$ORACLE_BASE', self.env['oracle_base'], self.env['oracle_home'])
+                    print 'New value: ORACLE_HOME=%s' % self.env['oracle_home']
+
+                return True
+            else:
+                print "Unable to find all variables"
+                return False
+
+        else:
+            return False
+
+        return
+
+
+    def replace(self):
+
+        print "Reading in opscript"
+        f = open("/current/etc/oracle/opscript",'r')
+        inputData = f.read()
+        f.close()    
+
+        inputData = re.sub("\$HOMEDIR", self.env["home"], inputData)
+        inputData = re.sub("\$HOSTNAME", self.nopen.nopen_rhostname.split(".")[0], inputData)
+        inputData = re.sub("\$ORACLEBASEDIR", self.env["oracle_base"], inputData)
+        inputData = re.sub("\$ORACLE_BASE", self.env["oracle_base"], inputData)
+        inputData = re.sub("\$ORACLEHOMEDIR", self.env["oracle_home"], inputData)
+        inputData = re.sub("\$ORACLE_HOME", self.env["oracle_home"], inputData)
+        inputData = re.sub("\$UID", self.env["uid"], inputData)
+        inputData = re.sub("\$GID", self.env["gid"], inputData)
+        inputData = re.sub("\$HOST_IPADDRESS", self.nopen.nopen_rhostname, inputData)
+        inputData = re.sub("\$ORACLESID", self.env["oracle_sid"], inputData)
+        inputData = re.sub("\$TMPDIR", self.options.dir, inputData)
+
+        if os.path.exists("/current/up/oracle/%s_opscript" % self.env["oracle_sid"]):
+            os.remove("/current/up/oracle/%s_opscript" % self.env["oracle_sid"])
+
+        f = open("/current/up/oracle/%s_opscript" % self.env["oracle_sid"],'w')
+        f.write(inputData)
+        f.close()
+
+        print self.env["oracle_base"]
+        print self.env["oracle_home"]
+
+        print "Data written to /current/up/oracle/%s_opscript" % self.env["oracle_sid"]
+
+        return True
+
+
+    def main(self, argv):
+
+        prog = sys.argv[0]
+        argv = argv[1:]
+
+        self.options, args = self.nopen.parseArgs(self.parser, argv)
+
+        if not self.nopen.connected:
+            self.nopen.connect()
+
+        if self.options.v:
+            self.print_version(prog)
+            return True
+
+        if not self.options.dir:
+            self.options.dir = '/tmp/.scsi'
+
+        if not self.getIDs(self.options.user, self.options.grp):
+            return False
+
+        if not self.findOracleHome(self.options.ohome, self.options.obase, 
+                                   self.options.osid):
+            return False
+
+        if not self.findPmon():
+            return False
+
+        #Pass mkopfiles the variables needed
+        #ORACLE_SID, CURRENT_MONTH, YEAR, HOSTNAME (short)
+        year = time.strftime("%Y",time.localtime())
+        month = time.strftime("%b",time.localtime()).upper()
+        short = self.nopen.nopen_rhostname.split(".")[0]
+        
+        if os.path.exists("/current/up/oracle"):
+            os.system("rm -f /current/up/oracle/*")
+
+        self.nopen.doit("-lsh /current/etc/oracle/mkopfiles.sh %s %s %s %s" % (self.env["oracle_sid"], year, month, short))
+
+        self.replace()
+
+        self.nopen.doit("-lsh 1x -title -popup -geometry 112x60-0+0 -e 'view /current/up/oracle/*_opscript'")
+
+        return
+
+
+    def get_arg_parser(self):
+
+        parser = OptParser(usage='usage: -gs oracle', epilog='\n-gs oracle version %s\n' % VERSION)
+        parser.add_option('-v', dest='v', action='store_true', help='Show version and exit.')
+        parser.add_option('-d', dest='dir', metavar='DIR', help='Temporary directory to use (default: /tmp/.scsi)')
+        parser.add_option('-u', dest='user', metavar='USER', help='Manually set the oracle user to use (default: oracle)')
+        parser.add_option('-g', dest='grp', metavar='USER', help='Manually set the oracle group to use (default: dba)')
+        parser.add_option('--oracle-sid', dest='osid', metavar='ORACLE_SID', help='Manually set $ORACLE_SID.')
+        parser.add_option('--oracle-home', dest='ohome', metavar='ORACLE_HOME', help='Manually set $ORACLE_HOME.')
+        parser.add_option('--oracle-base', dest='obase', metavar='ORACLE_BASE', help='Manually set $ORACLE_BASE.')
+
+        return parser
+
+
+    def print_version(self, prog):
+
+        script_name = os.path.basename(prog)
+
+        if script_name.startswith('auto'):
+            script_name = script_name.split('auto', 1)[1]
+
+        self.doprint('-gs %s version %s' % (script_name, self.version))
+
+
+if __name__ == '__main__':
+
+    imported = False
+
+    try:
+        # re-set the argv b/c NOPEN will do weird things with splitting args
+        argv = shlex.split(' '.join(sys.argv))
+        autooracle().main(argv)
+    except Exception, e:
+        print '\n\n%sUnhandled python exception: %s%s\n\n' % \
+            (COLOR['bad'], str(e), COLOR['normal'])
+        print '%sStack trace:\n' % COLOR['fail']
+        traceback.print_exc()
+        print COLOR['normal']

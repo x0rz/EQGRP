@@ -1,0 +1,269 @@
+#!/usr/bin/env perl
+#
+# INPUT: /current/etc/autoget.$nopen_rhostname (or -f filename).
+#        See autoautoget -h for syntax in that file.
+#
+$VER="1.3" ;
+$ext = $$ ; # limits likelihood of concurrent autoautoget's colliding
+            # BUT: still possible.
+            # not too likely to happen.
+myinit() ;
+unlink("$opetc/autoautoget.next.$ext") ;
+open(NOPENOUT,"> $opetc/autoautoget.next.$ext") || 
+  mydie("cannot open $opetc/autoautoget.next.$ext");
+$pass++ ;
+doit("${comment}NOGS") ;
+doit("-lsh mv $opetc/nopen_auto.$nopen_mypid $opetc/nopen_auto.$nopen_mypid.last 2>/dev/null") ;
+doit("$comment START running $opetc/autoautoget.next.$nopen_rhostname pass $pass") ;
+if (-e "$inputfile") {
+  unless (open(IN,"< $inputfile")) {
+    mydie("Aborting autoautoget--unable to open $inputfile");
+  }
+  my $i = 0 ;
+  while (<IN>) {
+    next if (/^$/ or /^$comment/) ;
+    s/\s+\#.*// ;
+    if (/^noburn/) {
+      $burning = 0 ;
+    }
+    if (/^keepalive/) {
+      $keepalive = 1 ;
+    }
+    ($taillines) = /\s+(\d+)L\s+/ ;
+    $get = "-get" ;
+    if ($taillines) {
+      $get = "-gs gettail -$taillines" ;
+      s/\s+(\d+)L\s+/ / ;
+    }
+    ($source,$what,$type,$ell) = /\s*(\S+)\s+(f|\d{2}-\d{2}-\d{4}|\d+d*)(\S*)\s+([\[\]-l]*)/ ;
+    $ell = " -l" if $ell ;
+    $ell = "" if $taillines ; # disable -l if using -gettail
+    next unless ($source and $what) ; # ignore lines with bad syntax
+#print "DBG: $source $what $ell: $_" ;
+    if ($source =~ /\s/) {
+      mywarn("Unable to autoautoget files/dirs containing whitespace--skipping $source");
+      next ;
+    }
+    if ($what eq "f") {
+      doit("$get$ell $source") ;
+      $gotone++;
+    } elsif ($what =~ /^\d{2}-\d{2}-\d{4}$/) {
+      # with -m we're ignoring the -gettail number if given
+      doit("-get$ell -m $what $source") ;
+      $gotone++;
+#    } elsif ($what =~ /^(\d+)d$/) {
+    } elsif ($what > 0 and $type eq "d") {
+      my $when = Time::Local::timegm(gmtime) - $what * 24 * 60 * 60 ;
+      my ($sec,$min,$hr,$mday,$monnum,$year) = gmtime($when);
+      ($mday) = substr($mday + 100,1) ;
+      $year += 1900;
+      $monnum++; # now 1=Jan based
+      ($monnum) = substr($monnum + 100,1) ;
+      $date = "$monnum-$mday-$year" ;
+      doit("$get$ell -m $date $source") ;
+      $gotone++;
+    } else {
+      $what = int($what) ;
+      if ($what < 1) {
+	mywarn("Unable to autoautoget $what recent files from $source--$what not a positive integer");
+	next ;
+      }
+      $gettingrecent++ ;
+      doit("-gs lss -f /current/ls-t.$nopen_rhostname.$pass -t $source",
+	   "# Now process ls-t.$nopen_rhostname.$pass",
+	   "-lsh egrep -v \"/\\.\$|/\\.\\.\$\" /current/ls-t.$nopen_rhostname.$pass | awk '{print \$10}' | tail -$what > /current/getthese.$nopen_rhostname.$pass",
+	  );
+      if ($taillines) {
+	`echo "#NOGS" > /current/getthesetails.$nopen_rhostname.$pass` ;
+	doit("-lsh sed \"s/^/$get /g\" /current/getthese.$nopen_rhostname.$pass >> /current/getthesetails.$nopen_rhostname.$pass",
+	     "-gs /current/getthesetails.$nopen_rhostname.$pass",
+	     "-lsh rm -f /current/getthese.$nopen_rhostname.$pass /current/ls-t.$nopen_rhostname.$pass",
+	    ) ;
+      } else {
+	doit(
+	     "-fget /current/getthese.$nopen_rhostname.$pass",
+	     "-lsh rm -f /current/getthese.$nopen_rhostname.$pass /current/ls-t.$nopen_rhostname.$pass",
+	    );
+      }
+      $gotone++;
+    }
+  }
+  close(IN) ;
+}
+doit("$comment DONE running $opetc/autoautoget.next.$nopen_rhostname pass $pass") ;
+doit("-gs keepalive") if ($keepalive) ;
+doit("-burnBURN") if ($burning) ;
+close(NOPENOUT);
+if ($debug) {
+  my $tmp = "\n".`grep -v "^#" $opetc/autoautoget.next.$ext`;
+  progprint($tmp,
+	    $COLOR_NORMAL,$COLOR_FAILURE,
+	    "### DEBUG MODE: FOLLOWING COMMANDS WOULD BE DONE IF NOT IN DEBUG MODE") ;
+} else {
+  if (-e "$opetc/nopen_auto.$nopen_mypid") {
+    `grep -v rm.*nopen_auto.$nopen_mypid $opetc/nopen_auto.$nopen_mypid >> $opetc/autoautoget.next.$ext` ;
+  }
+  #if ($gotone or $burning) {
+  if (!$gotone) {
+    my $more = " (refusing to burn)" if $burning ;
+    mywarn("Empty autoautoget file $inputfile$more. Fix it.") ;
+  } else {
+    rename("$opetc/autoautoget.next.$ext","$opetc/nopen_auto.$nopen_mypid");
+  }
+}
+unlink("$opetc/autoautoget.next.$ext");
+
+sub mywarn {
+  local ($what,$color,$color2,$what2) = (@_) ;
+  $color = $COLOR_FAILURE unless $color ;
+  $color2 = $color unless $color2 ;
+  $what2 = " $what2" if ($what2) ;
+#  local (@stuff) = (@_,$hopping) ;
+  warn  "${color2}${prog}[$$]$what2\a: ${color}$what$COLOR_NORMAL\n" ;
+#  warn "\n${COLOR_WARNING}\a@_$COLOR_NORMAL\n" ;
+}
+
+sub mydie {
+  local ($what,$color,$color2,$what2) = (@_) ;
+  $color = $COLOR_FAILURE unless $color ;
+  $color2 = $color unless $color2 ;
+  $what2 = " $what2" if ($what2) ;
+#  local (@stuff) = (@_,$hopping) ;
+  usage(  "${color2}${prog}[$$]$what2\a: ${color}$what$COLOR_NORMAL\n") ;
+#"\n${COLOR_FAILURE}\a$what $hopping$COLOR_NORMAL\n" ;
+  exit 1;
+}
+
+sub myinit {
+  use File::Basename ;
+  require Time::Local;
+  require "getopts.pl";
+  $COLOR_SUCCESS="\033[1;32m";
+  $COLOR_FAILURE="\033[1;31m";
+  $COLOR_WARNING="\033[1;33m";
+  $COLOR_NORMAL="\033[0;39m";
+  $COLOR_NOTE="\033[0;34m";
+  $COLOR_WHITE="\033[4;97m" ;
+  $prog = basename $0 ;
+  $prog = "-gs autoget" ;
+  $vertext = "$prog version $VER\n" ;
+  $opdir = "/current" ;
+  $opetc = "$opdir/etc" ;
+  $opdown = "$opdir/down" ;
+  $opmail = "$opdown/mailpull/$nopen_rhostname" ;
+  $usagetext="
+Usage: $prog [-h]                     (prints this usage statement)
+       $prog [ options ]
+
+Run from within a NOPEN session, $prog calls autoautoget which
+retrieves files from the remote end of that NOPEN session and (by
+default) -burnBURN's that NOPEN session.
+
+OPTIONS
+
+-b        DO NOT burn NOPEN sessions once $prog is complete
+          (default DOES burn the session when done)
+
+-k        Put NOPEN window into keepalive state once $prog is done
+
+-f file   Use \"file\" instead of $opetc/autoget.\$NOPEN_RHOSTNAME to
+          determine what files to download
+
+-d        Debug--output commands that would get run if -d not used
+
+Unless -f option is used, the files retrieved are determined by the host
+specific configuration file:
+
+                  $opetc/autoget.\$NOPEN_RHOSTNAME
+
+where \$NOPEN_RHOSTNAME is the usual hostname.IP string NOPEN uses for
+that target (which may or may not contain the domainname as well).
+
+SYNTAX for autoget configuration file:
+
+# blank lines and lines starting with # are ignored
+# comments can appear after valid syntax like those shown below
+
+noburn                          # same as -b option
+keepalive                       # same as -k option
+/dir/name [##L] N [-l]          # get the N most recent files in /dir/name
+/dir/name [##L] Nd [-l]         # get files from /dir/name less than N days old
+/dir/name MM-DD-YYYY [-l]       # get files in /dir/name newer than MM-DD-YYYY
+/file/name [##L] f [-l]         # get /file/name (file or directory!)
+
+The -l argument is optional on each line, and if given, -get -l is used
+instead of -get, putting the retrieved files in the current local working
+directory (-lpwd).
+
+The optional ##L argument means to only get the last ## lines from those files.
+
+";
+  mydie("bad option(s)") if (! Getopts( "hvbkf:d" ) ) ;
+  usage() if ($opt_h or $opt_v) ;
+  $| = 1;
+  $nopen_mypid = $ENV{NOPEN_MYPID} ;
+  $nopen_mylog = $ENV{NOPEN_MYLOG} ;
+  $nopen_rhostname = $ENV{NOPEN_RHOSTNAME} ;
+  $comment = "\#" ;
+  mydie("Call $prog from within noclient, not command line.\n".
+	"E.g., \"-lsh autoautoget -b\"\n".
+	"$vertext") unless $nopen_rhostname;
+  $pass = `grep "START running $opetc/autoautoget.next.$nopen_rhostname pass " $nopen_mylog | wc -l` ;
+  $pass = int($pass) ;
+  $gettingrecent=0 ;
+  $gotone=0;
+  $inputfile = "$opetc/autoget.$nopen_rhostname" ;
+  if ($opt_f) {
+    if (-s $opt_f) {
+      $inputfile = $opt_f ;
+    } else {
+      mywarn("Not using -f argument--$opt_f does not exist or is empty") ;
+    }
+  }
+  # set flags from options
+  $burning= ! $opt_b ;
+  $keepalive = 1 if ("@ARGV" =~ /keepalive/i or $opt_k) ;
+  $debug = $opt_d ;
+}
+
+sub progprint {
+  local ($what,$color,$color2,$what2) = (@_) ;
+  $color = $COLOR_NOTE unless $color ;
+  $color2 = $color unless $color2 ;
+  $what2 = " $what2" if ($what2) ;
+  print "${color2}${prog}[$$]$what2: ${color}$what$COLOR_NORMAL\n" ;
+}
+
+sub usage {
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  print $usagetext unless $opt_v ;
+  print $vertext ;
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  exit;
+} # end sub usage
+
+sub doit {
+  local (@cmds) = (@_) ;
+  local $output = "" ;
+  my $where = "" ;
+  my $nohistthistime = "";
+  while ($cmds[$#cmds] =~ /(OUT|NONOHIST)$/) {
+    if ($1 eq "NONOHIST") {
+      $nohistthistime = $1 ;
+    } else {
+      $where = pop(@cmds);
+    }
+  }
+  $where = "NOPENOUT" unless $where ;
+  foreach $cmd (@cmds) {
+    my $h = "";
+    $h="-nohist " 
+      unless ($cmd eq "#NOGS" or
+              $nonohist or
+              $nohistthistime or
+              !($where eq "NOPENOUT")) ;
+    print $where ("$h$cmd\n");
+    $output .= "$h$cmd\n";
+  }
+  return $output ;
+}#doit

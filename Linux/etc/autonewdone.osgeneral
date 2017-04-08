@@ -1,0 +1,352 @@
+#!/usr/bin/env perl
+#
+# 20130416 - This portion of autonewdone implements all of the general commands
+# that need to be run when first connecting to a UNIX target.
+#
+$VER="3.0.0.6";
+$ext = $$ ;			# limits likelihood of concurrent autodone's colliding
+				# BUT: still possible.
+				# not too likely to happen.
+
+$| = 1;
+myinit() ;
+
+sub doosgeneral() {
+  # This variable is used in multiple command parsing blocks.
+  my $year = ();
+
+  ($output) = doitwrite("uname -a");
+  newhostvar("host_uname{$nopen_rhostname}",$output)
+    if ($output);
+  #print HOSTINFO "OS: $output\n";
+
+  # We define out hackdirs here.
+  @hackdirs = ("/usr/lib/libX.a/bin","/usr/share/.aPa","/usr/share/.aPa/bin");
+  my $hackdirregexp = "(libX\.a|share\/.aPa)" ;
+  foreach (@hackdirs) {
+   next unless length $_;
+   push(@autoargv,$_);
+   $hackdirs .= " $_/*";
+  }
+  if (!$freebsdtarget and (!(-e "$optmp/hacksums.$nopen_rhostname"))) {
+    ($output,$nopenlines,@output) = 
+      doit("-ls -n -R /bin/ps /bin/netstat $hackdirs >> T:$optmp/hacksums.$nopen_rhostname",
+           "-ls -u -R /bin/ps /bin/netstat $hackdirs >> T:$optmp/hacksums.$nopen_rhostname",
+           "-sha1sum /bin/ps /bin/netstat $hackdirs >> T:$optmp/hacksums.$nopen_rhostname",
+      );
+    @hackoutput = split(/\n+/,@output);
+    foreach $line (@hackoutput) {
+      my ($hackedfile) = $line =~ /[\+-].* \d{4} (\/.*$hackdirregexp.*)/;
+      my ($sign,$file) = $line =~ /([\+-]).* \d{4} (\/.*)/;
+      $hackedfile =~ s/\s*$//;
+      $file =~ s/\s*$//;
+      if ($sign and $hackedfile) {
+        my $str="DEFINITELY A HACKED BOX!!";
+        if ($sign eq "+") {
+          $str .= "Matching checksum found for $file\n";
+        }
+        else {
+          $str .= "No matching checksum for $file\n";
+        }
+        $str .= "$line\n";
+        mywarn($str);
+        $latewarnings .= "\n$str";
+      }
+      elsif ($sign eq "-" and $file) {
+        my $file = $1;
+        $file =~ s/(\S*)\s*/$1/;
+        my $str="POSSIBLY Hacked? No matching checksum for $file\n";
+        $str .= "$line\n";
+        mywarn($str);
+        $latewarnings .= "\n$str";
+      }
+    }
+  } else {
+    # Just do /bin/ps and /bin/netstat, and don't save them...
+    unless ($freebsdtarget || $darwintarget) {
+      doit("-ls -n /bin/ps /bin/netstat",
+           "-ls -u /bin/ps /bin/netstat",
+           "-sha1sum /bin/ps /bin/netstat",
+          );
+    } elsif ($freebsdtarget) {
+      doit("-ls -n /bin/ps /usr/bin/netstat",
+           "-ls -u /bin/ps /usr/bin/netstat",
+           "-sha1sum /bin/ps /usr/bin/netstat",
+          );
+    } elsif ($darwintarget) {
+      doit("-ls -n /bin/ps /usr/sbin/netstat",
+           "-ls -u /bin/ps /usr/sbin/netstat",
+           "-sha1sum /bin/ps /usr/sbin/netstat",
+          );
+    }      
+  }
+
+ 
+  logdoit("=df");
+  logdoit("df -k -l");
+  chomp($dffile = `ls -rt $optargetcommands/df_-k_* | tail -1`);
+  if (open(DFFILE,"< $dffile")) {
+    my @disk = ();
+    my @tmp = ();
+    my %warned = ();
+    my $warnings = "";
+    while (chomp($line = <DFFILE>)) {
+      #dbg("in autonewdone doosgeneral, line=$line=");
+      @tmp = split (/\s+/,$line) ;
+      ($drv,$k,$u,$a,$c,$m) = @tmp;
+      #dbg("in autonewdone doosgeneral, drv=$drv= k=$k= u=$u= a=$a= c=$c= m=$m=");
+      next unless ($drv =~ /^\//) ;
+      push(@disk,$line);
+      if ($c > 90) {
+        $warnings .= "$drv\n" unless $warned{$drv}++;
+      }
+    }
+    close(DFFILE);
+    if (@disk) {
+      my $num = @disk;
+      print HOSTINFO "Number of Mounted Partitions: $num\n";
+      foreach $disk (@disk) {
+        print HOSTINFO "Partition: $disk\n";
+      }
+    }
+    chomp($warnings);
+    mywarn("\nAlmost FULL partitions:\n$warnings",$COLOR_FAILURE)
+      if $warnings;
+  }
+  else {
+    myalert("Can't open $dffile! $!");
+  }
+  
+  ($output) = doit("-getenv");
+  print HOSTINFO "System Path: $1\n" if $output =~ /^PATH=(.*)/;
+  
+  ($output) = doitwrite("=locale");
+  foreach $line (split(/\n+/,$output)) {
+    if ($line =~ /^LANG=(.+)/) {
+      print HOSTINFO "Box Language: $1\n" ;
+    }
+    if ($line =~ /^LC_CTYPE=(.+)/) {
+      print HOSTINFO "LC_CTYPE: $1\n" ;
+    }
+  }
+  
+  doitwrite("=procinfo") unless ($freebsdtarget or $solaristarget);
+  
+  doit("=mkoffset");
+  chomp($offsetfile = `ls -rt $opdown/mkoffset.$nopen_rhostname* | tail -1`);
+  if (open(OFFSETFILE,"< $offsetfile")) {
+    my ($ourdate,$ourudate,$theirdate,$theirudate,$boxutcoffset,$opboxdate) = ();
+    my $count = 0;
+    while (chomp($line = <OFFSETFILE>)) {
+      next if $line =~ /(\\n|\#)/;
+      #dbg("in autonewdone doosgeneral, line=$line=");
+      if ($opboxdate) {
+        next unless $line =~ /UTC_OFFSET/;
+        ($boxutcoffset) = $line =~ /(UTC_OFFSET=[-\d]*)/;
+      }
+      next unless $line =~ /(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s+.*\s(\d{4})/i;
+      $count++;
+      #dbg("in autonewdone dossgeneral, count=$count=");
+      chomp($ourdate = $line) if ($count == 1);
+      chomp($ourudate = $line) if ($count == 2);
+      chomp($theirdate = $line) if ($count == 3);
+      chomp($theirudate = $line) if ($count == 4);
+      next unless $count == 4 ;
+      $opboxdate = $line;
+    }
+    close(OFFSETFILE);
+    #dbg("in autonewdone doosgeneral, ourdate=$ourdate= ourudate=$ourudate= theirdate=$theirdate= theirudate=$theirudate= boxutcoffset=$boxutcoffset=");
+    ($mon,$d,$year) = $ourudate =~ /(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s+.*\s(\d{4})/i ;
+    ($h,$m,$nothing,$s) = $ourudate =~ /\s(\d{2}):(\d{2})(:(\d{2})){0,1}\s+/ ;
+    ($tz) = $ourudate =~ /([\D]+)\s+$year/;
+    $tz =~ s/^\s*(.*)\s*$/$1/;
+    $d += 100 ; $d = substr($d,1) ;
+    $gmnow = Time::Local::timegm($s,$m,$h,$d,$mons{$mon}-1,$year);
+    #dbg("in autonewdone doosgeneral, gmnow=$gmnow=");
+    
+    my ($newway,$monstr,$mday,$hr,$min,$myyear) = epochseconds($theirdate);
+    ($mon,$d,$year) = $theirdate =~ /(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s+.*\s(\d{4})/i ;
+    ($h,$m,$nothing,$s) = $theirdate =~ /\s(\d{2}):(\d{2})(:(\d{2})){0,1}\s+/ ;
+    ($tz) = $theirdate =~ /\s([\S]{3,})\s+$year/;
+    ($utctz) = $theirudate =~ /\s([\S]{3,})\s+$year/;
+    $d = sprintf("%02d",$d) ;
+    print HOSTINFO "Box Local Time: $theirdate\n";
+    print HOSTINFO "Box UTC Time: $theirudate\n";
+    print HOSTINFO "Box UTC_OFFSET: $boxutcoffset\n";
+    print HOSTINFO "Box Time Zone: $tz\n";
+    print HOSTINFO "Box UTC Time Zone: $utctz\n";
+    
+    my $tznow = Time::Local::timegm($s,$m,$h,$d,$mons{$mon}-1,$year);
+    my $offset = int(($tznow - $gmnow) / 60 + 0.50 ) unless $gmnow <= 0;
+    print HOSTINFO "Box Offset: $offset\n";
+    
+    my $offsethr = int(($offset / 60)) ;
+    $offset = -1 * $offset if ($offsethr < 0) ; # neg shown only in hr
+    my $offsetmin = int(0.50 + (($offset / 60) - int($offset / 60))* 60) ;
+    print HOSTINFO "Box Offset String: $offsethr hours $offsetmin minutes\n";          
+  }
+  else {
+    myalert("Can't open $offsetfile! $!");
+  }
+   
+  mydo("autochecklast");
+  chomp($lastfile = `ls -rt $optargetcommands/last_* | tail -1`);
+  if (open(LASTFILE,"< $lastfile")) {
+    my $rebootinfo = "";
+    while (chomp($line = <LASTFILE>)) {
+      next unless ($line =~ /^reboot/ or $line =~ /system boot/ );
+      chomp($year = `date +\%Y`) unless $year;
+      if (($day,$mon,$d,$h,$m) = $line =~ 
+        /(Mon|Tue|Wed|Thu|Fri|Sat|Sun) (\w{3}) ([ \d]{2}) (\d{2}):(\d{2})/) {
+        $d += 100;
+        $d = substr($d,1);
+        $rebootinfo = "Last reboot: $year-$mons{$mon}-$d $h:$m:00\n";
+        last;
+      }
+    }    
+    print HOSTINFO $rebootinfo;
+    close(LASTFILE);
+  }
+  else {
+    myalert("Can't open $lastfile! $!");
+  }
+  
+  my $datez = "%z";
+  $datez = "%Z" if $solaristarget;
+  my ($output) = doit("date \"+%a, %d %b %Y %H:%M:%S $datez\"");
+  writefile("$opdown/date-rfc2822.$nopen_rhostname",$output);
+  
+  my (undef,$dmesgfile) = doitwrite("ARRAY","dmesg;echo");
+  doit("egrep -i \"memory|mem = \" /var/log/messages /var/adm/messages /var/log/syslog /var/adm/syslog 2>/dev/null | tail -30 >> T:$dmesgfile");
+  chomp($dmesgfile = `ls -rt $optargetcommands/last_* | tail -1`);
+  if (open(DMESGFILE,"< $dmesgfile")) {
+    while (chomp($line = <DMESGFILE>)) {
+      $line =~ s/\r//g ; # Get rid of ^M's
+      $panic .= "$line\n" if ($line =~ /panic/) ;
+      ($t1,$t2,$t3) = $line2 =~ /(avail.*){0,1}mem\s*[=]\s*(\d+)(K{0,1})/i ;
+      if (scalar $t2 > 0) {
+        ($avail,$mem,$k) = ($t1,$t2,$t3) ;
+        $mem = $mem / 1024 unless ($k) ; # now in K
+        $mem = int(0.50 + 10 * $mem / 1024)/10 ; # now in M to one decimal
+        $avail ? $availmem = $mem : $totalmem = $mem ;
+        ($t1,$t2,$t3,$t4) = $line2 =~ /memory..(\d+)(k{0,1})\/(\d+)(k{0,1})/i ;
+      }
+      if (scalar $t1 > 0) {
+        $availmem = $t1 ; $k  = $t2 ;
+        $availmem = $availmem / 1024 unless ($k) ; # now in K
+        $availmem = int(0.50 + 10 * $availmem / 1024)/10 ; # now in M to one decimal
+      }
+      if (scalar $t3 > 0) {
+        $totalmem = $t3 ; $k2 = $t4 ;
+        $totalmem = $totalmem / 1024 unless ($k2) ; # now in K
+        $totalmem = int(0.50 + 10 * $totalmem / 1024)/10 ; # now in M to one decimal
+      }
+    }
+    close(DMESGFILE);
+    if ($availmem or $totalmem) {
+      if ($totalmem) {
+        $memprintlater.="RAM: $totalmem MB\n";
+        if ($availmem) {
+          my $availpct = int(0.50 + 100 * 10 * ($availmem/$totalmem)) / 10 ;
+          my $usedpct = int(0.50 + 10*(100 - $availpct))/10 ;
+          $memprintlater.="RAM available: $availmem of $totalmem MB ($usedpct% used)";
+        }
+        $memprintlater.="\n" ;
+      } else { # must be only $availmem
+        $memprintlater="RAM available: $availmem of ??? MB\n" ;
+      }
+      if ($panic) {
+        mymywarn("PANICS IN dmesg OUTPUT!!") ;
+        sleep 1;
+        mymywarn("PANICS IN dmesg OUTPUT!!") ;
+        sleep 1;
+        mymywarn ("$panic") if $saveoutputto;
+        print ("${COLOR_FAILURE}\n${panic}${COLOR_NORMAL}\n");
+        sleep 1;
+      }
+    }
+  }
+  else {
+    myalert("Can't open $lastfile! $!");
+  }
+    
+  doit("-w");
+  doitwrite("w");
+  chomp($wfile = `ls -rt $optargetcommands/w__* | tail -1`);
+  if (open(WFILE,"< $wfile")) {
+    while (chomp($line = <WFILE>)) {
+      my $ut = "";
+      my $userline = "";
+      my $usernum = 0;
+      my $gotusers = 0;
+      
+      next if $line =~ /^#/;
+      #dbg("in autonewdone doosgeneral, line=$line=");
+      ($uptimeprint,$userline,$loadprint) = ($1,$2,$3)
+        if $line =~ /^\s+\S{5,9}\s+(up \d+ \S+,\s+\S+),(\s+\d+\susers?),\s+(load averages?:.*)$/;
+      $usernum = $1 if $userline =~ /\s*(\d+).*/;
+      $gotusers++ if $usernum;
+      #dbg("in autonewdone doosgeneral, uptimeprint=$uptimeprint= userline=$userline= loadprint=$loadprint= usernum=$usernum=");
+      
+      if ($uptimeprint and $loadprint) {
+        print HOSTINFO "Load Average: $loadprint\n";
+        print HOSTINFO "Uptime string: $uptimeprint\n";
+        my ($d) = $uptimeprint =~ /(\d+)\s+day/;
+        my ($h,$m,$s) = $uptimeprint =~ /\s+(\d+):(\d+):(\d+)/;
+        ($h,$m) = $uptimeprint =~ /\s+(\d+):(\d+)/ unless $s;
+        if (length $h or length $m) {
+          my $utmin = $d*24*60 + $h*60 + $m ;
+          my $utsecs = $utmin*60 + $s;
+          print HOSTINFO "Uptime: $utmin\n";
+          print HOSTINFO "Uptime minutes: $utmin\n";
+          print HOSTINFO "Uptime seconds: $utsecs\n";
+        }
+        ($uptimeprint,$userline,$loadprint) = ();
+        next;
+      }
+      #dbg("in autonewdone doosgeneral, gotusers=$gotusers=");
+      if ($gotusers and !($line eq "") and ($line !~ /(^USER|^NO!|load average)/i)) {
+        print HOSTINFO "Active User: $line\n";
+        $latewarnings .= "\nActive User: $line\n";
+      }
+    }
+    close(WFILE);
+  }
+  else {
+    myalert("Can't open $wfile! $!");
+  }
+  return 1;
+}
+
+doosgeneral ();
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs newdone.osgeneral @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog = "-gs newdone.osgeneral";
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+
+  # Setting $autodone allows any mydo() called functions to know
+  # we are in this mode to populate $opdir/latewarnings*
+  $autodone=1;
+
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+}#myinit

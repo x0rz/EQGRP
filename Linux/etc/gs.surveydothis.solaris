@@ -1,0 +1,7 @@
+#NOGS
+eeprom
+isainfo -bv ; isainfo -kv ; isainfo -nv ; isalist
+pkginfo
+psrinfo -v
+showrev -a
+prtconf -V

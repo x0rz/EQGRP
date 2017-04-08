@@ -1,0 +1,390 @@
+#!/usr/bin/env perl
+use File::Basename;
+$progname = basename ${0};
+$versiontext = "2.6.0.3";
+@sourcefiles = (
+		"./ethernetMACs.txt",
+		"/current/doc/ethernetMACs.txt",
+		"/current/bin/ethernetMACs.txt",
+		"../doc/ethernetMACs.txt",
+		"../bin/ethernetMACs.txt",
+		"/usr/local/sbin/ethernetMACs.txt",
+);
+
+$usagetext = "
+Usage:  $progname [ethernetMACs.txt-file]
+
+   $progname loads in the ethernetMACs.txt file when first run. It then
+   prompts the user to paste in \"arp\" entries. When a blank line or ^D
+   is entered, those entered thus far are processed and the producer of
+   those NIC cards, if known, is output. If /current/down exists and is
+   writable, output is also saved there in two files: ethcheckout.raw
+   will contain the raw output of every execution of $progname, to
+   include any duplicates; ethcheckout.txt will contain a list of unique
+   MAC addresses, with multiple IPs on the same MAC grouped together.
+
+   So data pasted in is not lost, the final input to $progname should
+   always be a ^D. If ^C is attempted, the user is warned of this fact.
+   A second ^C will terminate, perhaps losing the most recently pasted
+   data.
+
+   $progname looks for ethernetMACs.txt in these locations:
+
+";
+foreach ( @sourcefiles ) {
+  $usagetext .= "\t\t$_\n";
+}
+
+$usagetext .= "\n$progname version $versiontext\n";
+sub catch_zap {
+  if (! $gotbreak and $arpEntries and $arpEntries > 0 ) {
+    warn ("You've pasted input. If you don't want to lose it,
+hit ^D instead. If you want to break anyway, ^C again.
+Now continuing where you left off...\n\n");
+    $gotbreak++;
+    return;
+  } else {
+print "cya!\n";
+    exit;
+  }
+}
+
+$myip = "MYIP";
+
+$SIG{INT} = \&catch_zap; 
+$arpEntries = 0;
+$arpHits = 0;
+$arpMisses = 0;
+$macCount = 0;
+%macEntry = ();
+%outputMacEntries = ();
+
+$argument_count = @ARGV;
+
+# print "argcount is $argument_count\n";
+
+# any help or version or other args?
+
+my $self = "";
+
+if ($argument_count > 0) {
+  if ($ARGV[0] eq "-h" or $ARGV[0] eq "--help" or $ARGV[0] eq "-v") {
+    print ($usagetext);
+    exit ;
+  }
+  if ($ARGV[0] eq "--self") {
+      $self = shift @ARGV;
+      $argument_count = @ARGV;
+  }
+}
+#
+# Open our reference file of known MAC addresses...
+#
+if ($argument_count != 1) {
+  if ($argument_count == 0) {
+    warn("No filename supplied. Trying defaults.... ");
+    # Try guessing...
+    while ($filename = shift(@sourcefiles)) {
+      open(FILEHANDLE, $filename) and last;
+    }
+    if ( ! $filename) {
+      # BONK!!!
+      warn("Reference file not found in any of:\n(@sourcefiles)\n\n");
+      die("\nUsage:  ethcheck.pl filename\n\n");
+    }
+    warn("Using $filename\n");
+  } else {
+    # BONK!!!
+    die("\nUsage:  ethcheck.pl filename\n\n");
+  }
+} else {
+  $filename = $ARGV[0];
+
+  print (STDOUT "Opening: <$filename>...\n");
+  if (!open(FILEHANDLE, $filename)) {
+    die("Unable to open <$filename>: $!");
+  }
+}
+
+# # Grab our current system's information...
+# $SIG{CHLD} = 'DEFAULT';  # Car!!!!!
+# if (!open(FILEHANDLE, "uname -a 2>&1 |")) {
+#     # BONK!!!
+#     die("\nUnable to invoke <uname -a 2>&1>: $!...\n");
+# }
+# 
+# # Read its output...
+# while(defined($systemInfo = <FILEHANDLE>)) {
+#     chomp($systemInfo);
+#     print (STDOUT "$textDatePrefix   $inputLine\n");
+# }
+# 
+# # Done with the input pipe...
+# close(FILEHANDLE);
+# $SIG{CHLD} = 'IGNORE';  # Game on!!!!!
+$fileout = 0;
+
+if (-d "/current/down") {
+  $dirage = -C _;
+  if ($dirage < (4.0/24.0)) { # if < 4 hours old
+    if (open (FILEOUT, ">> /current/down/ethcheckout.raw")) { 
+      $fileout = 1;
+      print STDERR "Sending output to both STDOUT and appending to /current/down/ethcheckout.raw\n\n";
+    } else {
+      warn "Could not open /current/down/ethcheckout.raw for append.";
+    }
+  }
+}
+# skip the bit of perl code at top
+while( ! <FILEHANDLE> =~ /^__DATA__/) {} ;
+while(defined($currentLine = <FILEHANDLE>)) {
+  if (!($currentLine =~ /^\s*\#/)) {
+    # Not a comment...good...include it...
+    $macCount++;
+    chomp($currentLine);
+    my(@macFields) = split(/ +/, $currentLine);
+    $macIndex = "\L$macFields[0]\E";
+#    $macIndex =~ s/:..:..:..$//;
+    shift(@macFields);
+    $macEntry{$macIndex} = join(" ", @macFields);
+  }
+}
+$line = "-----------------------------------------------------------------------------\n";
+# Done with the file...
+  close(FILEHANDLE);
+  print (STDOUT $line);
+  print (STDOUT "$macCount total MAC entries loaded from $filename\n");
+  print (STDOUT "ready to roll...paste me some \"arp\" output, please...\n");
+  print (STDOUT "(hit <ENTER> between batches, ^D to terminate).\n");
+  print (STDOUT $line);
+
+while (defined($arpLine = <STDIN>)) {
+#  $arpLine =~ s/\s+/ /g;
+  if ($arpLine eq "\n") {
+    # Time to flush output...
+    printout ( $line);
+    ## Uncomment to sort by "arp -a" text...
+    # foreach(sort by_alphabet keys(%outputMacEntries)) {
+    #     # Print each entry out...
+    #     printout ( "$outputMacEntries{$_}");
+    # }
+    ## Uncomment to sort by MAC codes...
+    foreach(sort by_alphabet values(%outputMacEntries)) {
+      # Print each entry out...
+      printout ( "$_");
+    }
+    printout ( $line);
+    # Reset our entries...
+    %outputMacEntries = ();
+    next;
+  }
+  $myip = $1 if ($arpLine =~ /\s(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s/ and $1 ne "127.0.0.1");
+  $arpEntries++;
+  chomp($arpLine);
+  #  if ( $arpLine =~ /Internet / ) { #input from Cisco
+  #    $arpLine =~ s/ ([\da-f]{2})([\da-f]{2})\.([\da-f]{2})([\da-f]{2})\.([\da-f]{2})([\da-f]{2})/ \1:\2:\3:\4:\5:\6/i
+  #  }
+  # An snmpscan of cisco router shows "ff ff ff ff ff ff" format, with spaces, so we replace those spaces with :.
+  if ($arpLine =~ /(([\da-f]{2})\s+([\da-f]{2})\s+([\da-f]{2})\s+([\da-f]{2})\s+([\da-f]{2})\s+([\da-f]{2}))\s*$/i) {
+    # This first one is anchored on the EOL
+    my $oldmac = $1;
+    my $newmac = lc "$2:$3:$4:$5:$6:$7";
+    $arpLine = "$newmac $arpLine";
+#    $arpLine =~ s/$oldmac/$newmac/;
+  } elsif ($arpLine =~ /(([\da-f]{2})\s+([\da-f]{2})\s+([\da-f]{2})\s+([\da-f]{2})\s+([\da-f]{2})\s+([\da-f]{2}))/i) {
+    # This one is bytes 2-7 of 7 or more
+    my $oldmac = $1;
+    my $newmac = lc "$2:$3:$4:$5:$6:$7";
+    $arpLine = "$newmac $arpLine";
+#    $arpLine =~ s/$oldmac/$newmac/;
+  } elsif ($arpLine =~ /(([\da-f]{2})\s+([\da-f]{2})\s+([\da-f]{2})\s+([\da-f]{2})\s+([\da-f]{2})\s+([\da-f]{2}))/i) {
+    # This one is bytes 2-7 of 7 or more
+    my $oldmac = $1;
+    my $newmac = lc "$2:$3:$4:$5:$6:$7";
+    $arpLine = "$newmac $arpLine";
+#    $arpLine =~ s/$oldmac/$newmac/;
+  } elsif ($arpLine =~ /([\da-f]{2})\s*(([\da-f]{2})\s+([\da-f]{2})\s+([\da-f]{2})\s+([\da-f]{2})\s+([\da-f]{2})\s+([\da-f]{2}))/i) {
+    my $oldmac = $2;
+    my $newmac = lc "$3:$4:$5:$6:$7:$8";
+    $arpLine = "$newmac $arpLine";
+#    $arpLine =~ s/$oldmac/$newmac/;
+  } elsif ($arpLine =~ /\s(([\da-f]{1,2})[\.:]([\da-f]{1,2})[\.:]([\da-f]{1,2})[\.:]([\da-f]{1,2})[\.:]([\da-f]{1,2})[\.:]([\da-f]{1,2}))\s/i) {
+    my $oldmac = $1;
+    my $newmac = lc "$2:$3:$4:$5:$6:$7";
+    $arpLine = "$newmac $arpLine";
+#    $arpLine =~ s/$oldmac/$newmac/;
+  }
+
+  my(@arpFields) = split(/\s+/, $arpLine);
+  $macAddress = 0;
+  foreach (@arpFields) {
+    # if ($_ =~ /^..:..:..:..:..:../) {
+    if (/^[\da-f]{2}[\.:-\s]{0,1}[\da-f]{2}[\.:-\s]{0,1}[\da-f]{2}[\.:-\s]{0,1}[\da-f]{2}[\.:-\s]{0,1}[\da-f]{2}[\.:-\s]{0,1}[\da-f]{2}$/i) {
+      s/^([\da-f]{2})([\da-f]{2}).{0,1}([\da-f]{2})([\da-f]{2}).{0,1}([\da-f]{2})([\da-f]{2})/\1:\2:\3:\4:\5:\6/i ;
+
+    }
+
+    # Some router stuff shows this format: 
+    #    cisco:  sh ip arp
+    #    huawei: display arp bridge
+    #    huawei: display arp
+    if (/^([\da-f]{4})[\.:-\s]{0,1}([\da-f]{4})[\.:-\s]{0,1}([\da-f]{4}[\.:-\s]){0,1}$/i) {
+      $_ = lc "$1:$2:$3";
+      s/([\da-f]{2})([\da-f]{2})/$1:$2/g;
+    }
+
+    if ( (/^[\da-f]{1,2}[:-][\da-f]{1,2}[:-][\da-f]{1,2}[:-][\da-f]{1,2}[:-][\da-f]{1,2}[:-][\da-f]{1,2}/i)
+       ) {
+      # Looks like a MAC address...reformat a bit...
+      @macFields = split(/[-:]/, "\L$_\E");
+      $macAddress = sprintf("%02x:%02x:%02x:%02x:%02x:%02x",
+			    hex($macFields[0]),
+			    hex($macFields[1]),
+			    hex($macFields[2]),
+			    hex($macFields[3]),
+			    hex($macFields[4]),
+			    hex($macFields[5]));
+      $arpLine =~ s/\ +$_// ;
+#    } elsif ($_ =~ /^[^-]+-[^-]+-[^-]+-[^-]+-[^-]+-[^-]+/) {
+#      # Hmmm...could it be some mutant system (can you say DEC)???
+#      @macFields = split(/-+/, "\L$_\E");
+#      $macAddress = sprintf("%02x:%02x:%02x:%02x:%02x:%02x",
+#			    hex($macFields[0]),
+#			    hex($macFields[1]),
+#			    hex($macFields[2]),
+#			    hex($macFields[3]),
+#			    hex($macFields[4]),
+#			    hex($macFields[5]));
+    }
+  }
+  if ($macAddress) {
+    $outputMacEntries{$arpLine} = "$macAddress  ";
+    $macIndex = $macAddress;
+    $macIndex =~ s/:..:..:..$//;
+
+    if (defined($macEntry{$macIndex})) {
+      $outputMacEntries{$arpLine} .= "<< $macEntry{$macIndex} >>";
+      $arpHits++;
+    } else {
+      $outputMacEntries{$arpLine} .= "NOT found in file $filename";
+      $arpMisses++;
+    }
+  } else {
+#    $outputMacEntries{$arpLine} = "no MAC address field found in \"arp\" line";
+  }
+  if ($self) {
+      $myip = $nopen_myip if $nopen_myip;
+      $outputMacEntries{$arpLine} .= "(self:$myip)";
+  }
+  $outputMacEntries{$arpLine} .= "  $arpLine\n";
+}
+printout ( $line);
+foreach(sort by_alphabet values(%outputMacEntries)) {
+  # Print each entry out...
+    if ($myip ne "MYIP" and /:MYIP/) {
+	s,:MYIP,:$myip,;
+    }
+  printout ( "$_");
+}
+
+# Reset our entries...
+%outputMacEntries = ();
+
+printout ( $line);
+printout ( "Done: $arpHits inputs were identified...$arpMisses not\n");
+printout ( $line);
+
+close (FILEOUT) if $fileout;
+%donethis = () ;
+
+if (open (FILEIN, "/current/down/ethcheckout.raw")) {
+  $mac = "";
+  $dupes = 0 ;
+  while ( $linein = <FILEIN> ) {
+    if ( $linein =~ /^----/ or $linein =~ /\s224\.0\.0\.0\s/ ) {
+      $mac = "";
+      next;
+    }
+    next if $donethis{$linein}++ ;
+    ($mac) = split(/\s+/,$linein);
+    if ($mac =~ /^[\da-f]{1,2}[:-][\da-f]{1,2}[:-][\da-f]{1,2}[:-][\da-f]{1,2}[:-][\da-f]{1,2}[:-][\da-f]{1,2}/i) {
+      if (defined $macs{$mac} and length($macs{$mac})) {
+	$linein =~ s/$mac/$mac\+/ ;
+	$dupes++ ;
+      } else {
+	$linein =~ s/$mac/ / ;
+      }
+#      $linein = "       dupe      $linein" if (length($macs{$mac})) ;
+      $macs{$mac} .= $linein unless ( $ips{$linein} ) ;
+      $ips{$linein}++ ;
+#    } else {
+#      $enddump .= $linein;
+    }
+  }
+  close(FILEIN);
+  $uniqips = keys( %macs );
+  $uniqmacs = keys( %ips );
+  $oldheaders = "" ;
+  if (open (FILEIN, "< /current/down/ethcheckout.txt")) {
+    while (<FILEIN>) {
+      next if ( / output generated/ or /Containing data from/ or /op host/ ) ;
+      $oldheaders .= $_ if (/^\#/) ;
+      last if (/^--/);
+    }
+    close(FILEIN) ;
+  } # else never mind
+  if (open (FILEOUT, "> /current/down/ethcheckout.txt")) {
+    print "\nCreating /current/down/ethcheckout.txt containing following:\n\n";
+    $fileout = 1;
+  } else {
+    $fileout = 0;
+  }
+  $localhost = $ENV{'HOST'};
+  $localhost = $ENV{'HOSTNAME'} unless $localhost ;
+  printout ( "#### op host: $localhost\n" ) if ($localhost);
+  printout ( "#### output generated ".`date` ) ;
+  $all = " ALL OF" if $oldheaders ;
+  printout ( "#### Containing data from$all:\n$oldheaders");
+  $nopen_rhostname = "$ENV{'NOPEN_RHOSTNAME'}";
+  my $tmp = "" ;
+  if (length $nopen_rhostname) {
+    $tmp = $nopen_rhostname."xx" ;
+  } elsif (-r "/current/etc/opscript.txt") {
+#    $tmp = `head -2 /current/etc/opscript.txt 2>/dev/null` ;
+#    $tmp =~ s/\n....\s+/\t/ ;
+#    $tmp =~ s/[\s\#]+//g ;
+    $tmp = "Command Line--Unknown source" ;
+  } else {
+    $tmp = "Command Line--Unknown source" ;
+  }
+  $ip = "" ;
+  ($ip) = $tmp =~ /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})xx/ ;
+  ($host) = $tmp =~ /(.*)\.*$ip/ ;
+  $host =~ s/\.$// ;
+  $host .= " " while (length($host) < 25) ;
+  $header = "####                $host\t$ip\n" ;
+  printout ( $header ) unless ( $oldheaders =~ /$header/ );
+  printout ( $line ) ;
+  foreach $mac (sort keys ( %macs ) ) {
+    printout ( $mac.$macs{$mac}  ) ;
+  }
+  printout ( "\n   +  Indicates duplicate IPs for same MAC\n") if $dupes;
+  printout ( "
+Unique MACs found: $uniqmacs
+Unique IP's found: $uniqips\n\n" ) ;
+}
+
+#printout ( $enddump );
+
+sub by_alphabet {
+	return $a cmp $b;
+}
+
+sub printout {
+  my ($linein) = (@_);
+  print STDOUT $linein;
+  print FILEOUT $linein if $fileout;
+}
+sub dbg {
+  warn "DBG: ".gmtime().": @_\n";
+}

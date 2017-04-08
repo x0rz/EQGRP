@@ -1,0 +1,623 @@
+#!/usr/bin/env python2.7
+VERSION = '0.3.0.0'
+
+import os
+import sys
+import shlex
+import traceback
+import re
+import time
+
+import autoutils
+from autoutils import COLOR
+from autoutils import OptParser
+from autolss import nopenlss
+
+import ConfigParser
+
+class autorootkit:
+
+    def __init__(self):
+
+        self.version = VERSION
+        self.nopen = autoutils.autoutils()
+        self.parser = self.get_arg_parser()
+        self.doprint = self.nopen.doprint
+        self.findComplete = 0
+        self.ldpreload = ""
+
+    # libXfind()
+    #
+    # This will look for remnants of libX in the find and, if it finds it,
+    # will change the aliases to properly use ps and netstat, among others
+    def libXfind(self):
+        if not self.findComplete:
+            autorootkit.libXguess(self)
+            return
+        libXfound = 0
+        rpsloc = ""
+        netstatloc = ""
+        for line in open("%s/cmdout/%s-find" % (self.nopen.opdown,self.nopen.nopen_rhostname)):
+            if "libX.a" in line:
+                libXfound = 1
+                if "/rps" in line:
+                    rpsloc = line.split()[22]
+                if "/netstat" in line:
+                    netstatloc = line.split()[22]
+                #print line
+        if libXfound:
+            autorootkit.libXsolve(self, rpsloc, netstatloc)
+        else:
+            self.doprint(COLOR['success'], "No libX found.")
+
+    # libXguess()
+    #
+    # This will look for remnants of libX by guessing where it should be
+    def libXguess(self):
+        output, nopenlines, outputlines = self.nopen.doit("-ls -R /usr/lib/libX.a")
+        if output:
+            rpsloc = ""
+            netstatloc = ""
+            for line in outputlines:
+                if "/rps" in line:
+                    rpsloc = line.split()[9]
+                if "/netstat" in line:
+                    netstatloc = line.split()[9]
+            autorootkit.libXsolve(self, rpsloc, netstatloc)
+        else:
+            self.doprint(COLOR['success'], "No libX found.")
+
+
+    # libXsolve()
+    #
+    # This will save off the netstat/ps saved in the bin directory of libX and then change the path/aliases.
+    # The parameters are the location of rps and netstat
+    def libXsolve(self, rpsloc, netstatloc):
+        # 1. save off the good netstat
+        output, nopenlines, outputlines = self.nopen.doit("%s -na; %s -rn >T:%s/netstat.%s.WITHlibX.a.netstat" % (netstatloc, netstatloc, self.nopen.opdown, self.nopen.nopen_rhostname))
+        # 2. save off the good ps
+        # 2a. get the ps switches from the help output
+        outputfile = "%s/.help.%s" % (self.nopen.optmp, self.nopen.nopen_rhostname)
+        output, nopenlines, outputlines = self.nopen.doit("-help >T:%s" % outputfile)
+        switches = ""
+        with file(outputfile, 'r') as aliases:
+            for alias in aliases:
+                if "alias =ps" in alias:
+                    switches = alias.split()[-1]
+        # 2b. save it off
+        output, nopenlines, outputlines = self.nopen.doit("%s %s >%:%s/ps.%s.WITHlibX.a.rps" % (rpsloc,switches,self.nopen.opdown, self.nopen.nopen_rhostname))
+        # 3. adjust the aliases
+        # 3a. add the libX path
+        libXbinpath = "/".join(rpsloc.split("/")[:-1])
+        output, nopenlines, outputlines = self.nopen.doit("-gs addpath %s" % libXbinpath)
+        # 3b. write the alias
+        newnorcfile = "%s/.norc.tmp.%s" % (self.nopen.optmp,self.nopen.nopen_rhostname)
+        fd = open(newnorcfile,'w')
+        fd.write("alias =ps=rps %s\n" % switches)
+        fd.close()
+        # 3c. add the alias
+        output, nopenlines, outputlines = self.nopen.doit("-readrc %s" % newnorcfile)
+        # 4. print the status
+        self.doprint(COLOR['fail'], "Found libX, saved off the netstat/ps, and modified the aliases to reflect the new ps change.")
+        return
+
+
+    # inodeChecks()
+    #
+    # This will look for jumps in inodes on the file system to detect trojaned
+    # binaries.  Not sure if this will be helpful or not.
+    def inodeChecks(self):
+        dirs = ['/bin','/sbin','/usr/bin','/usr/sbin']
+        threshold = 5000
+        jumpy_inodes = []
+        for dir in dirs:
+            output, nopenlines, outputlines = self.nopen.doit("-ls -i %s" % dir)
+            sorted_inodes = []
+            for line in outputlines:
+                inode = int(line.split()[0])
+                sorted_inodes.append((inode,line))
+            sorted_inodes.sort()
+            previous_inode = 0
+            for item in sorted_inodes:
+                diff=item[0]-previous_inode
+                if previous_inode != diff and diff > threshold:
+                    #print "diff: %s" % diff
+                    #self.doprint(COLOR['fail'],"inode jump: %s" % item[1])
+                    jumpy_inodes.append(item[1])
+                previous_inode = item[0]
+        # prune the list
+        jumpy_inodes = [x for x in jumpy_inodes if not x.endswith("..") and not x.endswith("/.")]
+        self.doprint(COLOR['fail'],'These files are at least %s higher than the previous inode number in the respective directory:\n%s' % (threshold,"\n".join(jumpy_inodes)))
+
+    # historyCheck()
+    #
+    # This will look in history files for bad strings
+    # Requires full find
+    def historyCheck(self):
+        badCommands = ['fsdb','debugfs','scrub','dd','LD_PRELOAD','dump'] #also contains ufsdump
+        badVariables = ['HISTSIZE','HISTFILE'] #also contains HISTFILESIZE
+        allHits = {}
+        if self.findComplete:
+            for line in open("%s/cmdout/%s-find" % (self.nopen.opdown,self.nopen.nopen_rhostname)):
+                # Examine history files for badCommands
+                m=re.search(" (\S*\.\w*history)\n", line)
+                if m and line.split()[1].startswith("-"):
+                    output, nopenlines, outputlines = self.nopen.doit("egrep \"%s\" %s" % ("\ |\ ".join(badCommands),m.group(1)))
+                    if output:
+                        allHits[m.group(1)] = output
+                # Examine profile files for badVariables
+                if line.endswith("profile\n") and line.split()[1].startswith("-"):
+                    output, nopenlines, outputlines = self.nopen.doit('file %s' % line.split()[22])
+                    if "ELF" not in output:
+                        for theString in badVariables:
+                            #output, nopenlines, outputlines = self.nopen.doit("grep -li %s %s 2>/dev/null" % (theString, line.split()[22]))
+                            output, nopenlines, outputlines = self.nopen.doit("egrep \"%s.*=\" %s 2>/dev/null" % (theString, line.split()[22]))
+                            if output:
+                                #self.doprint(COLOR['fail'],"Profile %s contains %s!" % (line.split()[22],theString))
+                                allHits[line.split()[22]] = theString
+        else:
+            output, nopenlines, outputlines = self.nopen.doit("-cat /etc/passwd")
+            for line in outputlines:
+                if len(line) > 1:
+                    homedir = line.split(":")[5]
+                    # Examine history files for badCommands
+                    output, nopenlines, outputlines = self.nopen.doit("-lt %s/.*history" % homedir)
+                    if outputlines:
+                        for line in outputlines:
+                            output2, nopenlines2, outputlines2 = self.nopen.doit("egrep \"%s\" %s" % ("\ |\ ".join(badCommands),line.split()[9]))
+                            if output2:
+                                allHits[line.split()[9]] = " ".join(badCommands)
+                    # Examine profile files for badVariables
+                    output, nopenlines, outputlines = self.nopen.doit("-lt %s/.*profile" % homedir)
+                    if outputlines:
+                        for line in outputlines:
+                            output2, nopenlines2, outputlines2 = self.nopen.doit("egrep \"%s\" %s" % ("\ |\ ".join(badVariables),line.split()[9]))
+                            if output2:
+                                allHits[line.split()[9]] = " ".join(badCommands)
+        # now print out all the hits
+        self.doprint(COLOR['fail'],"Hits:\n\n%s" % "\n".join([": ".join(key) for key in allHits.items()]))
+         
+
+    # staticSigs()
+    #
+    # This will look for static signatures in files
+    def staticSigs(self):
+        conf = ConfigParser.ConfigParser()
+        conf.read("/current/etc/rootkits.sig")
+        static_hits = []
+        for section in conf.sections():
+            files = " ".join(conf.get(section,'files').split('\n'))
+            if files:
+                output, nopenlines, outputlines = self.nopen.doit('-lt %s' % files)
+                if output:
+                    for hit in outputlines:
+                        static_hits.append((section, hit))
+            dirs = " ".join(conf.get(section,'dirs').split('\n'))
+            if dirs:
+                output, nopenlines, outputlines = self.nopen.doit('-ls -d %s' % dirs)
+                if output:
+                    for hit in outputlines:
+                        static_hits.append((section,hit))
+            syms = " ".join(conf.get(section,'ksyms').split('\n'))
+            if syms:
+                output, nopenlines, outputlines = self.nopen.doit('grep %s /proc/k*syms 2>/dev/null' % syms)
+                if output:
+                    for hit in outputlines:
+                        static_hits.append((section,hit))
+            users = " ".join(conf.get(section,'users').split('\n'))
+            if users:
+                output, nopenlines, outputlines = self.nopen.doit('-grep %s /etc/passwd 2>/dev/null' % users)
+                if output:
+                    for hit in outputlines:
+                        static_hits.append((section,hit))
+        # Now print out the hits
+        outputstring = ''
+        if static_hits:
+            for hit in static_hits:
+                outputstring += '%s #%s\n' % (hit[1].ljust(50), hit[0])
+            self.doprint(COLOR['fail'], 'Found the following hits:\n',outputstring)
+        else:
+            self.doprint(COLOR['success'], 'No hits on static signatures.')
+
+    # inetdChecks
+    #
+    # This performs a preliminary check to see if any inetd/xinetd service
+    # mentions a shell found in /etc/shells
+    def inetdChecks(self):
+        shells = ['/bin/bash','/bin/sh']
+        output, nopenlines, outputlines = self.nopen.doit("-cat /etc/shells")
+        if output:
+            for shell in outputlines:
+                if shell and shell not in shells:
+                    shells.append(shell)
+        output, nopenlines, outputlines = self.nopen.doit("grep -l \"tcp\" /etc/*inetd.conf /etc/*inetd.d/* 2>/dev/null")
+
+        bad_services = []
+        for inetd_file in outputlines:
+            for shell in shells:
+                output2, nopenlines2, outputlines2 = self.nopen.doit("grep -l %s %s 2>/dev/null" % (shell, inetd_file))
+                if output2:
+                    bad_services.append(inetd_file)
+        if bad_services:
+            self.doprint(COLOR['fail'],"Found inetd services that seem to spawn a shell:")
+            output, nopenlines, outputlines = self.nopen.doit("more %s | cat" % " ".join(bad_services))
+        else:
+            self.doprint(COLOR['success'],"\nNo suspicious inetd services.\n")
+
+
+    # networkChecks
+    #
+    # This performs anomalous network checks via promiscdetect and sniffdetect
+    def networkChecks(self):
+        output, nopenlines, outputlines = self.nopen.doit('-gs promiscdetect')
+        output, nopenlines, outputlines = self.nopen.doit('-gs sniffdetect')
+
+    # ldsopreload
+    #
+    # This performs checks on ld.so.preload and LD_* environment variables
+    # Requires full find
+    def ldsopreload(self):
+        output, nopenlines, outputlines = self.nopen.doit('-lt /etc/ld.so.preload')
+        if output:
+            output, nopenlines, outputlines = self.nopen.doit('-cat /etc/ld.so.preload')
+            self.doprint("Investigate:\n=== /etc/ld.so.preload ===\n",output,"=== END ===\n")
+            self.nopen.pause()
+        if self.findComplete:
+            for line in open("%s/cmdout/%s-find" % (self.nopen.opdown,self.nopen.nopen_rhostname)):
+                if line.endswith("profile\n") and line.split()[1].startswith("-"):
+                    output, nopenlines, outputlines = self.nopen.doit('file %s' % line.split()[22])
+                    if "ELF" not in output:
+                        output, nopenlines, outputlines = self.nopen.doit("-grep -i ld_ %s" % line.split()[22])
+                        if output:
+                            self.doprint("Investigate:\n=== %s ===\n%s\n=== END ===\n" % (line.split()[22],output))
+                            self.nopen.pause()
+        else:
+            output, nopenlines, outputlines = self.nopen.doit("-cat /etc/passwd")
+            for line in outputlines:
+                if len(line) > 1:
+                    homedir = line.split(":")[5]
+                    output, nopenlines, outputlines = self.nopen.doit("-lt %s/.*profile" % homedir)
+                    if outputlines:
+                        for line in outputlines:
+                            output2, nopenlines2, outputlines2 = self.nopen.doit("-grep -i ld_ %s " % line.split()[9])
+                            self.nopen.pause()
+
+    # moduleChecks
+    #
+    # This is just a wrapper to fork on the OS for moduleChecksLinux and moduleChecksSolaris
+    #
+    # option will define whether or not to do the modinfo checks on Linux (which could log):
+    #     0 - don't run the modinfo checks
+    #     1 - run the modinfo checks
+    def moduleChecks(self, option):
+        if "Linux" in self.nopen.nopen_serverinfo:
+            if "Linux 2.6" in self.nopen.nopen_serverinfo:
+                autorootkit.moduleChecksLinux(self)
+            if option:
+                autorootkit.moduleChecksLinux2(self)
+        elif "SunOS" in self.nopen.nopen_serverinfo:
+            autorootkit.moduleChecksSolaris(self)
+        else:
+            self.doprint(COLOR['fail'],'There are no module checks available for this os: %s' % self.nopen.nopen_serverinfo)
+
+
+    # moduleChecksLinux
+    #
+    # This performs checks on the loaded modules compared to the modules that have symbols
+    def moduleChecksLinux(self):
+        output, nopenlines, outputlines = self.nopen.doit("cat /proc/kallsyms | grep '\[' | awk '{ print substr($4,2,length($4)-2) }' | sort -u")
+        output2, nopenlines2, outputlines2 = self.nopen.doit("cat /proc/modules | awk '{print $1}' | sort -u")
+        kallsyms_modules = [ x for x in outputlines ]
+        loaded_modules = [x for x in outputlines2 ]
+        missing_modules = []
+        for mod in kallsyms_modules:
+            if mod not in loaded_modules:
+                missing_modules.append(mod)
+        if missing_modules:
+            self.doprint(COLOR['fail'],"/proc/kallsyms and /proc/modules don't match:\n%s" % "\n".join(missing_modules))
+        else:
+            self.doprint(COLOR['success'],"\n/proc/kallsyms and /proc/modules match.\n")
+
+    # moduleChecksLinux2
+    #
+    # This performs checks on the loaded modules compared to the modules on disk as specified by modinfo
+    # Of note, if modinfo returns nothing, it means it can't find the file and could have caused a log in dmesg
+    # because modprobe searches for the kernel module.
+    def moduleChecksLinux2(self):
+        output, nopenlines, outputlines = self.nopen.doit("lsmod")
+        listed_modules = [ x.split()[0] for x in outputlines if x.split()[0] != "Module" ]
+        listed_modules_files = []
+        for module in listed_modules:
+            output, nopenlines, outputlines = self.nopen.doit("modinfo -F filename %s" % module)
+            if output:
+                listed_modules_files.append(output)
+            else:
+                self.doprint(COLOR['fail'],"ERROR for %s\n\nmodinfo failed to find the filename; this could have caused a log in dmesg and even sent an email to the root user!" % module)
+                self.nopen.pause()
+        found_modules = {}
+        for module in listed_modules_files:
+            found_modules[module] = 0
+        if self.findComplete:
+            self.doprint(COLOR['note'],"\nSearching through the find for all loaded kernel modules...\n")
+            for line in open("%s/cmdout/%s-find" % (self.nopen.opdown,self.nopen.nopen_rhostname)):
+                for module in listed_modules_files:
+                    m=re.search("%s" % module, line)
+                    if m:
+                        found_modules[module] = 1
+        else:
+            for module in listed_modules_files:
+                output, nopenlines, outputlines = self.nopen.doit("-lt %s" % module)
+                if output:
+                    found_modules[module] = 1
+        unfound_modules = [z for z in found_modules.keys() if found_modules[z] == 0]
+        if unfound_modules:
+            self.doprint(COLOR['fail'],"Unfound modules:\n%s" % "\n".join(unfound_modules))
+        else:
+            self.doprint(COLOR['success'],"All loaded kernel modules found on disk.")
+            
+            
+
+    # moduleChecksSolaris
+    #
+    # This performs checks on the loaded modules compared to ones on disk for Solaris
+    # Note that this entire check requires the find
+    def moduleChecksSolaris(self):
+        if self.findComplete:
+            output, nopenlines, outputlines = self.nopen.doit("-cat /etc/system")
+            kernel_location_lines = [ x for x in outputlines if "moddir" in x and x[0] != "*" ]
+            kernel_locations = []
+            for loc in kernel_location_lines:
+                m=re.search(".*moddir: (.*)$", loc)
+                if m:
+                    kernel_locations.append(m.group(1))
+            if len(kernel_locations) < 1:
+                kernel_locations = ['/kernel','/usr/kernel','/platform']
+            kernel_mods_lines = []
+            for line in open("%s/cmdout/%s-find" % (self.nopen.opdown,self.nopen.nopen_rhostname)):
+                for loc in kernel_locations:
+                    if " %s" % loc in line:
+                        kernel_mods_lines.append(line)
+            output, nopenlines, outputlines = self.nopen.doit("isainfo -b")
+            output2, nopenlines2, outputlines2 = self.nopen.doit("modinfo")
+            kernel_modules = []
+            for line in outputlines2:
+                if line and line.split()[5] not in kernel_modules and line.split()[5] != "Module":
+                    kernel_modules.append(line.split()[5])
+            unfound_kernel_modules = []
+            for mod in kernel_modules:
+                found = 0
+                for line in kernel_mods_lines:
+                    if output == "64":
+                        if line.endswith("sparcv9/%s\n" % mod):
+                            found = 1
+                    else:
+                        if line.endswith("%s\n" % mod) and "sparcv9" not in line:
+                            found = 1
+                if found == 0:
+                    unfound_kernel_modules.append(mod)
+            if unfound_kernel_modules:
+                self.doprint(COLOR['fail'], "These modules are loaded but not found in the standard location:\n%s" % "\n".join(unfound_kernel_modules))
+            else:
+                self.doprint(COLOR['success'], "All kernel modules identified in modload are found in standard locations.")
+        else:
+            self.doprint(COLOR['note'],"\nSkipping this section as there was not a full find completed.\n")
+            
+
+    # sharedObjectsCheck
+    #
+    # This performs an ldd on every binary provided in list_of_files to look for fully qualified libraries (not the ones that
+    # have "=>") and then does an -lt on them to determine if they are visible.  If they are not, they are notified.
+    #
+    # If no list_of_files is provided, it'll search over all directories in dirs_to_check, which could take some time.
+    #
+    # Requires full find.
+    def sharedObjectsCheck(self,list_of_files):
+        fully_qualified_sos = []
+        # just check the files that were provided
+        if list_of_files:
+            for file in list_of_files:
+                output, nopenlines, outputlines = self.nopen.doit("ldd %s" % file)
+                for line in outputlines:
+                    if "=." not in line and "not a dynamic executable" not in line and "ldd: " not in line and line.split()[0] not in fully_qualified_sos:
+                        fully_qualified_sos.append(line.split()[0])
+        # otherwise, check all the directories
+        else:
+            for line in open("%s/cmdout/%s-find" % (self.nopen.opdown,self.nopen.nopen_rhostname)):
+                dirs_to_check = ['/bin','/sbin','/usr/bin','/usr/sbin','/usr/local/bin','/usr/local/sbin']
+                for dir in dirs_to_check:
+                    if " %s/" % dir in line:
+                        m=re.search(" %s/(\S*)" % dir, line)
+                        output, nopenlines, outputlines = self.nopen.doit("ldd %s/%s" % (dir,m.group(1).split()[0]))
+                        for line in outputlines:
+                            if "=." not in line and "not a dynamic executable" not in line and "ldd: " not in line and line.split()[0] not in fully_qualified_sos:
+                                fully_qualified_sos.append(line.split()[0])
+        missing_sos = []
+        for file in fully_qualified_sos:
+            output, nopenlines, outputlines = self.nopen.doit("-ls %s" % file)
+            if not output:
+                missing_sos.append(file)
+        if missing_sos:
+            self.doprint(COLOR['fail'], "Missing shared objects referenced:\n","\n".join(missing_sos))
+        else:
+            self.doprint(COLOR['success'], "\nAll shared objects referenced can be found on disk.\n")
+
+    # sharedObjectsCheckMinimal(self):
+    #
+    # This is a minimal version of the sharedObjectsCheck from above with only certain files, and is a wrapper for sharedObjectsCheck()
+    def sharedObjectsCheckMinimal(self):
+        fully_qualified_sos = []
+        binaries = ['arp','find','ftpd','fuser','inetd','in.ftpd','in.proftpd','in.rlogind','in.rshd','in.telnetd','in.tftpd','in.wuftpd','krlogind','krshd','login','ls','modinfo','netstat','obexftpd','opieftpd','proftpd','ps','pure-ftpd','rcpure-ftpd','rcrinetd','rcxinetd','rinetd','rlogind','rm','rshd','sh','su','telnet','telnetd','tftpd','update-inetd','vsftpd','w','wu.ftpd','xinetd']
+        file_list = nopenlss(self.nopen).main('-P %s' % " ".join(binaries))
+        full_binaries = [ binary.split()[9] for binary in file_list if binary ]
+        autorootkit.sharedObjectsCheck(self,full_binaries)
+        
+
+    # processCheck
+    #
+    # Unlike =pscheck, this does the following more heuristic checks:
+    #    1. psproc: is the process argv[0] different in proc than via ps
+    #    2. deleted binaries (Linux)
+    def processCheck(self):
+        output, nopenlines, outputlines = self.nopen.doit("-gs psproc")
+        self.nopen.doprint(COLOR['note'],"\n\n\tCheck above output for processes whose names appear differently in the process list and in proc\n\n")
+        self.nopen.pause()
+        if "Linux" in self.nopen.nopen_serverinfo:
+            output, nopenlines, outputlines = self.nopen.doit("lsof -Pn | grep dele")
+            if output:
+                self.doprint("Deleted binaries:\n",COLOR['fail'],output)
+
+    # strangeFindFiles
+    #
+    # This will look for strange files in the find file, such as "...", etc.
+    def strangeFindFiles(self):
+        if self.findComplete:
+            self.nopen.doit("-lsh 1x -hold -e python2.7  %s/strangeFiles.py -f %s/cmdout/%s-find" % (self.nopen.opbin,self.nopen.opdown,self.nopen.nopen_rhostname))
+        else:
+            self.doprint(COLOR['note'],"\nSkipping section because full find was not completed.\n")
+
+    # binaryChecks
+    #
+    # This will check to make sure that all the standard binaries used are ELF
+    def binaryChecks(self):
+        binaries = ['arp','find','ftpd','fuser','inetd','in.ftpd','in.proftpd','in.rlogind','in.rshd','in.telnetd','in.tftpd','in.wuftpd','krlogind','krshd','login','ls','modinfo','netstat','obexftpd','opieftpd','proftpd','ps','pure-ftpd','rcpure-ftpd','rcrinetd','rcxinetd','rinetd','rlogind','rm','rshd','sh','su','telnet','telnetd','tftpd','update-inetd','vsftpd','w','wu.ftpd','xinetd']
+        file_list = nopenlss(self.nopen).main('-P %s' % " ".join(binaries))
+        full_binaries = [ binary.split()[9] for binary in file_list if binary ]
+        print "file %s 2>/dev/null | egrep -v 'ELF|symbolic link'" % " ".join(full_binaries)
+        output, nopenlines, outputlines = self.nopen.doit("file %s 2>/dev/null | egrep -v 'ELF|symbolic link'" % " ".join(full_binaries))
+        if output:
+            self.nopen.doprint(COLOR['fail'],"Check out these standard binaries that are not ELF or symbolic links:\n%s" % output)
+        else:
+            self.nopen.doprint(COLOR['success'],"All suspected binaries are either ELF or symbolic links.")
+
+    # passwdChecks
+    #
+    # This just checks for small anomalies in /etc/passwd
+    def passwdChecks(self):
+        output, nopenlines, outputlines = self.nopen.doit("grep \"x:0:\" /etc/passwd | grep -v root")
+        if output:
+            self.nopen.doprint(COLOR['fail'], "Non 'root' user has UID 0!:\n%s" % output)
+        else:
+            self.nopen.doprint(COLOR['success'], "/etc/passwd looks benign.")
+
+
+
+    def main(self,argv):
+
+        argv = argv[1:]
+        opts, args = self.nopen.parseArgs(self.parser, argv)
+
+        # --modinfo-checks requires -f
+        if opts.MODINFO and not opts.FILES:
+            self.parser.error("Option --modinfo-checks needs to also have -f")
+            return self.nopen.finish()
+
+        # -l requires any other option
+        if opts.LDPRELOAD and len(argv) < 2:
+            self.parser.error("Option -l needs to have another option")
+            return self.nopen.finish()
+
+        if len(argv) < 1:
+            self.parser.print_help()
+            return self.nopen.finish()
+
+        # connect to autoport after parse args
+        if not self.nopen.connected:
+            self.nopen.connect()
+
+        # Set variable if full find has been completed
+        if os.path.isfile('%s/cmdout/%s-find' % (self.nopen.opdown,self.nopen.nopen_rhostname)):
+            self.findComplete = 1
+
+        # Set the LD_PRELOAD variable to be empty
+        if opts.LDPRELOAD:
+            output, nopenlines, outputlines = self.nopen.doit("echo $LD_PRELOAD")
+            if output:
+                self.ldpreload = outputlines
+            output, nopenlines, outputlines = self.nopen.doit("-setenv LD_PRELOAD=")
+
+        if opts.STATIC or opts.ALL:
+            self.doprint(COLOR['warn'],"\n\n\n\tExecuting %s now...\n\n" % "static signature checks")
+            time.sleep(3)
+            autorootkit.staticSigs(self)
+            self.nopen.pause()
+
+        if opts.FILES or opts.ALL:
+            funcs = ['strangeFindFiles','libXfind','historyCheck','ldsopreload','moduleChecks','inetdChecks','inodeChecks','passwdChecks','binaryChecks']
+            for func in funcs:
+                self.doprint(COLOR['warn'],"\n\n\n\tExecuting %s now...\n\n" % func)
+                time.sleep(3)
+                executeMe = getattr(autorootkit,func)
+                if func is "moduleChecks":
+                    executeMe(self,opts.MODINFO)
+                else:
+                    executeMe(self)
+                self.nopen.pause()
+
+        if opts.SHAREDOBJECTS:
+            self.doprint(COLOR['warn'],"\n\n\n\tExecuting %s now...\n\n" % "shared objects checks")
+            time.sleep(3)
+            autorootkit.sharedObjectsCheck(self,'')
+
+        if opts.NIC or opts.ALL:
+            self.doprint(COLOR['warn'],"\n\n\n\tExecuting %s now...\n\n" % "network checks")
+            time.sleep(3)
+            autorootkit.networkChecks(self)
+            self.nopen.pause()
+
+        if opts.PROCESSES or opts.ALL:
+            self.doprint(COLOR['warn'],"\n\n\n\tExecuting %s now...\n\n" % "process checks")
+            time.sleep(3)
+            autorootkit.processCheck(self)
+            self.nopen.pause()
+
+        if opts.SHAREDOBJECTSMIN:
+            autorootkit.sharedObjectsCheckMinimal(self)
+
+        if opts.SHAREDOBJECT_SINGLE:
+            autorootkit.sharedObjectsCheck(self,[opts.SHAREDOBJECT_SINGLE])
+            
+        if opts.LDPRELOAD:
+            # Before returning, reset LD_PRELOAD
+            output, nopenlines, outputlines = self.nopen.doit("-setenv LD_PRELOAD=%s" % self.ldpreload)
+
+        return self.nopen.finish()
+
+
+
+
+
+
+
+    def get_arg_parser(self):
+
+        epilog = '\n-gs rootkit version %s\n' % self.version
+
+        parser = OptParser(usage='usage: -gs rootkit [options]', epilog=epilog)
+
+        parser.add_option('-a', dest='ALL', action='store_true', help='Run full rootkit detection')
+        parser.add_option('-f', dest='FILES', action='store_true', help='Run anomalous/malicious file check')
+        parser.add_option('-l', dest='LDPRELOAD', action='store_true', help='Preserve our current LD_PRELOAD variable')
+        parser.add_option('-n', dest='NIC', action='store_true', help='Run NIC checks')
+        parser.add_option('-p', dest='PROCESSES', action='store_true', help='Run anomalous/malicious process check')
+        parser.add_option('-s', dest='STATIC', action='store_true', help='Check only static signatures')
+        parser.add_option('--modinfo-checks', dest='MODINFO', action='store_true', help='This enables the modinfo checks on Linux for finding file names from kernel modules')
+        parser.add_option('--shared-objects', dest='SHAREDOBJECTS', action='store_true', help='This does just the shared objects check')
+        parser.add_option('--shared-objects-minimal', dest='SHAREDOBJECTSMIN', action='store_true', help='This does a shared objects check on a fixed set of regularly used binaries')
+        parser.add_option('--shared-object', dest='SHAREDOBJECT_SINGLE', metavar='shared_object', action='store', type='string', help='This does a shared objects check on a particular file')
+
+        return parser
+
+
+if __name__ == '__main__':
+
+    try:
+        # re-set the argv b/c NOPEN will do weird things with splitting args
+        argv = shlex.split(' '.join(sys.argv))
+        autorootkit().main(argv)
+    except Exception, e:
+        print '\n\n%sUnhandled python exception: %s%s\n\n' % \
+            (COLOR['bad'], str(e), COLOR['normal'])
+        print '%sStack trace:\n' % COLOR['fail']
+        traceback.print_exc()
+        print COLOR['normal']
+

@@ -1,0 +1,272 @@
+#!/usr/bin/env perl
+#
+# INPUT: $ARGV[]:   [ ###  [command] ]
+# Puts this noclient window into loop: Execute command every ### minutes.
+# ### defaults to 3
+# command defaults to -w
+#
+$VER="1.5.0.3" ;
+select STDERR ;
+$ext = $$ ; # limits likelihood of concurrent autoholdwindow's colliding
+            # BUT: still possible.
+            # not too likely to happen.
+myinit() ;
+my $nohist = " -nohist" unless $oneperline ;
+$SIG{INT} = \&catch_zap;
+$SIG{TERM} = \&catch_zap;
+my $secs = 0 ;
+my $die = 0 ;
+my $manmore = "";
+if ($popredir) {
+  unlink("$optmp/popup.tmp");
+  mydie("Cannot unlink $optmp/popup.tmp")
+    if (-e "$optmp/popup.tmp");
+  my $title = gmtime();
+  $title = "-popup $nopen_hostonly $title";
+  $title .= ": $command" if length $command < 40;
+#  $title =~ s/ /_/g;
+  if ($nopen_clientver and
+      $nopen_clientver !~ /^3.1/ and
+      $nopen_clientver ge "3") {
+      $title =~ s,(\s),\\\\\1,g;
+  } else {
+      $title =~ s,(\s),\\\\\\\\\1,g;
+  }
+  if ($command =~ /^(-lsh ){0,1}man /) {
+    $manmore = "-nohist -lsh mv $optmp/popup.tmp $optmp/popup.tmp.man ; sed \"s/.//g\" $optmp/popup.tmp.man > $optmp/popup.tmp \n";
+  }
+  $popitup = "-nohist -lsh cd $optmp ; 1x -title $title -geometry 112x60-0+0 -e \"view popup.tmp\"\n";
+dbg("title=$title= popitup=$popitup=");
+  $die=1;
+} else {
+  $popitup = "";
+  if (-e "$optmp/holding.$nopen_rhostname.$nopen_mypid") {
+    mywarn("\n\nWill execute \"$command\" every $delaystr, in perpetuity. ${howtostop}un one of the following locally to stop it:\n\n
+ $opbin/unhold       \t# stops one active $prog (at random)
+ $opbin/unhold $$    \t# stops this particular holdwindow only
+ $opbin/unhold all   \t# stops ALL active holdwindows (on all servers)
+
+");
+  } else {
+    $secs = ($delaymin * 60) - 1;
+  }
+}
+while ($secs < $delaymin * 60 and !$die) {
+  `touch $optmp/holding.$nopen_rhostname.$nopen_mypid 2>/dev/null`;
+  sleep 1;
+  $secs += 1;
+  print "\rTime left:\t".($delaymin*60 -$secs)."s        " 
+    unless $secs == $delaymin*60;
+  my ($unhold,$whystop) = (0,"");
+  foreach (@unholds) {
+    if (-e $_) {
+      $unhold++;
+      $whystop .= " or $_";
+    }
+  }
+  $whystop =~ s/^ or //;
+  $whystop = "<CR>" unless $whystop;
+  if ($unhold) {
+    $die++;
+    if (-e "$optmp/unhold.all") {
+      sleep 2;
+    }
+    mywarn("\n\nStopped via $whystop");
+    unlink(@unholds); #just in case
+    last ;
+  }
+}
+unlink("$optmp/holding.$nopen_rhostname.$nopen_mypid")
+  if $die;
+unless ($die and !$popredir) {
+  print OUT "$command$nohist$popredir\n$manmore$popitup";
+  print OUT "-gs holdwindow @origargv -nohist\n" unless $popredir;
+}
+close(OUT);
+# Do this very last - might have more than one -holdwindow running.
+# Hope is the .$ext unique to this one will preserve 
+#rename("$opetc/gs.holdwindownext.$ext","$opetc/gs.holdwindownext");
+
+# why were we cp to tmp?
+system("cp $opetc/gs.holdwindownext.$ext $optmp");
+   copy("$opetc/gs.holdwindownext.$ext","$opetc/nopen_auto.$nopen_mypid");
+#rename("$opetc/gs.holdwindownext.$ext","$opetc/nopen_auto.$nopen_mypid");
+
+1;
+
+sub mymydie {
+  close(OUT);
+  #rename("$opetc/gs.holdwindownext.$ext","$opetc/nopen_auto.$nopen_mypid");
+copy("$opetc/gs.holdwindownext.$ext","$opetc/nopen_auto.$nopen_mypid");
+  mydie(@_);
+}#mymydie
+
+sub myinit {
+  $willautoport=1;
+  my $autoutils = "../etc/autoutils" ;
+  unless (-e $autoutils) {
+    $autoutils = "/current/etc/autoutils" ;
+  }
+  require $autoutils;
+  use File::Basename ;
+#  require "getopts.pl";
+  $COLOR_SUCCESS="\033[1;32m";
+  $COLOR_FAILURE="\033[1;31m";
+  $COLOR_WARNING="\033[1;33m";
+  $COLOR_NORMAL="\033[0;39m";
+  $COLOR_NOTE="\033[0;34m";
+  $COLOR_WHITE="\033[4;97m" ;
+  $opdir = "/current" ;
+  $opetc = "$opdir/etc" ;
+  $opbin = "$opdir/bin" ;
+  $opdown = "$opdir/down" ;
+  $optmp = "$opdir/tmp" ;
+  $prog = basename $0 ;
+  if ($prog =~ /popup/) {
+    $shortprog = "popup";
+    $popredir = " >>T:$optmp/popup.tmp";
+  } else {
+    $shortprog = "holdwindow";
+    $popredir = "";
+  }
+  $prog = "-gs $shortprog" ;
+  $vertext = "$prog version $VER\n" ;
+  $defcommand = "-w" ;
+  $defdelay = "3m" ;
+  $delaymin = 3 ;
+  @unholds = ("$optmp/unhold.bin",
+	      "$optmp/unhold",
+	      "$optmp/unhold.",
+	      "$optmp/unhold.all",
+	      "$optmp/unhold.$nopen_rhostname.quiet",
+	      "$optmp/unhold.$nopen_rhostname",
+	      "$optmp/unhold.$$",
+	      "$optmp/unhold.$nopen_mypid",
+	     );
+  $usagetext=usagetext();
+  unlink("$optmp/unhold.bin","$optmp/unhold","$optmp/unhold.",
+	 "$optmp/unhold.$nopen_rhostname","$optmp/unhold.$nopen_mypid",
+	 "$optmp/unhold.$nopen_rhostname.quiet","$optmp/unhold.$$",
+	 "$opetc/gs.holdwindownext.$ext",
+	) ; # just in case
+  # This will be renamed to nopen_auto.$nopen_mypid and will either
+  # 1) call the same -gs holdwindow ## ?? command once timer expires; or
+  # 2) do nothing if user aborts with SIG INT or TERM or hitting return.
+  open(OUT,"> $opetc/gs.holdwindownext.$ext") || 
+      mydie("cannot open $opetc/gs.holdwindownext.$ext");
+  print OUT "#NOGS\n";
+#  mydie("bad option(s)") if (! Getopts( "hv" ) ) ;
+# Getopts was messing up builtin commands (e.g., "-lt" gave unknown opts l and t)
+  $opt_h = ($ARGV[0] eq "-h") ;
+  $opt_v = ($ARGV[0] eq "-v") ;
+  usage() if ($opt_h or $opt_v) ;
+  chomp($test = `perl -v 2>&1 | grep -i "this is perl"`) ;
+  $test =~ s/this is perl.\s*(v{0,1}[\d.]+).*/\1/i ;
+  unless ($test ge "v5.8.1" ) {
+#    `echo "$ENV{HOSTNAME} requires perl v5.8.1 or better (not $test)" >> $opdown/opnotes.txt.additional` ;
+    mywarn("requires perl v5.8.1 or better (you have $test) for hitting return to work") ;
+    $howtostop = "\nR" ;
+  } else {
+    $howtostop = "Hit return to stop it, or if\nthat fails, r" ;
+  }
+  @origargv = @ARGV ;
+  my $unit = "";
+  $unit = "m" unless $ARGV[0] =~ /\d+.*[hms]$/;
+  $delaysecs = strtoseconds($ARGV[0].$unit);
+  if ($delaysecs > 0) {
+    shift @ARGV;
+  } else {
+    $delaysecs = strtoseconds($defdelay);
+  }
+  $delaystr = secstostr($delaysecs);
+  $delaymin = $delaysecs / 60 ;
+  my @args = split(/ :: /,"@ARGV");
+  my $specaial = 0;
+  if (@args > 1) {
+    $oneperline++;
+  } else {
+    @args = @ARGV ;
+  }
+  while (@args) {
+    my $arg = shift(@args) ;
+    if ($oneperline) {
+      $command .= "$arg -nohist\n" ;
+    } else {
+      $command .= " $arg" ;
+    }
+    mydie("Cannot have -holdwindow or -popup as an argument")
+      if ($arg =~ /-(gs ){0,1}holdwindow/ or
+	  $arg =~ /-(gs ){0,1}popup/);
+  }
+  $command =~ s/^ // ;
+  $command = $defcommand unless $command ;
+  $| = 1;
+  $nopen_mypid = $ENV{NOPEN_MYPID} ;
+  $nopen_mylog = $ENV{NOPEN_MYLOG} ;
+  $nopen_rhostname = $ENV{NOPEN_RHOSTNAME} ;
+  mydie("Call $prog from within noclient, not command line.\n".
+	"E.g., \"-lsh autoholdwindow -b\"\n".
+	"$vertext") unless $nopen_rhostname;
+  if (open(OUT2,"> $opbin/unhold")) {
+    print OUT2 "#!/bin/sh
+EXT=bin
+[ \"\$1\" ] && EXT=\$1
+touch $optmp/unhold.\$EXT\n";
+    close(OUT2);
+    chmod(0777,"$opbin/unhold");
+  }
+}#myinit
+
+sub catch_zap {
+  my $signame = shift;
+  mywarn("$prog"."[$$]: received SIG $signame. Aborting") ;
+  $die++ ;
+} # catch_zap
+
+sub usagetext {
+  return "
+Usage: $prog [-h]                (prints this usage statement)
+       -holdwindow [ [#h]#[m][#s] command]
+       -popup command
+
+The scripts autopopup and autoholdwindow are identical. \"-popup\" and
+\"-holdwindow\" call it by their associated filename, which determines
+its behavior. In both cases \"command\" is executed (see below for the
+format, in particular how to execute multiple commands).
+
+HOLDWINDOW MODE
+
+If called via -holdwindow, execution is done once every [#h]#[m][#s],
+and stops when return is pressed in that window or $opbin/unhold
+[pid|all] is run at any local prompt. The time period defaults to $defdelay,
+and the unit of time defaults to minutes if none is given.
+
+        the delay \"[#h]#[m][#s]\" defaults to ${defdelay}
+        command defaults to $defcommand
+
+NOTE: The delay is from the end of one execution to the beginning of
+the other. The time the command takes to execute will mean the run
+time of the command is a bit more than the delay from the last one.
+
+POPUP MODE
+
+If called via -popup, execution is done once, but its output is saved
+to a temporary file which is then popped up at the top right corner of
+your screen opened with \"view\" (vi in read only mode). The delay, if
+any, is ignored in popup mode. (-pop is also an alias for -gs popup.)
+
+The alias \"-holdwindow\" is the same as \"-gs holdwindow\", and \"-popup\"
+is the same as \"-gs popup\".
+
+COMMAND SYNTAX
+
+The \"command\" given can contain one or more builtins if they are \" :: \"
+delimited from other commands. E.g., \"-holdwindow -ls /tmp :: -w :: w\".
+The builtin may be a call to another NOGS script.
+
+Usage: $prog [-h]                (prints this usage statement)
+       -holdwindow [ [#h]#[m][#s] command]
+       -popup command
+
+";
+}#usagetext

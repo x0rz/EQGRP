@@ -1,0 +1,138 @@
+#!/usr/bin/env perl
+##
+$VER="1.0.0.2" ;
+# nopen seems happier with stderr in lsh runs
+# or does it? Took it out now...
+#select STDERR ;
+$| = 1 ;
+my $batchmode=0;
+my $yesdownloadall=0;
+myinit();
+
+sub findpanics {
+  my @filestoget = ();
+  my $paniclist = "$opdown/panicfiles.$nopen_rhostname";
+  open(PANICLIST, "> $paniclist") or mydie("Can't open listing of panic files: $!");
+
+  # All that old code - gone!! All hail nopenlss()!
+  ($panicfiles,$nopenlines,@panicfiles) = nopenlss("-UFQZR",@dirs);
+  my (@filelisting) = grep m, /.*\/.*$, , split(/\n+/,$panicfiles);
+  foreach $entry (@filelisting) {
+    if ($entry =~ m, (/.*\/.*$),) {
+      # Grep for the desired string in each file.
+      my $file = $1;
+      dbg("in autopanic findpanics, got filename =$file=");
+      ($panics,$nopenlines,@panics) = doit("-grep -n \"$string\" $file");
+      if (grep {/(\d+):.*$string.*$/} @panics) {
+        dbg("in autopanic findpanics, found our string =$string= in =$file=");
+        push(@filestoget,$file);
+        select PANICLIST;
+        print "$file\n";
+        select STDOUT;
+      }
+    }
+  }
+
+  # More old code - gone!
+  if (($yesdownloadall or $batchmode) and scalar @filestoget) {
+    my $args = "-UFQzrZRG";
+    $args .= "Y" if $batchmode;
+    nopenlss($args,"-M20000000",@filestoget);
+  }
+  else { 
+    progprint("No panics were found in any of the following files:${COLOR_NORMAL}\n\n$panicfiles\n") unless $batchmode;
+  }
+
+  if (-e "$opdown/dmesg.$nopen_rhostname") {
+    # Get the panics from dmesg too.
+    ($dmesgpanics,$nopenlines,@dmesgpanics) = doit("-lsh -nohist grep -l \"$string\" $opdown/dmesg.$nopen_rhostname 2>/dev/null");
+    if (grep {/(\d+):.*$string.*$/} @dmesgpanics) {
+      select PANICLIST;
+      print "$opdown/dmesg.$nopen_rhostname\n";
+      select STDOUT;
+    }
+  }
+  close(PANICLIST);
+  return 1;
+}
+
+findpanics();
+
+# End with true value as we require this script elsewhere.
+1;
+#ENDMAIN
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs panic @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }  
+    require $autoutils;
+    $prog = "-gs panic";
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"-gs panic\" is used.
+
+";
+  $gsusagetext="
+Usage: -gs panic [options] [ string ] [ DIR1 [ DIR2 ... ] ]
+
+-gs panic calls $opetc/autopanic [ string ] [ DIR1 [ DIR2 ... ] ].
+
+\"string\" defaults to \"panic\" and must not begin with \"/\" or
+contain any quotes or escaped characters.
+
+Directories examined will be /var/adm and /var/log unless DIR#
+argument(s) are provided, which must begin with \"/\". $prog uses
+-grep to determine which files in DIR* contain the string and then
+downloads those files with -lss -G.
+
+OPTIONS
+
+  -h     print this usage statement
+  -v     print the version
+  -n     do not download files that match (and do not prompt)
+  -y     DO DOWNLOAD files that match (and prompt for each file)
+  -b     DO DOWNLOAD files that match (and do not prompt)
+
+";
+
+  mydie("bad option(s)") if (! Getopts( "hvnyb" ) ) ;
+  usage() if ($opt_h or $opt_v) ;
+  $string = "panic" ;
+  if (length($ARGV[0]) and !(substr($ARGV[0],0,1) eq "/")) {
+    $string = $ARGV[0];
+    shift(@ARGV) ;
+  }
+  foreach (@ARGV) {
+    push(@dirs,$_) if (substr($ARGV[0],0,1) eq "/") ;
+  }
+  @dirs = ("/var/log","/var/adm") unless @dirs ;
+  $yesdownloadall = $opt_y;
+  $batchmode = $opt_b;
+  $opt_y = "-y" if $opt_y;
+  $opt_n = "-n" if $opt_n;
+  $opt_b = "-b" if $opt_b;
+
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+}#myinit

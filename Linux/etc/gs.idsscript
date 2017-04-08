@@ -1,0 +1,8 @@
+#NOGS
+-cmdout /current/down/script.idsGSOPTIONS -nohist
+-ls /etc /bin /usr /usr/sbin /usr/local /usr/local/etc -nohist
+-cmdout -nohist
+-gs replay -Hf /current/down/script.idsGSOPTIONS ps -nohist
+-gs replay -Hf /current/down/script.idsGSOPTIONS df -k -nohist
+-gs replay -Hf /current/down/script.idsGSOPTIONS netstat -nohist
+-lsh rm -f /current/etc/gs.idsscript.GSOPTIONS -nohist

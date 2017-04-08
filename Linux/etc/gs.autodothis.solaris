@@ -1,0 +1,16 @@
+#NOGS
+# 2009-03-05 12:49:00 EST
+-nohist -lsh rm -f /current/down/solarisstats.cmdout
+-nohist -cmdout /current/down/solarisstats.cmdout
+#-nohist prtconf -v -p
+-nohist -cmdout
+#-nohist prtvtoc  `df -lk /|tail -1|awk '{print \$1}'`
+-nohist -ls -R /var/crash/
+#-nohist -gs replay  -Hf /current/down/solarisstats.cmdout prtvtoc
+-nohist -gs replay  -Hf /current/down/solarisstats.cmdout df -k
+-nohist # We mkdir -p then remove the dir. If NOPEN_RHOSTNAME has any / chars this helps that.
+-nohist -lsh mkdir -p /current/down/solarisstats.cmdout.$NOPEN_RHOSTNAME 2>/dev/null && rmdir  /current/down/solarisstats.cmdout.$NOPEN_RHOSTNAME
+-nohist -lsh mv /current/down/solarisstats.cmdout  /current/down/solarisstats.cmdout.$NOPEN_RHOSTNAME
+-nohist -gs orcheck -i
+-nohist isainfo -bv ; isainfo -kv ; isainfo -nv ; isalist
+-nohist -gs lss -QRFYGM10000 /etc/ipf /etc/zones

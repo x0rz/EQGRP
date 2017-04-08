@@ -1,0 +1,3 @@
+#NOGS
+-lsh [ "$GSOPTIONS" ] || export GSOPTIONS=. ; for h in /current/down/hostinfo.*$GSOPTIONS* ; do echo -en "$h: \\t\\t" ; (grep -i ^UTC.OFFSET $h || echo NO OFFSET FOUND) | sed "s/UTC Offset: /UTC_OFFSET=/" ; done -nohist
+

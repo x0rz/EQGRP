@@ -1,0 +1,101 @@
+#NOGS
+# checksum some of the usual suspects
+# We -ls first to see access times before we access them with our -cksum
+-ls -n /bin/find /bin/ls /bin/netstat /bin/ps /bin/rm /bin/sh /bin/su /bin/telnet /bin/w /sbin/arp /usr/bin/find /usr/bin/telnet /usr/bin/w /usr/lbin/ftpd /usr/lbin/remshd /usr/lbin/rlogind /usr/lbin/telnetd /usr/sbin/arp /usr/sbin/*ftpd /usr/sbin/*inetd /usr/sbin/modinfo /usr/sbin/modload /usr/sbin/netstat /usr/sbin/*rlogind /usr/sbin/*rshd /usr/sbin/*telnetd /usr/ucb/ps /bin/login
+-ls /bin/find /bin/ls /bin/netstat /bin/ps /bin/rm /bin/sh /bin/su /bin/telnet /bin/w /sbin/arp /usr/bin/find /usr/bin/telnet /usr/bin/w /usr/lbin/ftpd /usr/lbin/remshd /usr/lbin/rlogind /usr/lbin/telnetd /usr/sbin/arp /usr/sbin/*ftpd /usr/sbin/*inetd /usr/sbin/modinfo /usr/sbin/modload /usr/sbin/netstat /usr/sbin/*rlogind /usr/sbin/*rshd /usr/sbin/*telnetd /usr/ucb/ps /bin/login
+
+-cksum /bin/find /bin/ls /bin/netstat /bin/ps /bin/rm /bin/sh /bin/su /bin/telnet /bin/w /sbin/arp /usr/bin/find /usr/bin/telnet /usr/bin/w /usr/lbin/ftpd /usr/lbin/remshd /usr/lbin/rlogind /usr/lbin/telnetd /usr/sbin/arp /usr/sbin/*ftpd /usr/sbin/*inetd /usr/sbin/modinfo /usr/sbin/modload /usr/sbin/netstat /usr/sbin/*rlogind /usr/sbin/*rshd /usr/sbin/*telnetd /usr/ucb/ps /bin/login
+
+# the following is from "chkrootkit" and elsewhere
+
+# libX.a rootkit
+-ls -nR /usr/lib/libX.a
+-ls -R /usr/lib/libX.a
+
+# Ramen Worm
+grep ^asp /etc/inetd.conf
+
+# Various network backdoors
+netstat -an | egrep '(^tcp.*LISTEN|^udp)' | egrep '(114 |145 |465 |511 |600 |1008 |1524 |1999 |2881 |3133 |3879 |4369 |5665 |10008 |12321 |23132 |27374 |29364 |31336 |31337 |45454 |47017 |47889 |60001 )'
+
+# adore or knark Linux Kernel Module
+egrep -i '(adore|knark)' /proc/ksyms 
+
+# misc suspicious files
+find /dev -type f
+
+# the following is from "RootKit für SunOS" by "NSDAP"
+
+# ulogin trojan
+-ls /bin/xlogin /sbin/xlogin
+
+# Uni-PS trojan by {MANIAC}
+-ls /lib/ldlibps.so
+
+# t0rnkit v7 or rip rootkit
+-ls /usr/src/.puta /usr/info/.t0rn /usr/src/linux/arch/alpha/lib/.lib
+
+# X-Org Linux rootkit
+-ls /lib/security/.config
+
+# RameN Worm 
+-ls /usr/src/.poop
+
+# TeLeKiT telnetd trojan
+-ls /dev/hda06 /usr/info/libc1.so
+
+# tribe bot
+-ls /dev/wd4
+
+# Danny-Boy's Abuse Kit
+-ls /dev/mdev
+
+# aPa rootkit
+-ls /usr/share/.aPa
+
+# dua rootkit
+-ls /usr/bin/duarawkz /usr/bin/duarawkz/loginpass
+
+# langsuir
+-ls /dev/ptyas
+
+# sshd trojan (look in /etc/rc2)
+-ls /usr/lib/dmis/dmisd
+
+# misc directories
+-ls -d /var/run/.tmp /usr/man/man1/lib/.lib /dev/portd /dev/*/... /dev/... /bin/... /dev/.lib /usr/share/man/mansps
+
+# misc files
+-ls /dev/ptyy /dev/ptyu /dev/ptyq /dev/ptyv /dev/hdbb
+
+# the following is from "chkrootkit"
+
+# misc suspicious files
+-ls /var/run/.tmp /usr/man/man1/lib/.lib /usr/man/man2/.man8 /usr/man/man1/..\ *
+
+# t0rn rootkit or Lion Worm
+-lsh egrep "libproc.a|1i0n.sh" cmdout/*find
+
+# ark
+-lsh grep ptyxx cmdout/*find
+#-lsh grep '.ark.*' cmdout/*find
+
+# rk17
+-lsh egrep '(rtty|squit|pback|psid|kset|autod.o|gib|number.cgi|void.cgi|last.cgi)' cmdout/*find
+
+# rsha
+-lsh egrep '(kr4p|n3stat|chsh2|alpha/lib/.lib)' cmdout/*find
+
+# ShitC Worm
+-lsh egrep '(frgy|in.slogind)' cmdout/*find
+
+# Omega Worm
+#-lsh grep chr cmdout/*find
+
+# rh-sharpe
+#-lsh egrep '(lpstree|lkillall|ldu|lnetstat)' cmdout/*find
+-lsh egrep '(lps|lpstree|lkillall|ldu|lnetstat)' cmdout/*find
+
+# misc suspicious files in local *find
+-lsh egrep " \\$|\\.\\.\\." cmdout/*find
+

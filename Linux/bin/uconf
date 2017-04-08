@@ -1,0 +1,13 @@
+#!/usr/bin/env perl
+use File::Basename;
+$prog = basename $0 ;
+die("Usage: $prog <file-to-unmunge>\n\n$prog unmunges *conf.inv rootkit config files.\n\nuconf v1.0.0\n")
+  if (!$ARGV[0]
+      or $ARGV[0] eq "-h"
+      or defined $ARGV[1]
+      or !(-e $ARGV[0])
+     );
+open (BOB, "$ARGV[0]") or die("Cannot open $ARGV[0]: $!");
+binmode (BOB);
+print STDOUT ~$cdd while (read (BOB, $cdd, 1)) ;
+

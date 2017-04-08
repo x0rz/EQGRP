@@ -1,0 +1,564 @@
+#!/usr/bin/env perl
+##
+$VER="1.2.0.6";
+$| = 1 ;
+use File::Copy ;
+
+myinit() ;
+my $proxypid;
+
+### Check to see if firefox is running. If it is, dont allow noproxy to continue.
+my $ffrunning = `ps -e | egrep -c firefox`;
+if ($ffrunning > 0) {
+  mydie("Firefox already running, Please close all running instances of Firefox and try again!");
+} 
+
+my ($pitchip,$pitchport,$more) = ();
+if (@pitchips == 1) {
+  $pitchip = $pitchips[0];
+  $pitchport = $pitchports[0];
+  $more = "\n        (currently, your external pitchimpair IP:port is\n".
+    "        $pitchip:$pitchport)\n";
+}
+my $interfacemore = "\n             (I see right now $interface is $localip)"
+  if $localip;
+offerabort
+  ("You are about to use $nopen_rhostname as a web proxy.\n\n".
+   "A browser (firefox) will pop up when you continue. It is preconfigured\n".
+   "to use the NOPEN redirection (its proxy will be set to 127.0.0.1:$proxyport).\n".
+   "You also have the option of using your Windows ops station's browser\n".
+   "through this box as a proxy. You would need to:\n".
+   "         1) Point that box' DNS to this box; and\n".
+   "         2) Point that box' web proxy setting here at port 9000$interfacemore.\n".
+   "\n".
+   "$prog will be responsible for:\n\n".
+   "     1) DNS lookups, redirected through this NOPEN target, using\n".
+   "        the target's DNS server (you'll be prompted for one if it has none)\n".
+   "     2) Tunnels: each distinct session (http://, https://, ftp://, etc.)\n".
+   "        being redirected will get and use its own NOPEN -tunnel\n".
+   "        (noproxy.pl adds/removes tunnels as needed via a -tunnel command\n".
+   "        listening on a UDP port in this window).\n".
+   "     3) Adding DROP rules for port 80/443 while NOPROXY is running.\n".
+   "        (more explanation here later...)$more\n".
+   "Close firefox (here) when done with $prog and all will revert back.".
+   "\n\n"
+  );
+
+offerabort
+    (
+     "With the current firewall settings (see fwrules.py -h), ports 80 and 443 are\n".
+     "normally allowed by default anywhere. When you continue, $prog will insert\n".
+     "DROP rules for 80 and 443 temporarily, so your browser does not accidentally\n".
+     "bypass NOPROXY. Those DROP rules will be removed when you exit your browser."
+    );
+
+#my $fwrules = "$opbin/fwrules.py";
+#my $fwrulessaved = "$optmp/fwrules.$nopen_rhostname.".time();
+#progprint(`$fwrules -S $fwrulessaved 2>&1`.
+	#"\n\nJust saved current rules:\n".
+	#`ls -al $fwrulessaved`
+         #);
+
+
+# This variable is sent to noproxy.pl, which adds the DNS tunnel for us
+$remotedns = setupdns($remotedns);
+
+mydie("Cannot determine what remote DNS IP to use $remotedns")
+  unless ipcheck($remotedns);
+
+# Several children needed. This forks and returns immediately.
+setupkids();
+
+# Set up local firewall rules to block 80/443, first quietly delete any already there (if any).
+progprint("BLOCKING port 80/443 outbound:\n\n".
+	  `iptables -t filter -D OUTPUT -o eth0 -p tcp --dport 443 -j DROP 2>/dev/null`.
+	  `iptables -t filter -D OUTPUT -o eth0 -p tcp --dport 443 -j DROP 2>/dev/null`.
+	  "INSERTING: ".`iptables -t filter -v -I OUTPUT -o eth0 -p tcp --dport 443 -j DROP 2>&1`.
+	  `iptables -t filter -D OUTPUT -o eth0 -p tcp --dport 80 -j DROP 2>/dev/null`.
+	  `iptables -t filter -D OUTPUT -o eth0 -p tcp --dport 80 -j DROP 2>/dev/null`.
+	  "INSERTING: ".`iptables -t filter -v -I OUTPUT -o eth0 -p tcp --dport 80 -j DROP 2>&1`.
+	  `iptables -L -n -v | egrep "DROP.*(80|443)" 2>&1`.
+	  "");
+
+# set up tunnel (run -tunnel $notunnelport
+doit("-tunnel $notunnelport udp");
+
+# Delete DROP rules for 80/443 that we added.
+progprint("DELETING port 80/443 DROP rules outbound:\n\n".
+	  " DELETING: ".`iptables -t filter -v -D OUTPUT -o eth0 -p tcp --dport 443 -j DROP 2>&1`.
+	  " DELETING: ".`iptables -t filter -v -D OUTPUT -o eth0 -p tcp --dport 80 -j DROP 2>&1`.
+	  "");
+
+# echo out "ready to go" with directions on how to quit (^C in popup
+# C&C window)
+
+## END MAIN ##
+
+# SUBROUTINES
+
+# NEED: portpicker in noproxy.pl
+
+sub myinit {
+  $willautoport=1;
+  my $autoutils = "../etc/autoutils" ;
+  unless (-e $autoutils) {
+    $autoutils = "/current/etc/autoutils" ;
+   }
+  require $autoutils;
+  $prog = "-gs noproxy";
+  $vertext = "$prog version $VER\n" ;
+  mymydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			    -e $nopen_mylog);
+
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session when \"$prog\" or
+\"=noproxy\" is used.
+
+";
+  $proxylogfile = "$opdown/noproxy.$nopen_rhostname.log";
+  preservefile($proxylogfile);
+  $interface = "eth1";
+  ($localip) = `ifconfig $interface 2>/dev/null | grep inet.addr:`
+    =~ /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/;
+  @pitchlines = split(/\n/,`didthis 2>/dev/null | grep noclient`);
+  foreach (@pitchlines) {
+    dbg("pitchline=$_");
+    if (/noclient\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)/) {
+      push(@pitchports,$2);
+      push(@pitchips,$1);
+    }
+  }
+  dbg("pitchports=(@pitchports)");
+
+  my ($sec,$min,$hr,$thismday,$thismonnum,$thisyear) = gmtime();
+  $thisyear += 1900 if ($thisyear < 1900);
+
+  my $usagemore="PITCHIMPAIR is now @pitchips:@pitchports"
+    if @pitchips;
+  $gsusagetext="
+Usage: $prog [options]
+
+$prog turns your NOPEN redirector into a web proxy for you. It will
+use the redirector's /etc/resolv.conf to determine what (remote) DNS
+server to use.
+
+If the local environment variable USERAGENT is set, either via an
+exported local variable in that scripted window prior to running any
+noclients or via -lsetenv just before $prog, the content of it will
+be used as the useragent string (and will override any -U setting on
+the command line).
+
+$usagemore
+
+OPTIONS
+  -h            Show this help
+  -v            Show version
+  -D IP         Remote DNS server to use (defaults as described above)
+  -U string     Replace your client useragent string with this one,
+                  e.g. \"Mozilla/1.0\". Or use -lsetenv USERAGENT
+                prior to running $prog:
+
+     -lsetenv USERAGENT=Some string with no quotes any characters
+
+  -W list       Comma delimited list of \"IP/prefix\" entries
+                  (use /32 for one host)
+
+Usage: $prog [options]
+
+";
+  my $Uarg = "";
+  my @newarg=();
+  # Die here if $gsoptions contains just an odd number of \".
+  my $testquotes = $gsoptions;
+  $testquotes =~ s/[^\"]//g;
+  my $odd = int(length $testquotes) % 2;
+  mydie("Mismatched quotes on command line: $gsoptions")
+    if ($odd);
+  if ($ENV{USERAGENT}) {
+      $Uarg = $ENV{USERAGENT};
+  } elsif ($gsoptions =~ /-(\S*)U\s*\"(.*)\"/) {
+    $Uarg = $2;
+    my $otherargs = $1;
+    my ($testUarg,$openquote) = ();
+    for (my $i=0;$i<@ARGV;$i++) {
+      if ($openquote) {
+	if ($ARGV[$i] =~ /(.*)\"/) {
+	  $testUarg .= " $1";
+#	  undef $ARGV[$i];
+	  $ARGV[$i] = "";
+	  $openquote=0;
+	  next;
+	} else {
+	  $testUarg .= " $ARGV[$i]";
+#	  undef $ARGV[$i];
+	  $ARGV[$i] = "";
+	  next;
+	}
+      }
+      if ($ARGV[$i] =~ /-${otherargs}U\s*(\S*)/) {
+	my $more = $1;
+	unless (length $more) {
+	  $more = $ARGV[$i+1];
+	  $ARGV[$i+1] = "";
+	}
+	if ($more =~ /\"(.*)/) {
+	  $openquote=1;
+	  $testUarg .= $1;
+	} else {
+	  # Our -U has no quotes, good to use as is
+	  dbg("THIS IS HUGE PROBLEM SHOULD NOT GET HERE PROCEEDING ANYWAY");
+	  last;
+	}
+	if ($otherargs) {
+	  $ARGV[$i] = "-$otherargs";
+	} else {
+	  $ARGV[$i] = "";
+	}
+      }
+      push(@newarg,$ARGV[$i]) if length $ARGV[$i];
+    }
+    @ARGV=@newarg;
+  }
+  mymydie("bad option(s)") if (! Getopts( "hvD:W:U:" ) ) ;
+  $opt_U = $Uarg if (length $Uarg) ;
+  $useragent = $opt_U;
+  $whitelist = $opt_W;
+  $noproxyargs .= " -U \"$useragent\"" if $useragent;
+  $noproxyargs .= " -W $whitelist" if $whitelist;
+  $ffprofile = "$opbin/noproxy.profile";
+  $remotedns = $opt_D;
+  $notunnelport = 38883 ;
+  $proxyport = 9000;
+  usage() if ($opt_h or $opt_v) ;
+
+  mymydie("-W $whitelist: Cannot have whitespace in whitelist")
+    if ($whitelist =~ /\s/);
+
+  mymydie("-D $opt_D is not valid")
+    unless (!$remotedns or ipcheck($remotedns));
+
+  # Remove old $opbin/noproxy.profile if need be, then unpack
+  #  $opbin/noproxy.profile.tar.bz2: Fresh start every time.
+  my ($rmerr,$rmmore,$reuse) = ();
+  if (-d $ffprofile) {
+    my ($ans) = mygetinput
+      (
+       "-gs noproxy has already been used once.\n\n".
+       $COLOR_FAILURE."\n".`ls -aldc $ffprofile`."\n".$COLOR_NORMAL.
+       "Do you want to <R>euse your profile from that previous run, or\n".
+       "               <C>lear the old and start with a fresh one, or\n".
+       "               <A>bort\n\n".
+       "Enter one of [C,r,a]:","C","R","A"
+
+      );	
+    mydie("User aborted") if ($ans eq "a");
+    if ($ans eq "r") {
+      $reuse++;
+    } else {
+      $rmerr = `rm -rf  $ffprofile 2>&1` ;
+      $rmmore = "Wiping old noproxy.profile and\n";
+      if (-d "$ffprofile") {
+	mymydie("Error deleting $ffprofile:\n\n$rmerr");
+      }
+    }
+  }
+  unless ($reuse) {
+    progprint(".\n".$rmerr.
+	      $rmmore.
+	      "Unpacking a fresh $ffprofile for this run..."
+	     );
+    $rmerr = `cd $opbin ; echo cd $opbin ; tar xvjf noproxy.profile.tar.bz2 2>&1`;
+    mymydie("$rmerr\n\nError above untarring $ffprofile.tar.bz2")
+      if $rmerr =~ /error/i;
+  }
+  mymydie("Firefox profile directory $ffprofile/ must exist to continue")
+    unless -d $ffprofile;
+
+
+
+  # Set aside old HTTP/ directory in case we want it later
+  opendir(PERLDIR,"/usr/lib/perl5/vendor_perl")
+    or mymydie("Something wrong here: cannot opendir /usr/lib/perl5/vendor_perl: $!");
+  my @perlversions = sort readdir PERLDIR;
+  closedir(PERLDIR);
+  my $maxperlversion = "";
+  foreach my $ver (@perlversions) {
+    $maxperlversion = $ver
+      if ((verval($ver))[1] > (verval($maxperlversion))[1]);
+  }
+  my $httpdir = "/usr/lib/perl5/vendor_perl/$maxperlversion/HTTP" ;
+  unless(!(-d $httpdir) or
+	 (-s "$httpdir.orig.tar.bz2")) {
+    progprint("Backing up original $httpdir:\n".
+	      "tar cvjf $httpdir.orig.tar.bz2 $httpdir\n".
+	      `tar cvjf $httpdir.orig.tar.bz2 $httpdir 2>&1`
+	     );
+  }
+  progprint("Putting latest HTTP/Proxy\n".
+	    "in place from $opbin/noproxy/HTTP/:\n".
+	    "cp -prv $opbin/noproxy/HTTP/* $httpdir\n".
+	    `cp -prv $opbin/noproxy/HTTP/* $httpdir ; chown -R 0.0 $httpdir 2>&1`
+	   );
+  chomp(my $noproxyversion = `noproxy.pl -v 2>&1 | grep -i "noproxy.*v\."`);
+dbg("nopv=$noproxyversion");
+  mymydie("noproxy.pl must be in path")
+    unless $noproxyversion;
+  $socket = pilotstart(quiet);
+
+  my @noproxytest = split(/\n/,`whl firefox`);
+  if (@noproxytest > 1) {
+    my ($usethisone,$firstone,$newestepoch,$hr,$min) = ();
+    foreach my $ls (@noproxytest) {
+      my ($size,$monstr,$mday,$yr,$path) = $ls =~
+	m,(\d+)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)\s+(\d+)\s+(/.*),;
+      my $monnum = $nummon{$monstr};
+      unless($yr) {
+	($size,$monstr,$hr,$min,$path) = $ls =~
+	m,(\d+)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)\s+(\d\d):(\d\d)\s+(/.*),;
+	$yr = $thisyear;
+	if ($monnum = $nummon{$monstr}) { # this is 0 based for month like gmtime is
+	  $yr-- if ($monnum > $thismonnum);
+	}
+      }
+      next unless $path;
+      $firstone = $path unless ($firstone);
+      if ($monstr and $yr and $path) {
+	my $epoch = Time::Local::timegm(0,$min,$hr,$mday,$monnum,$yr);
+	next unless $epoch > $newestepoch;
+	$usethisone = $path;
+	$newestepoch = $epoch;
+      }
+    }
+    unless (!$usethisone or $usethisone eq $firstone) {
+      my $rmoutput = "";
+      foreach my $ls (@noproxytest) {
+	my ($size,$monstr,$mday,$yr,$path) = $ls =~
+	  m,(\d+)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)\s+(\d+)\s+(/.*),;
+	next if ($path eq $usethisone);
+	$rmoutput = `rm -fv $path`;	
+      }
+      my @noproxytestafter = split(/\n/,`whl firefox`);
+      my ($binary,$an,$s,$S) = ("binary"," an");
+      ($binary,$s,$S,$an) = ("binaries","s","S","")
+	if (@noproxytest - @noproxytestafter > 1);
+      offerabort
+	($COLOR_FAILURE."\n\n".
+	 "NOTE: This station had$an old firefox $binary in our PATH, so all but\n".
+	 "      the newest one will be deleted. BEFPRE DELETE$S:\n\n ".
+	 join("\n ",@noproxytest)."\n\n".
+	 "That has been resolved by removing the older one$s. AFTER DELETE$S:\n\n".
+	 join("\n ",@noproxytestafter)."\n\n".
+	 "This station will be fine from now on."
+	);
+    }
+  }
+} #myinit
+
+sub setupdns {
+  local ($myremotedns) = (@_);
+  # Use remote resolv.conf, set ours aside first
+  if (open(RESOLV,"/etc/resolv.conf")) {
+    my @content = <RESOLV>;
+    close(RESOLV);
+    unless("@content" eq "nameserver 127.0.0.1\n") {
+      preservefile("/etc/resolv.conf.noproxy");
+      rename("/etc/resolv.conf","/etc/resolv.conf.noproxy");
+    }
+  }
+  close(RESOLV);
+
+  # Our DNS points to loopback throughout
+  open(RESOLV,">/etc/resolv.conf")
+    or mymydie("Cannot write to our local /etc/resolv.conf");
+  print RESOLV "nameserver 127.0.0.1\n";
+  close(RESOLV);
+
+  my ($targetresolv, $remotednsname, $dnswarnings,) = ();
+  unless ($myremotedns) {
+    doit("-get /etc/resolv.conf")
+      unless (-e "$opdown/$nopen_rhostname/etc/resolv.conf");
+
+    open(RESOLVIN,"$opdown/$nopen_rhostname/etc/resolv.conf")
+      or mydie("Cannot open $opdown/$nopen_rhostname/etc/resolv.conf");
+
+dbg("Remote resolv.conf has:");
+    while (<RESOLVIN>) {
+dbg($_);
+      $targetresolv .= $_;
+      my ($dnsip) = /^\s*nameserver\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/;
+      # Remote guy's loopback is no good for OUR side's DNS server
+      next if $dnsip eq "127.0.0.1";
+      my ($dnsname) = ();
+      ($dnsname) = /^\s*nameserver\s+(\S+)/
+	unless $dnsip;
+      next if $dnsname =~ /^localhost.*/;
+      if ($dnsip) {
+	if ($myremotedns) {
+	  # Use first only, skip others but warn about them
+	  $dnswarnings .= "     $dnsip\n";
+	} else {
+	  $myremotedns = $dnsip;
+	}
+      } elsif ($dnsname) {
+	if ($remotednsname) {
+	  # Use first only, skip others but warn about them
+	  $dnswarnings .= "     $dnsname\n";
+	} else {
+	  $remotednsname = $1;
+	}
+      }
+    }
+    close(RESOLVIN);
+  }
+  if ($remotednsname and !$myremotedns) {
+    # Look up remote DNS server name remotely when we have no IP yet
+    my ($output,$nopenlines,@output) = doit("-nslookup $remotednsname");
+    my (@hits) = grep /Address:\s*\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/,
+      @output;
+    unless (@hits) {
+      # -nslookup sometimes fails, use target nslookup
+      my ($output,$nopenlines,@output) = doit("nslookup $remotednsname");
+      (@hits) = grep /Address:\s*\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/,
+	@output;
+    }
+    if (@hits) {
+      ($myremotedns) = $hits[0] =~
+	/Address:\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/;
+    }
+    if ($dnswarnings or !$myremotedns) {
+      my $localwarning = "";
+      while (1) {
+	my ($prompt) = 
+	  ("\n\n$targetresolv\n\n".
+	   $localwarning.
+	   "Target has no DNS servers (resolv.conf, if any, shown above).\n".
+	   "Pick one of your own:","4.2.2.2"
+	  );
+	if ($dnswarnings) {
+	  ($prompt) = 
+	    ("\n\n$targetresolv\n\n".
+	     $localwarning.
+	     "Target has multiple DNS servers, shown above.\n".
+	     "Pick one:",$myremotedns
+	    );
+	}
+	my ($ans,$longans) =offerabort
+	  ($prompt,$myremotedns);
+	if (ipcheck($longans)) {
+	  $myremotedns = $longans;
+	  last;
+	} else {
+	  $localwarning = "${COLOR_FAILURE}INVALID IP: $longans\n$COLOR_NORMAL\n";
+	}
+      }
+    }
+  }
+#OOPS: This makes no sense here DNS is not setup until noproxy.pl runs
+#  my ($ans,$host) = mygetinput
+#    ("Enter DNS query to make remotely to check if DNS is set up\n".
+#     "correctly through $nopen_rhostname\n".
+#     "(enter \"NONE\" to skip this):",
+#     "google.com");
+#  unless ($host eq "NONE") {
+#    my $result = `nslookup $host 2>&1`;
+#    offerabort
+#      ("DNS results of nslookup $host:\n".$result."\n\n".
+#       "Continue if that looks right.");
+#  }
+  return $myremotedns;
+}
+
+sub setupkids {
+    my $noproxy_perl = "noproxy.pl $noproxyargs -F $proxylogfile -i 127.0.0.1 -p $notunnelport -r $proxyport -d $remotedns";
+    progprint
+      (".\n\n".$COLOR_FAILURE."\n".
+       "LOCAL DNS RESOLUTION NOW GOES THROUGH REMOTE END TO $remotedns.\n".
+       "Pastable to use in any NOPEN window to locally test if it works:\n\n".
+       "     -lsh nslookup google.com".
+       ".\n\n".
+       $COLOR_NOTE.
+       "RUNNING as BACKGROUND PROCESS:\n\n\t".
+       $COLOR_NORMAL.
+       "$noproxy_perl".
+       $COLOR_NOTE."\n\n".
+       "RUNNING as BACKGROUND PROCESS (it will pop up and\n".
+       "use noproxy.pl as its proxy):\n\n\t".
+       $COLOR_NORMAL.
+       "firefox -profile $opbin/noproxy.profile/\n\n".
+       $COLOR_NOTE.
+       "This window will handle -tunnels until you close the browser.\n\n".
+       "Use File->New Window or Ctrl-N or Ctrl-T to get additional windows\n".
+       "or tabs in that browser that are also proxied."
+      );
+  return unless fork();
+
+  sleep 1;
+
+  # Close file descriptors (they tie up NOPEN client)
+  close(STDIN);
+  close(STDOUT);
+  close(STDERR);
+  close($socket);
+  # daemonize this child after closing above
+  fork() and exit;
+
+  # ASSERT: No more comms with user for these kids. dbg() will still
+  # write out to /current/tmp/dammit.
+
+  # next child, start noproxy.pl
+  unless ($proxypid = fork()) {
+    # Fork, wait until $notunnelport port is there, then start actual
+    # local perl proxy script.
+    my $maxsleep = 61;
+    while ($maxsleep-- > 0) {
+      sleep 1;
+      my @test = grep /^\sudp        0      0 0.0.0.0:38883/,
+	`netstat -an`;
+      last unless @test;
+    }
+    sleep 1;
+    # TODO: Maybe offer -gs noproxy options for: -H -t -s40000 -e60000
+    dbg("EXECING: $noproxy_perl");
+#    dbg(`noproxy.pl $noproxyargs -F $proxylogfile -i 127.0.0.1 -p $notunnelport -r $proxyport -d $remotedns 2>&1 | tee -a $optmp/noproxy.pl.output`);
+    exec("$noproxy_perl");
+    exit;
+  }
+
+  # next child, monitor/accept kill signals and act in a popup C&C window
+  #NOT DONE YET
+
+  # next child, start browser for them with profile
+  # When browser exits, undo everything and exit
+  unless(fork()) {
+    system("firefox -profile $ffprofile/");
+    # When that exits, they are done so we shut down -tunnel
+    undostuff();
+    mydie("Done with $prog");
+  }
+  
+  # Any of those that might return, it must stop here
+  exit ;
+}
+
+sub undostuff {
+  # Close tunnels, quit -tunnel on $notunnelport
+  `closetunnel $notunnelport`;
+  dbg("Sending    kill(TERM,\$proxypid); if \$proxypid=$proxypid > 0");
+
+  kill(TERM,$proxypid) if $proxypid > 0;
+  dbg("Putting resolv.conf back:\n".`ls -al /etc/resolv*`);
+  rename("/etc/resolv.conf.noproxy","/etc/resolv.conf")
+    if -f "/etc/resolv.conf.noproxy";
+}
+sub mymydie {
+  undostuff() if $socket;
+  mydie(@_);
+}
+
+

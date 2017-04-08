@@ -1,0 +1,133 @@
+#!/usr/bin/env perl
+
+use File::Basename ;
+use File::Copy ;
+require Time::Local;
+require "getopts.pl";
+$VER="1.0.1.8" ;
+myinit() ;
+if ($promptfile) {
+  if (open(GETINPUTIN,$promptfile)) {
+    while(<GETINPUTIN>) {
+      $prompt .= $_;
+    }
+    close(GETINPUTIN);
+  } else {
+    $prompt = "UNABLE TO FIND PROMPT CONTENT FROM =$promptfile=";
+  }
+  ($default,@allowed) = @ARGV;
+} else {
+  if ($ENV{PROMPT}) {
+    $prompt = $ENV{PROMPT};
+  } else {
+    $prompt = shift(@ARGV);
+  }
+}
+if ($ENV{DEFAULT}) {
+  $default= $ENV{DEFAULT};
+} else {
+  $default = shift(@ARGV);
+}
+
+foreach (@ARGV) {
+  if ($_ eq "ANYTHING") {
+    $allowanything++;
+    next;
+  }
+  push(@allowed,$_);
+}
+push(@allowed,split(/\s+/,$ENV{ALLOWED})) if $ENV{ALLOWED};
+$allowanything++ if (grep /^ANYTHING$/,@allowed);
+
+usage() unless $prompt ;
+$prompt =~ s/\\n/\n/g;
+$prompt =~ s/\\t/\t/g;
+$prompt =~ s/NNLL/\n/g;
+$prompt =~ s/DQ/\"/g;
+my $colors = $prompt =~ /(COLOR(RED|GREEN|YELLOW|BLUE|NORMAL))/;
+$prompt =~ s/COLORRED/${COLOR_FAILURE}/g;
+$prompt =~ s/COLORGREEN/${COLOR_SUCCESS}/g;
+$prompt =~ s/COLORYELLOW/${COLOR_WARNING}/g;
+$prompt =~ s/COLORBLUE/${COLOR_NOTE}/g;
+$prompt =~ s/COLORNORMAL/${COLOR_NORMAL}/g;
+my $endcolor = "";
+$endcolor = $COLOR_NORMAL if $colors ;
+$prompt = "\n\n\n$prompt$endcolor";
+select ANSWER;
+print getinput($prompt,$default,@allowed);
+print "\n";
+close(ANSWER);
+select STDOUT;
+unlink($promptfile);
+dbg("Leaving autogetinput(@ARGV)");
+
+sub getinput {
+  local($prompt,$default,@allowed) = @_;
+  local($ans,$tmp,%other) = ();
+  $other{"Y"} = "N" ; $other{"N"} = "Y" ;
+  if ($other{$default}) {
+    push(@allowed,$other{$default}) ;
+  }
+  $tmp = $default;
+  if (chop($tmp) eq "") {
+    #damn ^M's in script files
+    $default = $tmp;
+  }
+  SUB: while (1) {
+    print STDERR $prompt;
+    if ($default) {
+      print STDERR " [$default] ";
+    } else {
+      print STDERR " ";
+    }
+    system ("stty -echo") if $notty;
+    chomp($ans = <STDIN>);
+    if ($notty) {
+      system ("stty echo");
+      print STDERR "\n";
+    }
+    $ans = $default if ( $ans eq "" );
+    last SUB if ($allowanything or $#allowed < 0) ;
+    foreach ($default,@allowed) {
+      last SUB if $ans =~ /^$_/i ;
+    }
+    print STDERR "\n\a${COLOR_FAILURE}Invalid response \"$ans\".\n$COLOR_NORMAL\n";
+    sleep 1;
+  }
+  return $ans;
+} # getinput
+
+sub myinit {
+  my $autoutils = "../etc/autoutils" ;
+  unless (-e $autoutils) {
+    $autoutils = "/current/etc/autoutils" ;
+  }
+  require $autoutils;
+
+  $vertext = "$prog version $VER\n" ;
+  $usagetext="$COLOR_NOTE
+Usage: $prog \"prompt\" [ Default [ Others ] ]
+Usage: $prog -O OUTPUTFILE -P PROMPTFILE [ Default [ Others ] ]
+$COLOR_NORMAL
+$prog echos the \"prompt\" to the user, accepts a single line of
+input from them, then writes that input to the file OUTPUTFILE.
+
+The \"prompt\" can contain the tags \"NNLL\" and/or \"DQ\", which $prog
+replaces with a newline and double quote, respectively. Similarly,
+the tags$COLOR_FAILURE RED,$COLOR_SUCCESS GREEN,$COLOR_WARNING YELLOW,$COLOR_NOTE BLUE and$COLOR_NORMAL NORMAL will change the color
+of text following that tag.
+
+$prog is meant to be called from automated NOPEN scripts that
+use the new NOPEN_AUTOPORT functionality to allow user interaction.
+
+";
+  die("bad option(s)\n") if (! Getopts( "hvP:O:TA" ) ) ;
+  usage() if ($opt_h or $opt_v) ;
+  $notty = $opt_T;
+  $promptfile = $opt_P
+    if (-s $opt_P and -r _);
+  $outputfile = $opt_O;
+  $allowanything = $opt_A;
+  preservefile($outputfile);
+  open(ANSWER,"> $outputfile") or die "Unable to open $outputfile: $!\n";
+} #myinit

@@ -1,0 +1,183 @@
+#!/usr/bin/env python
+VERSION = "2.0.1.3"
+
+import optparse
+import os
+import sys
+import re
+
+def get_good_lines(filename):
+    logfile = open(filename, 'r')
+    good_lines = []
+    good_pid = 0
+    for line in logfile:
+        pid = get_value(" pid", line)
+        if pid == good_pid:
+            good_lines.append(line.strip())
+            if get_value("type", line) == "USER_END":
+                break
+        else:
+            if line.find("crond") > 0:
+                if get_value("type", line) == "USER_ACCT":
+                    if good_pid <= 0:
+                        good_pid = get_value(" pid", line)
+                        good_lines.append(line.strip())
+    logfile.close()
+    return good_lines
+
+def get_value(key, line):
+    match = re.search(key+"=(\w+)", line)
+    if match:
+        value = match.group(1)
+    else:
+        value = match
+    return value
+
+def get_audit(line):
+    match = re.search("(\d+\.\d+:\d+)", line)
+    if match:
+        value = match.group(1)
+    else:
+        value = match
+    return value
+
+def get_bad_lines():
+    print "\nPaste the log entries you want to clean. Press CRTL+D when finished...\n"
+    bad_lines = []
+    try:
+        user_input = sys.stdin.read()
+    except (KeyboardInterrupt, SystemExit):
+        print "\nExiting..."
+        sys.exit(0)
+    for line in user_input.split("\n"):
+        if line != '':
+            bad_lines.append(line)
+    print "\nGot a CTRL+D"
+    return bad_lines
+
+def get_line(index, filename):
+    logfile = open(filename, 'r')
+    for i, log_line in enumerate(logfile):
+        if i == index:
+            logfile.close()
+            return log_line.strip()
+    logfile.close()
+    return None
+
+def get_line_index(line, filename):
+    logfile = open(filename, 'r')
+    for i, log_line in enumerate(logfile):
+        if log_line.strip() == line:
+            logfile.close()
+            return i
+    logfile.close()
+    return None           
+
+def get_prev_ses(index, filename):
+    prev_ses = None
+    for i in range(index, -1, -1):
+        line = get_line(i, filename)
+        if get_value("type", line) == "LOGIN":
+            prev_ses = get_value("new ses", line)
+            break
+    return prev_ses
+
+def get_prev_pid(index, filename):
+    prev_ses = None
+    for i in range(index, -1, -1):
+        line = get_line(i, filename)
+        if get_value(" pid", line):
+            prev_ses = get_value(" pid", line)
+            break
+    return prev_ses
+
+def main():
+    parser = optparse.OptionParser(usage="%prog [options] [FILE]", epilog="Version " + VERSION, description="Auditcleaner generates sed lines to clean /var/log/audit/audit.log. You must first get audit.log from the target and test locally. When run without specifying a FILE, Auditcleaner will look for \"audit.log\" in the cwd.")
+    (options, args) = parser.parse_args()
+    if len(args) > 1:
+        parser.error("too many arguments")
+    elif len(args) == 1:
+        options.filename = args[0]
+    else:
+        options.filename = "audit.log"
+
+    if not os.path.isfile(options.filename):
+        parser.error("%s does not exist or is not a file" % options.filename)
+  
+    bad_lines = get_bad_lines()
+    if len(bad_lines) < 1:
+        print "\nYou didn't paste any lines!\n"
+        return
+
+    good_lines =  get_good_lines(options.filename)
+    template_lines = []
+    template_ses = None 
+    
+    for good_line in good_lines:
+        if get_value("type", good_line) != "LOGIN":
+            template_lines.append(good_line)
+        else:
+            template_ses = get_value("new ses", good_line)
+    
+    if not template_ses:
+        print"\nCould not find enough good lines in %s" % options.filename
+        return
+    else:
+        print "\nHere is the first good cron session from %s:\n" % options.filename
+        for good_line in good_lines:
+            print good_line
+
+    template_index = 0
+    bad_line_index = 0
+    fixed_lines = []
+
+    while bad_line_index < len(bad_lines):
+        bad_line = bad_lines[bad_line_index]
+        bad_index = get_line_index(bad_line, options.filename)
+        if not bad_index:
+            print "\nThis line could not be found in %s:\n\n%s\n" % (options.filename, bad_line)
+            return
+        else:
+            new_ses = get_prev_ses(bad_index, options.filename)
+            if not new_ses:
+                new_ses = template_ses
+            if not get_value(" pid", bad_line):
+               new_pid = get_prev_pid(bad_index, options.filename)
+            else:
+                new_pid = get_value(" pid", bad_line)
+            if get_value("type", bad_line) != "LOGIN":
+                fixed_line = re.sub(r'(\d+\.\d+:\d+)', "\\\\1", template_lines[template_index%len(template_lines)])
+                fixed_line = re.sub(r'"', '\\"', fixed_line)
+                fixed_line = re.sub(" pid=\d+", " pid="+new_pid, fixed_line)
+                fixed_line = re.sub("ses="+template_ses, "ses="+new_ses, fixed_line)
+                fixed_line = "sed -e \"s#^type=%s.*\(%s\).*\$#%s#g\"" % (get_value("type", bad_line), get_audit(bad_line), fixed_line)
+                if bad_line_index < len(bad_lines) - 1:
+                    fixed_line = fixed_line + " | \\"
+                else:
+                    fixed_line = fixed_line + " > .tmp557371; \\"
+                fixed_lines.append(fixed_line)
+            template_index += 1
+        bad_line_index += 1
+
+    if len(fixed_lines) > 0:
+        print "\nPastables to test locally:\n"
+        print "cp %s .tmp345634; cat .tmp345634 | \\" % options.filename
+        for fixed_line in fixed_lines:
+            print fixed_line
+        print "diff %s .tmp557371; rm -f .tmp345634 .tmp557371" % options.filename
+
+        print "\nPastables to run on target:\n"
+        print "-get /var/log/audit/audit.log"
+        print "-shell"
+        print "unset HISTFILE"
+        print "unset HISTSIZE"
+        print "unset HISTFILESIZE\n"
+        print "cp /var/log/audit/audit.log .tmp345634; cat .tmp345634 | \\"
+        for fixed_line in fixed_lines:
+            print fixed_line
+        print "diff /var/log/audit/audit.log .tmp557371; cat .tmp557371 > /var/log/audit/audit.log; rm -f .tmp345634 .tmp557371"
+    else:
+        print "\nNo need to clean LOGIN lines.\n"
+
+if __name__ == '__main__':
+    main()

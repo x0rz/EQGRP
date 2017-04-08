@@ -1,0 +1,319 @@
+#!/bin/bash
+VER=2.1.0.2
+## 09 FEB 2008
+# shell script to unmount encrypted partitions.  This could be done easily with
+# a truecrypt command, but for backwards compatability sake, this script needs
+# has been modified.
+##
+
+MNTPNTBASE="/mnt/zip"
+KEYFILE="/etc/keyfile"
+export TRUECRYPT=1
+export UNMOUNT=0
+export MNTPNT1="/mnt/zip"
+export MNTPNT2="/mnt/zip2"
+export MNTPNT3="/mnt/zip3"
+
+
+
+findzipdev() {
+
+#
+# All these exports are legacy, I would rather leave them in than risk 
+# breaking something
+#
+	export MNTPNT1="/mnt/zip"
+	export MNTPNT2="/mnt/zip2"
+	export MNTPNT3="/mnt/zip3"
+	export ALLMNTS="$MNTPNT1 $MNTPNT2 $MNTPNT3"
+	export LASTMNT=`echo $ALLMNTS | sed "s/.* //g"`
+
+	[ "$*" = "-u" ] && UNMOUNT=1
+	
+	#
+	# If the fuse kernel module is not loaded, truecrypt cannot mount the
+	# encrypted partition, this checks and tries to load it
+	#
+
+	FUSE_DRIVER_LOADED=`lsmod | grep "^fuse"`
+#	echo "FUSE_DRIVER_LOADED=${FUSE_DRIVER_LOADED}"
+	if [[ -z ${FUSE_DRIVER_LOADED} ]] ; then 
+		echo "fuse module not loaded, attempting to load it" ; 
+		modprobe fuse
+		FUSE_DRIVER_LOADED=$?
+#		echo "FUSE_DRIVER_LOADED=${FUSE_DRIVER_LOADED}"
+		if [[ ${FUSE_DRIVER_LOADED} -gt 0 ]] ; then 
+			echo "Loading module failed, exiting"; exit -1 ; 
+		fi
+	fi
+
+
+#
+# Legacy Variables, could probably get rid of them
+#
+
+	# Our /mnt/zip* devices
+	DEV1=`mount | grep " on $MNTPNT1 " | head -1 | sed "s/ .*//g"`
+	DEV2=`mount | grep " on $MNTPNT2 " | head -1 | sed "s/ .*//g"`
+	DEV3=`mount | grep " on $MNTPNT3 " | head -1 | sed "s/ .*//g"`
+
+	# Other non /mnt/zip* devices
+	OTHDEV1=`mount | grep -v " on $MNTPNT1" | grep "^/" | head -1 | sed "s/ .*//g"`
+	OTHDEV2=`mount | grep -v " on $MNTPNT1" | grep "^/" | head -2 | tail -1 | sed "s/ .*//g"`
+	[ "$OTHDEV2" = "$OTHDEV1" ] && OTHDEV2=""
+	OTHDEV3=`mount | grep -v " on $MNTPNT1" | grep "^/" | head -3 | tail -1 | sed "s/ .*//g"`
+	[ "$OTHDEV3" = "$OTHDEV2" -o "$OTHDEV3" = "$OTHDEV1" ] && OTHDEV3=""
+
+	MNT1=`mount | grep " on $MNTPNT1 " | head -1 | sed "s/.* on //g" | sed "s/ .*//g"`
+	MNT2=`mount | grep " on $MNTPNT2 " | head -1 | sed "s/.* on //g" | sed "s/ .*//g"`
+	MNT3=`mount | grep " on $MNTPNT3 " | head -1 | sed "s/.* on //g" | sed "s/ .*//g"`
+
+
+#
+# This next line greps through /var/log/messages and pulls out USB devices.
+# It pulls out sd[abc] etc instead of sd[abc]1 because we are using full disk 
+# encryption and therfore don't have sd[abc]1
+#
+	USBDEVS=`egrep "kernel: Attached scsi removable disk" /var/log/messages | sed "s/^.*removable disk sd\([a-h]\).*$/sd\1/g" | sort | uniq`
+
+[ "$DEBUG" ] && echo USBDEVS=$USBDEVS
+
+#
+# If any USB devices are mounted, unmount  them.  I am not sure if this will 
+# unmount CDROM drives, I guess it depends on if they are recognized as scsi 
+# removable disks.  We should never mount a thumb drive once this goes into
+# effect.
+#
+	echo "Unmounting all USB devices"
+	for USBDEV in $USBDEVS; do
+		umount /dev/${USBDEV}* 2>/dev/null
+	done
+
+#
+# If we are called as uz or with the -u option, unmount everything and return
+#
+	RESULT2=0
+	if [ $UNMOUNT -gt 0 ] ; then
+	    if [ $TRUECRYPT -gt 0 ] ; then
+		echo "Unmounting all truecrypt partitions."
+		truecrypt -d
+		RESULT2=$?
+		LEFTOVER=`truecrypt --list 2>/dev/null`
+		[[ -z "$LEFTOVER" ]] || return 1
+		[[ -z "$LEFTOVER" ]] && return 0
+	    else
+		echo umount ${MNTPNTBASE}*
+		umount ${MNTPNTBASE}* 2>/dev/null
+		RESULT2=$?
+	    fi
+	    rmdir ${MNTPNTBASE}* 2>/dev/null
+	    return $RESULT2
+	fi
+
+
+#
+# This is the heart of the new code.  MNTPNTBASE (defined at the top of this
+# file) holds the first mount point to try.  If that one is already mounted, or
+# is non-directory file, then increment by one and try again (/mnt/zip2, etc)
+# there is no hard stop here.  Conceviebly, you could get to /mnt/zip999, but
+# I hope not.
+#
+	MNTPNT="${MNTPNTBASE}"
+	ZIPNUM="1"
+	RESULT=1
+	for USBDEV in ${USBDEVS}; do
+
+		if [ ! -e /dev/${USBDEV} ] ; then continue; fi
+		while [ -e "${MNTPNT}" -a ! -d "${MNTPNT}" ]; do
+	#			echo "${MNTPNT} exists and is not a folder, skipping"
+				ZIPNUM=`echo "$ZIPNUM + 1" | bc`
+				MNTPNT="${MNTPNTBASE}${ZIPNUM}"
+				continue
+			done
+			MNTRESULTS=`mount | egrep " on $MNTPNT "`
+			while [ -n "${MNTRESULTS}" ] ; do
+	#			echo "${MNTPNT} is already mounted to, moving on"
+				ZIPNUM=`echo "$ZIPNUM + 1" | bc`
+				MNTPNT="${MNTPNTBASE}${ZIPNUM}"
+				MNTRESULTS=`mount | egrep " on $MNTPNT "`
+			done
+
+	#
+	# If the mount point we are trying to mount to does not exist, create it.
+	#
+			[[ -d ${MNTPNT} ]] || mkdir ${MNTPNT}
+
+	#
+	# The one truecrypt line does most of the work.
+	#
+			[ -e /dev/${USBDEV}1 -a -b /dev/${USBDEV}1 ] && USBDEV="${USBDEV}1" && export ${USBDEV}
+			if [ $TRUECRYPT -gt 0 ] ; then
+			    echo "Mounting /dev/${USBDEV} READONLY to ${MNTPNT} with truecrypt::"
+			    echo "# truecrypt -t -k \"${KEYFILE}\" -m ro /dev/${USBDEV} ${MNTPNT} 2>/dev/null "
+			    truecrypt -t -k "${KEYFILE}" -m ro /dev/${USBDEV} ${MNTPNT} 2>/dev/null 
+			else
+			    echo "Mounting /dev/${USBDEV} READONLY to ${MNTPNT} without truecrypt::"
+			    echo "# mount -o ro /dev/${USBDEV} $MNTPNT"
+			    mount -o ro /dev/${USBDEV} $MNTPNT
+			fi
+	#
+	# After a successful mount, ls the zip drive
+	#
+			SUCCESS=$?
+	#		echo "SUCCESS=$SUCCESS"
+			if [ ${SUCCESS} -eq 0 ] ; then RESULT=0; fi
+			[ ${SUCCESS} -eq 0 ] && echo "ls -alrtd ${MNTPNT}/*"
+			[ ${SUCCESS} -eq 0 ] && ls -alrtd ${MNTPNT}/*
+			[ ${SUCCESS} -gt 0 ] && echo
+		done
+
+	#
+	# scrubands uses $MNTPNT, and THISMNT is used by legacy code if findzip is not 
+	# sourced
+	#
+		export MNTPNT=${MNTPNT}
+		THISMNT=${MNTPNT}
+
+	#
+	# Return 0 if even one encrypted partion is mounted
+	#
+		if [ $TRUECRYPT -gt 0 ] ; then
+		    truecrypt --list > /dev/null 2>&1
+		    RESULT=$?
+		fi
+	return $RESULT
+}
+
+
+#
+# if we are not called as mz,uz or findzip, exit.  This allows this script to 
+# be sourced so other scripts can have the findzipdev() functionality
+#
+if [ ! "`echo $0 | egrep \"uz$|findzip|mz$\"`" ] ; then
+#	exit 1
+	return
+fi
+if [ "`echo $0 | egrep \"uz|unfindzip\"`" ] ; then
+	UNMOUNT=1
+fi
+
+
+# Since we were not sourced then, we define our own PROG, VER and usage()
+PROG=`basename ${0}`
+
+usagetext="
+Usage: $PROG [-t] [-u] [-q]
+
+findzip tries to find a removable USB drive, using recent log entries
+in /var/log/messages to find the right device. If it cannot, it
+proceeds to try and find a ZIP drive. It can mount up to three distinct
+devices in this manner.
+
+Run with the -u option (or alternatively as the softlink unfindzip),
+it attempts to unmount the device it most recently mounted. When it
+unmounts the device, the mount point directory is also removed.
+
+If it finds one not already mounted, it is mounted as $MNTPNT1 or
+$MNTPNT2 or $MNTPNT3, whichever is first available. Then, this
+is output to stdout for those that are currently mounted, and the
+final line will be the most recently mounted mount point.
+
+             export MNTPNT1=/mnt/zip
+             export MNTPNT2=/mnt/zip2
+             export MNTPNT3=/mnt/zip3
+             export MNTPNT=(varies)
+
+Use the -t option to disable use of TRUECRYPT, if you are permitted.
+
+The quiet (-q) option will suppress informational and error messages
+to stderr, so you will see only the appropriate lines as above. In
+non-quiet mode, you will see a \"ls -alrtd\" output for each mounted
+device that shows the FULL path to files on the root directory.
+
+$PROG returns 0 on success, 1 otherwise.
+
+You must be root to run $PROG.
+
+$PROG is a bash script, and other scripts can source $PROG to
+import (but not run) the function findzipdev. See $PROG source for
+more detail. When the script runs findzipdev() it will then have
+the MNTPNT* definitions for those that are mounted.
+"
+
+usage() {
+    [ "$1" = "exit" ] && EXIT=1 && shift
+    if [ "$1" = "-h" ] ; then
+        shift
+        [ "$ERRSTR" ] || ERRSTR="\nNOTE: \a THE NEW WAY REQUIRES NO UU*CODE NOR ANY E=\"ratpreargs\"!!!!"
+        echo -e "$usagetext"
+    fi
+    # We want -v output to be just two digits, so scrubver is #.#
+    # and suitever can have whole #.#.#.# in it.
+    if [ "$1" = "-v" ] ; then
+        shift
+    fi
+    echo "$PROG version $VER"
+    ERRSTR="${*}"
+    if [ "$ERRSTR" ] ; then
+        echo -e "\a${ERRSTR}"
+    fi
+    [ "$EXIT" ] && exit
+} # end usage
+
+
+MYDIR=`dirname $0`
+if [ ! -e "$MYDIR/unfindzip" ] ; then
+    ln -sf findzip $MYDIR/unfindzip
+    ln -sf findzip $MYDIR/mz
+    ln -sf findzip $MYDIR/uz
+fi
+
+QUIET=""
+TRUECRYPT=1
+while getopts hvqut optvar ; do
+  case "$optvar" in
+  v|h) usage exit -$optvar ;;
+  q)  QUIET="#QUIET " ;;
+  u)  UNMOUNT=1 ;;
+  t)  TRUECRYPT=0 ;;
+  *)  usage exit "Argument not recognized: $1"        ;;
+  esac
+done
+shift `expr $OPTIND - 1`
+
+ROOT=`id -u`
+
+if [ $ROOT != 0 ] ; then
+    [ "$QUIET" ] || echo You must be root 1>&2
+    exit 1
+fi
+
+findzipdev
+RESULT=$?
+
+
+if [ $UNMOUNT -gt 0 ] ; then
+    rmdir ${MNTPNTBASE}* 2>/dev/null
+    for mnt in $ALLMNTS ; do
+        if [ -d $mnt ] ; then
+            MORE=""
+            mount | grep -q " on ${mnt} " && MORE="This device is still mounted"
+            [ "$MORE" ] && echo "$MORE"
+            echo ls -arlt $mnt 1>&2
+            ls -arlt $mnt 1>&2
+        else
+            echo $mnt unmounted and removed
+        fi
+    done
+    exit $RESULT
+fi
+
+if [ "$THISMNT" -a -d $THISMNT ] ; then
+    # We export MNTPNT as the most recently mounted one
+    export MNTPNT=$THISMNT
+fi
+
+echo
+df -h ${MNTPNTBASE}* | grep zip ; df -h ${MNTPNTBASE}* | grep Avail
+exit $RESULT
+

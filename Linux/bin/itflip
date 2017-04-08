@@ -1,0 +1,118 @@
+#!/usr/bin/perl
+$version = "2.1" ;
+myinit() ;
+if (@ARGV) {
+  if ($#ARGV > 0) {
+    die ("Too many arguments.\n");
+  }
+  $origfile = "@ARGV" ;
+  die("No such file $origfile\n") unless (-s $origfile and -r _) ;
+  warn("New itflip now creates @ARGV.flipped and @ARGV.flipped2, which will\n".
+      "pop up shortly in two xterm/vi windows (Alt-F4 will close them).\n\n");
+  foreach ("flipped","flipped2") {
+    my $ext = "" ;
+    if (-e "$origfile.$_") {
+      $ext++ while (-e "$origfile.$_.old$ext") ;
+      rename ("$origfile.$_","$origfile.$_.old$ext") ;
+    }
+  }
+  open(OUT1,"> $origfile.flipped") || die("Cannot open > $origfile.flipped");
+  open(OUT2,"> $origfile.flipped2") || die("Cannot open > $origfile.flipped2");
+  $nopencomment = "# " ;
+  print OUT1 "#NOGS\n";
+  print OUT2 "#NOGS\n";
+  select OUT1 ;
+} else {
+  if ( $0 =~ /flip2/) {
+    $needdepth++;
+    select OUT1 ; # this gets thrown away when no @ARGV
+  }
+}
+
+while (<>) {
+  if (/\.\/it/) {
+    $justhadnullline = 0;
+    push @lines,$_;
+    $lines{&depth($_)} .= $_; #this one is for itflipped2
+  } elsif (/^\n/) {
+    next if $justhadnullline ;
+    $justhadnullline++ ;
+    @temp=@lines;
+    for (@temp) {
+      $line =	pop @lines;
+      print $line;
+    }
+    @lines=@temp=();
+    print;
+  } else {
+    $justhadnullline = 0;
+    # otherwise save it in $comments for itflipped2
+    push @comments,"$nopencomment$_";
+    print "$nopencomment$_";
+  }
+}
+if ($needdepth) {
+  select STDOUT ;
+} else {
+  exit unless ($origfile) ;
+  # Input done, so itflipped is done
+  close(OUT1) ;
+  select OUT2 unless $needdepth ;
+}
+# now print out %lines, deepest first
+foreach $depth (sort { $b <=> $a} keys %lines) {
+  print $lines{$depth};
+}
+print "\n";
+# print the rest
+print foreach (@comments) ;
+
+unless ($needdepth) {
+  close(OUT2) ;
+  select STDOUT ;
+  `chmod a-w $origfile.flipped $origfile.flipped2` ;
+  system("xterm -geometry 127x35-0+0 -title $origfile.flipped -e view $origfile.flipped &") ;
+  system("xterm -geometry 127x35-0-0 -title $origfile.flipped2 -e view $origfile.flipped2 &") ;
+}
+sub depth {
+  my ($line) = (@_) ;
+  my $count = 0;
+
+  for ($i = 0 ; $i < length($line) ; $i++) {
+    $char = substr($line,$i,1);
+    $count++ if ($char eq "/");
+  }
+  return $count;
+}
+
+sub usage {
+  print $usagetext unless $opt_v ;
+  print $versiontext ;
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  exit;
+} #end sub usage
+
+sub myinit {
+  require "getopts.pl";
+  usage("bad option(s)") if (! &Getopts( "hv" ) );
+  use File::Basename ;
+  $prog = basename $0 ;
+  $versiontext = "$prog version $version\n" ;
+  $usagetext = "
+Usage:
+        $prog < stdin
+OR
+        $prog filename
+
+When processing stdin, $prog can be called as either \"itflip\" or
+\"itflip2\", and behaves like the old itflip/itflip2.
+
+When given a filename, $prog will create two new files, called
+filename.flipped and filename.flipped2, with contents what you
+would expect. Once they are created, two fresh xterm/view windows
+are brought up showing both files. Alt-F4 closes them quickly.
+
+" ;
+
+  usage() if ($opt_h or $opt_v) ;
+}

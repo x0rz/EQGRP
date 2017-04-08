@@ -1,0 +1,138 @@
+#!/usr/bin/env perl
+
+use File::Basename;
+
+#version:
+$VER="2.0.0.1";
+# primary
+# 9 Jan 2002
+
+$progname = basename ${0};
+
+$lownum=10025 ;
+$highnum=65534 ;
+
+$versiontext="$progname version $VER
+" ;
+$usagetext="
+Usage:  $progname [-V] [-t] [<file> [<another file>...]]
+        $progname [-n] [lownum [highnum] ]
+
+ -t enables tagging of modified lines (off by default)
+
+ -V disables verbose mode (default is on)
+    Verbose mode prints files changed and their randoms to stderr.
+
+ -n This mode generates a single random to stdout. lownum defaults
+    to $lownum, highnum defaults to $highnum.
+
+    Processes through files on command line or if no arguments then
+    all *script* and user.* files in $debug/current/etc, changing every
+    occurence of a string in the form \"randomNN-MM[-II]\" into a random
+    number from NN to MM, inclusive. File is saved off unmodified as
+    filename.pre$progname unless that already exists. If the -t option
+    is used, lines modified by $progname will also occur unmodified,
+    prefaced by \"#rnd:\" just before the line with the random(s)
+    inserted.
+
+    Strings of the form randomNN-MM-II, II an integer, will each
+    be replaced by the same random number.  E.g., if your scripts
+    have \"random1025-65535-1\" in several places, each will be
+    changed to the same random, but if \"random1025-65535\" appears
+    more than once, each will be replaced by a different random.
+
+";
+
+$|=1; # unbuffered output
+
+require "getopts.pl";
+&Getopts( "tdhvVn" );
+&usage() if ($opt_h or $opt_v);
+$debug = "." if ($opt_d);
+$verbose = 1 unless ($opt_V);
+$tagging = 1 if ($opt_t);
+
+if ( $debug ) {
+  
+}
+
+if ($opt_n) {
+  $lownum  = 1 * $ARGV[0] if $ARGV[0] ;
+  $highnum = 1 * $ARGV[1] if $ARGV[1] ;
+  $rand = &myrand($lownum,$highnum) ;
+  print "$rand\n";
+  exit ;
+} elsif ($#ARGV >= 0) {
+  @files = @ARGV;
+} else {
+  chdir("$debug/current/etc") || die "Could not cd to $debug/current/etc.";
+  $inetc = " in /current/etc";
+  @files = split (/\n/,`ls -1 *script* user.* | grep -v pre$progname`);
+}
+
+$filesmodified = 0;
+
+foreach (@files)  {
+  $randoms = `grep "random[0-9]*-[0-9]*" $_`;
+  next if (! $randoms);
+  rename("$_","$_.pre$progname") if (! -e "$_.pre$progname");
+  open (IN,"$_.pre$progname") || die "could not open $_ for read$inetc";
+  open (OUT,"> $_") || die "could not open $debug/current/etc/$_ for write$inetc";
+  print STDERR "\nmodifying \"$_\"..." if ($verbose);
+  $filesmodified++;
+  while (<IN>) {
+    $sameline = 0;
+    # this while reads in original file
+    while ( ($oldstr) = /(random[0-9]*-[0-9]*)/g ) {
+      # this while gets multiple randoms on same line
+      ($min,$max) = ($oldstr =~ /random([0-9]*)-([0-9]*)/ );
+      $r = &myrand($min,$max);
+
+      if ( ($instance) = (/$oldstr-([0-9]*)/) ) {
+	$oldstr .= "-$instance";
+	$r = $val{$oldstr} if ($val{$oldstr});
+      }
+      # print commented old line before modifying
+      if ($tagging) {
+	print OUT "#rnd:$_" unless $sameline
+      }
+      s/$oldstr/$r/;
+      if ($instance) {
+	$val{$oldstr} = $r;
+      }
+      if ($verbose) {
+	print STDERR "\n  line $.:\t$oldstr\t->\t$r";
+      }
+      $sameline = 1;
+    } # end while
+    # dump out line, modified or otherwise
+    print OUT;
+  }
+  print "\n" if ($verbose);
+}
+close (IN);
+close (OUT);
+print STDERR "\nNO FILES MODIFIED\n\n" if ($verbose && ! $filesmodified);
+print STDERR "\nDone.\n" if ($verbose);
+
+sub myrand () {
+  local ($mymin,$mymax) = (@_);
+  local $tmp;
+  $tmp=int(rand($mymax - $mymin + 1));
+  $tmp+=int(rand($mymax - $mymin + 1));
+  $tmp+=int(rand($mymax - $mymin + 1));
+  $tmp+=int(rand($mymax - $mymin + 1));
+  $tmp+=int(rand($mymax - $mymin + 1));
+  $tmp %= ($mymax - $mymin + 1);
+
+  $tmp = $tmp + $mymin;
+  return $tmp;
+}
+
+sub usage () {
+  print "\nFATAL ERROR: @_\n" if ($#_ >= 0);
+  print "$versiontext" ;
+  print "$usagetext" unless $opt_v;
+  print "\nFATAL ERROR: @_\n" if ($#_ >= 0);
+  exit ;
+}

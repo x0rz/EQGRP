@@ -1,0 +1,71 @@
+#!/bin/sh
+
+
+PATH=:/bin:/usr/bin
+it=it
+contents=/var/sadm/install/contents
+do_mtime=0
+
+if [ "$1" = "-m" ]; then
+	do_mtime=1
+	shift
+fi
+case $# in
+	1 ) file=$1 ;;
+	2 ) file=$1; it=$2 ;;
+	* ) echo "Usage: $0 [-m] <filename> <it>"; exit ;;
+esac
+if [ ! -f $it ]; then
+	echo "need $it available to run this"
+	exit 
+fi
+if [ ! -f $contents ]; then
+	echo "$contents does not exist"
+	exit
+fi
+if [ ! -f $file ]; then
+	echo "$file does not exist"
+	exit
+fi
+
+resetcmd=`$it $contents | grep "$it"`
+
+sz=`wc -c $file | awk '{print $1}'`
+sum=`sum $file  | cut -d' ' -f1`
+mtime=`$it $file | grep "$it" | awk '{print $5}' | cut -d. -f1`
+
+if [ $do_mtime -eq 1 ]; then
+	new=`echo $sz $sum $mtime`
+else
+	new=`echo $sz $sum`
+fi
+
+if [ $do_mtime -eq 1 ]; then
+	old=`grep "$file " $contents | awk '{print $7" "$8" "$9}'`
+else
+	old=`grep "$file " $contents | awk '{print $7" "$8}'`
+fi
+
+echo "old size/sum values = [$old]"
+echo "new size/sum values = [$new]"
+
+if [ "$old" = "$new" ]; then
+	echo "no change necessary"
+	exit
+fi
+
+ed $contents << END
+g=$file =p
+s=$old=$new=p
+w
+q
+END
+
+echo
+echo "Using reset command:"
+echo $resetcmd
+echo
+
+$resetcmd
+
+exit

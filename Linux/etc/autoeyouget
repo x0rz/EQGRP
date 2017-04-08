@@ -1,0 +1,651 @@
+#!/usr/bin/env perl 
+##
+$VER="1.0.1.3";
+
+use Fcntl ':flock';
+use POSIX;
+
+$| = 1 ;
+($scriptcount, $functioncount) = ();
+myinit() ;
+
+$STOPFILE = "${optmp}/eyoustop";
+$LSS_STOPFILE = "${optmp}/StopLSSnow";
+$MAX_GREP_COUNT = 25;
+$MAX_GET_COUNT = 25;
+
+if(!$isslave) {
+    $thedate = `date +%s`;
+    chomp($thedate);
+}
+else {
+    $thedate = $fileid;
+}
+
+# default file for -find output
+$findfile = "${opdown}/cmdout/${nopen_rhostname}-find";
+
+# tmp file to copy and old find if one exists
+$findfile_old = "${findfile}_${thedate}";
+
+# the result from -find
+$findfile_new = "${opdown}/${nopen_rhostname}_eyouget_find_${thedate}";
+
+# list of only files from the find
+$filelist = "${optmp}/${nopen_rhostname}_eyouget_find_${thedate}_files";
+
+# final list of files to get
+$filelist_filtered = "${opdown}/${nopen_rhostname}_eyouget_find_${thedate}_files_filtered";
+
+# files skipped that weren't in output from -g option
+$filelist_skipped_grep = "${opdown}/${nopen_rhostname}_eyouget_find_${thedate}_files_skipped_grep";
+
+# files skipped from the -V option
+$filelist_skipped_grepout = "${opdown}/${nopen_rhostname}_eyouget_find_${thedate}_files_skipped_grepout";
+
+# file to let slaves know no more files are coming
+$grepdone_file = "${optmp}/${nopen_rhostname}_eyouget_find_${thedate}_files_filtered_grepdone";
+
+# position of next file in $filelist_filtered that a slave should get
+$index_file = "${optmp}/${nopen_rhostname}_eyouget_find_${thedate}_files_filtered_index";
+
+if(!$isslave) {
+    if($deliverlog_dir) {
+        masterlog();
+    }
+    else {
+        masterfind();
+    }
+}
+else {
+    slaveget();
+}
+
+# Called via do so must end with 1;
+1;
+
+#
+# This will run the find and do the greps for each file
+#
+sub masterfind() {
+
+    # save current find if exists
+    if(-e $findfile) {
+        progprint("Saving old find.");
+        doit("-lsh mv ${findfile} ${findfile_old}");
+    }
+
+    # do the find for current mail files
+    progprint("Running find on ${maildir}");
+    ($output, $nopenlines, @output) = doit("-nohist -find -M ${maildate_opt} ${maildir}");
+    doit("-lsh mv ${findfile} ${findfile_new}");
+
+    # replace old find if it was there
+    if(-e $findfile_old) {
+        progprint("Replacing old find and creating file list.");
+        doit("-lsh mv ${findfile_old} ${findfile}");
+    }
+
+    # create the list of files
+    doit("-lsh egrep '^[0-9]+ -' ${findfile_new} | awk '{print \$23}' > ${filelist}");
+    
+    # get the list of files to not download
+    @nodl_list = ();
+
+    if($nodl_file) {
+        open(NODL_FILE, "<${nodl_file}");
+        
+        while(my $line = <NODL_FILE>) {
+            $line =~ s/\n\r?//;
+            push(@nodl_list, $line);
+        }
+
+        close(NODL_FILE);
+    }
+
+    %nodl_hash = map { $_ => 1 } @nodl_list;
+
+    # get the list of files to download from the find, 
+    # removing those listed in nodl_list
+    @full_filelist = ();
+
+    open(FILE_LIST, "<${filelist}");
+    
+    while(my $line = <FILE_LIST>) {
+        chomp $line;
+
+        if(!exists($nodl_hash{$line})) {
+            push(@full_filelist, $line);
+        }
+    }
+
+    close(FILE_LIST);
+
+    # split the list into groups
+    @filegroups = ();
+
+    while(scalar(@full_filelist) > 0) {
+        @tmplist = splice(@full_filelist, 0, $MAX_GREP_COUNT);
+        if(scalar(@tmplist) > 0) {
+            push(@filegroups, [ @tmplist ]);
+        }
+    }
+
+    # reset the index file used to keep track of the last file downloaded
+    open(F, ">${index_file}");
+    print F "1";
+    close(F);
+
+    show_slave_pastables();
+
+    open(FILE_LIST, ">>${filelist_filtered}");
+    open(SKIPPED_GREP_FILE, ">${filelist_skipped_grep}");
+    open(SKIPPED_GOUT_FILE, ">${filelist_skipped_grepout}");
+
+    for $i (0 .. $#filegroups) {
+        # debug: show all elements in 2D array
+        #for $j ( 0 .. $#{$filegroups[$i]} ) {
+        #    doit("# $i, $j - ".$filegroups[$i][$j]);
+        #}
+
+        if(-e $STOPFILE) {
+            last;
+        }
+
+        @tmplist = @{$filegroups[$i]};
+
+        if($expr) {
+            $tmplist_str = join(" ", @tmplist);
+
+            if(verval($nopen_clientver) >= verval("3.2.0.0")) {
+                ($output, $nopenlines, @output) = doit("egrep -li \"${expr}\" ${tmplist_str}");
+            }
+            else {
+                ($output, $nopenlines, @output) = doit("egrep -li ${expr} ${tmplist_str}");
+            }
+
+            for $f (@tmplist) {
+                if(scalar(grep(/$f/, @output)) == 0) {
+                    print SKIPPED_GREP_FILE "${f}\n";
+                }
+            }
+
+            @tmplist = @output;
+        }
+
+        if($exprv) {
+            $tmplist_str = join(" ", @tmplist);
+
+            if(verval($nopen_clientver) >= verval("3.2.0.0")) {
+                ($output, $nopenlines, @output) = doit("egrep -li \"${exprv}\" ${tmplist_str}");
+            }
+            else {
+                ($output, $nopenlines, @output) = doit("egrep -li ${exprv} ${tmplist_str}");
+            }
+
+            print SKIPPED_GOUT_FILE "${output}";
+
+            # remove the matching file names from @tmplist
+            # todo: any clever or more efficient way to do this?
+            for $j (0 .. $#output) {
+                for $k (0 .. $#tmplist) {
+                    if($output[$j] eq $tmplist[$k]) {
+                        if($k == 0) {
+                            shift(@tmplist);
+                        }
+                        elsif($k == $#tmplist) {
+                            pop(@tmplist);
+                        }
+                        else {
+                            splice(@tmplist, $k, 1);
+                        }
+                        last;
+                    }
+                }
+            }
+        }
+
+        $tmplist_str = join("\n", @tmplist);
+
+        if(length($tmplist_str) > 0) {
+            $tmplist_str .= "\n";
+            flock(FILE_LIST, LOCK_EX);
+            seek(FILE_LIST, 0, 2);
+            print FILE_LIST "${tmplist_str}";
+            flock(FILE_LIST, LOCK_UN);
+        }
+    }
+
+    close(FILE_LIST);
+    close(SKIPPED_GREP_FILE);
+    close(SKIPPED_GOUT_FILE);
+
+    doit("-lsh touch ${grepdone_file}");
+}
+
+#
+# This uses the deliver_mail.log files to generate the mail tasking.
+#
+sub masterlog() {
+
+    if($user_file) {
+        @users_list = ();
+        
+        open(USER_FILE, "<${user_file}");
+
+        while(my $user = <USER_FILE>) {
+            $user =~ s/\n\r?//;
+            push(@users_list, $user);
+        }
+
+        close(USER_FILE);
+
+        $users_str = join("|", @users_list);
+    }
+    
+    @log_lss_opts = ("-R", "-U", "-Q", "-gdeliver_mail.log");
+
+    if($maildate_num_prev) {
+        push(@log_lss_opts, "-Vdeliver_mail.log.${maildate_num_prev}");
+        push(@log_lss_opts, $maildate_prev_opt);
+    }
+
+    @deliverlog_list = ();
+    ($output, $nopenlines, @output) = nopenlss(@log_lss_opts, $deliverlog_dir);
+
+    foreach $line (@output) {
+        @arr = split(/\//, $line, 2);
+        push(@deliverlog_list, "/${arr[1]}");
+    }
+
+    $tmploglist_str = join("\n", @deliverlog_list);
+    progprint(" \n\nDeliver log files to search:\n\n".
+              "${COLOR_NORMAL}${tmploglist_str}${COLOR_NOTE}");
+
+    # reset the index file used to keep track of the last file downloaded
+    open(F, ">${index_file}");
+    print F "1";
+    close(F);
+
+    show_slave_pastables();
+
+    open(FILE_LIST, ">>${filelist_filtered}");
+
+    foreach $file (@deliverlog_list) {
+        my @file_list = ();
+
+        if($users_str) {
+            $users_grep = "egrep \"(${users_str})\" ${file}";
+        }
+        else {
+            $users_grep = "cat ${file}";
+        }
+
+        # some ways to grep..."sed -r" isn't as portable, so using "tr" for now
+        # egrep "file_id:\[([^]]+)\]" | sed -r 's/^.* file_id:\[([^]]*)\] .*$/\1/g'
+        # egrep "file_id:\[([^]]+)\]" | tr ' ' '\n' | egrep file_id
+
+        ($output, $nopenlines, @output) = 
+            doit("${users_grep} | egrep \"file_id:\\[([^]]+)\\]\" | ".
+                 "tr ' ' '\\n' | egrep file_id");
+
+        foreach $line (@output) {
+            chomp $line;
+            #if($line =~ /file_id:\[.*-([^]_]+).+\]/) {
+            if($line =~ /file_id:\[([^]_]+).+\]/) {
+                $file = $1;
+                push(@file_list, "${maildir_prefix}/${file}");
+            }
+        }
+
+        $filelist_str = join("\n", @file_list);
+        
+        if(length($filelist_str) > 0) {
+            $filelist_str .= "\n";
+            flock(FILE_LIST, LOCK_EX);
+            seek(FILE_LIST, 0, 2);
+            print FILE_LIST "${filelist_str}";
+            flock(FILE_LIST, LOCK_UN);
+        }
+    }
+
+    close(FILE_LIST);
+
+    doit("-lsh touch ${grepdone_file}");
+}
+
+#
+# Show some pastables and pause for the user.
+#
+sub show_slave_pastables() {
+
+    $slave_pastable = "";
+    $lss_opts_str = join(" ", @lss_opts);
+    if(length($lss_opts_str) > 0) {
+        $lss_opts_str .= " ";
+    }
+
+    for($i = 1; $i <= $slavenum; $i++) {
+        $slave_pastable .= "    -gs eyouget ${lss_opts_str}-s ${thedate} -n ${i}\n";
+    }
+
+    if($deliverlog_dir) {
+        $lineone = "Now going to grep through each deliver log file.";
+    }
+    else {
+        $lineone = "Now going to grep through each file in groups of ${MAX_GREP_COUNT}.";
+    }
+
+    mypause("${lineone}\n\n".
+            "Before continuing, start slave instances (one per window) with:\n\n${slave_pastable}\n\n\n".
+            "Save these lines in case you need to quit:\n\n".
+            "    ${COLOR_WARNING}-lsh touch ${STOPFILE}${COLOR_NORMAL}      # Stop eYouGet master and slaves.\n".
+            "    ${COLOR_WARNING}-lsh touch ${LSS_STOPFILE}${COLOR_NORMAL}    # Stop current -lss instances.\n\n");
+
+}
+
+#
+# This will wait until there are files listed in the queue file (passed with the
+# -s option) and download those files.
+#
+sub slaveget() {
+
+    $done = 0;
+    $slave_getfile = "${optmp}/${nopen_rhostname}_eyouget_find_${thedate}_files_filtered_${slavenum}";
+    @prev_getlist = ();
+
+    push(@lss_opts, "-G");
+    push(@lss_opts, "-U");
+    push(@lss_opts, "-Y");
+    push(@lss_opts, "-Q");
+
+    progprint(" \n\nWaiting for the following file to exist...\n\n${filelist_filtered}\n\n\n".
+              "Use this to quit:\n\n${COLOR_WARNING}-lsh touch ${STOPFILE}${COLOR_NORMAL}");
+
+    while(! -e $filelist_filtered) {
+        if(-e $STOPFILE) {
+            mydie("Script stopped by stop file");
+        }
+        sleep(1);
+    }
+
+    open(FILE_LIST, "<${filelist_filtered}");
+
+    # check if the slave_getfile already exists, which means this script was
+    # run before and stopped before a -lss was done
+    if(-e $slave_getfile) {
+        open(F, "<${slave_getfile}");
+
+        while(my $line = <F>) {
+            chomp $line;
+            push(@prev_getlist, $line);
+        }
+
+        close(F);
+    }
+
+    while($done == 0) {
+        flock(FILE_LIST, LOCK_EX);
+        seek(FILE_LIST, 0, 0);
+
+        $curr_filelist_idx = `cat ${index_file}`;
+        $line_count = 0;
+        $file_count = 0;
+        @file_list = ();
+
+        # check if stopfile touched while waiting for lock
+        if(-e $STOPFILE) {
+            flock(FILE_LIST, LOCK_UN);
+            last;
+        }
+
+        if(scalar(@prev_getlist) > 0) {
+            push(@file_list, @prev_getlist);
+            $file_count = scalar(@file_list);
+            @prev_getlist = ();
+        }
+
+        while(my $line = <FILE_LIST>) {
+            chomp $line;
+            $line_count += 1;
+
+            # loop until we get to the latest file in the queue
+            if($line_count < $curr_filelist_idx) {
+                next;
+            }
+
+            $file_count += 1;
+            $curr_filelist_idx += 1;
+            push(@file_list, $line);
+
+            if($file_count >= $MAX_GET_COUNT) {
+                last;
+            }
+        }
+
+        # Locking on this file taken care of from other lock (i.e. only use
+        # this file when the other one is locked).
+        # Also, don't put a newline in the file.
+        open(F, ">${index_file}");
+        print F "${curr_filelist_idx}";
+        close(F);
+
+        flock(FILE_LIST, LOCK_UN);
+
+        # CURR_GETFILE will hold the list of files this instance is currently downloading.
+        # Hold a lock on it in case someone runs another slave instance with the same 
+        # instance number (from -n option).
+        open(CURR_GETFILE, ">${slave_getfile}");
+        flock(CURR_GETFILE, LOCK_EX);
+        
+        if(scalar(@file_list) > 0) {
+            $tmplist = join("\n", @file_list);
+            print CURR_GETFILE "${tmplist}\n";
+        }
+        else {
+            truncate(CURR_GETFILE, 0);
+        }
+
+        # done when the greps are finished and we're at the end of the queue
+        if((-e "${grepdone_file}" && scalar(@file_list) == 0) || -e $STOPFILE) {
+            $done = 1;
+        }
+        elsif(scalar(@file_list) > 0) {
+            ($output, $nopenlines, @output) = nopenlss(@lss_opts, @file_list);
+            if(($max_download > 0 && (bwsofar())[0] > $max_download) || (-e $LSS_STOPFILE)) {
+                $done = 1;
+            }
+            else {
+                # the -lss -G should have finished, so clear the current get list
+                truncate(CURR_GETFILE, 0);
+            }
+        }
+        else {
+            sleep(1);
+        }
+
+        flock(CURR_GETFILE, LOCK_UN);
+        close(CURR_GETFILE);
+    }
+
+    close(FILE_LIST);
+}
+
+sub myinit {
+    # If $willautoport is already defined, we must have been called
+    # by another script via require. We do not re-do autoport stuff.
+    $calledviarequire = 0 unless $calledviarequire;
+    $stoiccmd = "called as: -gs eyouget @ARGV";
+    if ($willautoport and $socket) {
+        $stoiccmd = "in $prog, called as: eyouget(@ARGV)";
+        dbg("via require autoeyouget ARGV=(\n".join("\n",@ARGV)."\n) prog=$prog");
+        #progprint("$prog called -gs eyouget @ARGV");
+        $calledviarequire = 1;
+    }
+    else {
+        $prog = "-gs eyouget";
+        $willautoport=1;
+        my $autoutils = "../etc/autoutils" ;
+        unless (-e $autoutils) {
+            $autoutils = "/current/etc/autoutils" ;
+        }
+        require $autoutils;
+        $vertext = "$prog version $VER\n" ;
+    }
+    clearallopts();
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+          "(I.e., noclient calls $prog, not you.)\n".
+          "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+                              -e $nopen_mylog);
+
+    my $origoptions = "@ARGV";
+    mydie("bad option(s)") if (! Getopts( "hd:L:D:x:X:g:V:s:u:n:T:M:m:okK0" ) ) ;
+
+    ###########################################################################
+    # PROCESS ARGUMENTS
+    ###########################################################################
+
+    usage() if ($opt_h || 
+                $opt_v || 
+                (!$opt_d && !$opt_s) || 
+                ($opt_s && ($opt_d || $opt_x || $opt_X || $opt_L || $opt_D)) ||
+                ($opt_L && !$opt_D));
+
+    $maildir = $opt_d;
+    $expr = $opt_g;
+    $exprv = $opt_V;
+    $isslave = $opt_s ? 1 : 0;
+    $fileid = $opt_s;
+    $max_download = $opt_T ? $opt_T : 0;
+    $slavenum = $opt_n ? $opt_n : 1;
+    $deliverlog_dir = $opt_L;
+    $maildir_prefix = $opt_D;
+
+    @lss_opts = ();
+    push(@lss_opts, "-T${opt_T}") if($opt_T);
+    push(@lss_opts, "-M${opt_M}") if($opt_M);
+    push(@lss_opts, "-m${opt_m}") if($opt_m);
+    push(@lss_opts, "-o") if($opt_o);
+    push(@lss_opts, "-k") if($opt_k);
+    push(@lss_opts, "-K") if($opt_K);
+    push(@lss_opts, "-0") if($opt_0);
+
+    # Connect to autoport, we need status and more interactively.
+    # If $socket is already defined, we must have been called
+    # by another script via require. We do not re-do autoport stuff.
+    $socket = pilotstart(quiet) unless $socket;
+
+    ## ERROR CHECKING OF OPTS
+    if($opt_x) {
+        $maildate = $opt_x;
+        if($maildate !~ /\d\d-\d\d-\d\d\d\d/) {
+            mydie("Bad date argument.");
+        }
+
+        $maildate_opt = "-xm ${maildate}";
+
+        @dateparts = split(/-/, $maildate);
+        $time = mktime(0, 0, 0,
+                       int($dateparts[1]),
+                       int($dateparts[0]) - 1,
+                       int($dateparts[2]) - 1900);
+
+        # make previous day date
+        $time_prev = $time - (60 * 60 * 24);
+        @tm = localtime($time_prev);
+        $maildate_prev = strftime("%m-%d-%Y", @tm);
+        $maildate_prev_opt = "-xm${maildate_prev}";
+        $maildate_num_prev = strftime("%Y%m%d", @tm);
+    }
+    if($opt_X) {
+        $nodl_file = $opt_X;
+        if(! -e $nodl_file) {
+            mydie("File ${nodl_file} does not exist.");
+        }
+    }
+    if($opt_u) {
+        $user_file = $opt_u;
+        if(! -e $user_file) {
+            mydie("User tasking list '${user_file}' does not exist.");
+        }
+    }
+    if($max_download && $max_download !~ /\d+/) {
+        mydie("Bad -T option. Must be an integer.");
+    }
+    if($slavenum !~ /\d+/) {
+        mydie("-n Must be an integer.");
+    }
+}
+
+sub setusagetexts {
+    # Separate long usage strings as separate function
+    $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session when \"$prog\" or
+\"=eyouget\" is used.
+
+";
+
+    $gsusagetext="
+Usage  master:   $prog -d <dir> [OPTIONS]
+        slave:   $prog -s <file> -n <num> [OPTIONS]
+
+$prog is a script to collect mail on eYou mailservers.
+
+  -h              Show this help.
+
+Master Options:
+  -d dir          Mail directory (required).
+  -x MM-DD-YYYY   Begin date of mail to get.
+  -n num          Number of slaves to generate pastables for (default 1).
+
+  Searching mail with -find:
+  -X file         file specifies a list of files (one per line) to NOT download,
+                  which is checked before sending the files to egrep (-g and -V).
+                  Use this if continuing collection from a previous op to prevent
+                  duplicate downloads.
+  -g expr         Regular expression passed to 'egrep' that is run on each
+                  file, and only those with matching content will get 
+                  downloaded. This cannot contains spaces.
+  -V expr         Regular expression passed to 'egrep' that is run on each file
+                  AFTER the '-g' egrep (if specified) to NOT download any files
+                  that have matching content. This cannot contain spaces.
+
+  Searching mail with deliver log files:
+  -L logdir       Directory of deliver_mail.log files. If this is specified,
+                  the deliver logs will be used to find mail instead of -find.
+  -D dir_prefix   Prefix of the mail directory (up to and including the 'filed'
+                  directory). Required with -L option.
+  -u user_file    File that contains the list of users.
+
+Slave Options:
+  -s file_id      Slave instance. 'file_id' will tell the slave which file will
+                  has the list that gets written by the master instance. The 
+                  file id is provided when the master instance pauses (required).
+  -n num          Slave number (default 1).
+
+* Note: If a slave stopped in the middle of a collection and you need to restart
+  it, re-run all instances with the same -s and -n options.
+
+LSS Options (supply with master or slave):
+  -T max          Stop pulling files when the bwmonitor reaches max Megabytes.
+  -m min          Only download files of at least min bytes.
+  -M max          Only download files of at most max bytes.
+  -o              Collect one file at a time.
+  -k              Keep original order.
+  -K[0]           Skip any file download where some previously -lss downloaded
+                  file is identical and instead make a local copy by that name.
+                  Add the option -0 (zero) option to skip making the local
+                  duplicate file.
+
+To stop collection:
+  -lsh touch ${optmp}/eyoustop
+
+Usage:  $prog [OPTIONS]
+
+";
+}#setusagetexts

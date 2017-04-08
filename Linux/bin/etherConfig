@@ -1,0 +1,160 @@
+#!/bin/sh
+#
+#
+COLOR_SUCCESS="\\033[1;32m"
+COLOR_FAILURE="\\033[1;31m"
+COLOR_WARNING="\\033[1;33m"
+COLOR_NORMAL="\\033[0;39m"
+COLOR_NOTE="\\033[0;34m"
+SETCOLOR_SUCCESS="echo -en $COLOR_SUCCESS"
+SETCOLOR_FAILURE="echo -en $COLOR_FAILURE"
+SETCOLOR_WARNING="echo -en $COLOR_WARNING"
+SETCOLOR_NORMAL="echo -en $COLOR_NORMAL"
+SETCOLOR_NOTE="echo -en $COLOR_NOTE"
+PROG=`basename ${0}`
+VER=2.4.0.3
+
+warn() {
+    $SETCOLOR_FAILURE
+    echo -e "$*"
+    $SETCOLOR_NORMAL
+    usleep 700000
+}
+
+    
+die() {
+    $SETCOLOR_FAILURE
+    echo -e "$*"
+    $SETCOLOR_NORMAL
+    exit 1
+}
+
+# For "echo -n"
+PATH=/usr/ucb:$PATH; export PATH
+
+os=`uname -s`
+version=`uname -r`
+INTERFACE=eth0
+if [ "${1:0:3}" = "eth" ] ; then
+  INTERFACE=$1
+  shift
+fi
+
+defip=$1
+defmask=$2
+defgw=$3
+[ "$defmask" ] || defmask=255.255.255.0
+
+[ "$1" = "-v" ] && echo "$PROG version $VER" && exit
+if [ "$1" = "-h" ] ; then
+cat <<EOF
+
+Usage:  $PROG [ethN] [addr [netmask [gw]]]
+
+	Interface defaults to $INTERFACE
+	netmask defaults to $defmask
+	gw defaults to 24bitsofaddr.1
+
+$PROG will use fwrules.py to first clear/reset the firewall
+gateway and iptables rules, then change our IP/mask/gateway, and
+then use fwrules.py again to reset those rules with the new IPs.
+
+$PROG version $VER
+EOF
+  exit
+fi
+if [ "$1" ] && [ "$2" ] && [ "$3" ] ; then
+  echo "Using (IP / mask / gw) of ($1 / $2 / $3)"
+else
+  echo -n "    Enter IP address: "
+  [ "$defip" ] && echo -n "[$defip] "
+  read address
+  echo -n "       Enter netmask: "
+  [ "$defmask" ] && echo -n "[$defmask] "
+  read netmask
+
+  echo -n "Enter default router: "
+  [ "$defgw" ] && echo -n "[$defgw] "
+  read router
+fi
+
+[ "$address" ] || address=$defip
+[ "$netmask" ] || netmask=$defmask
+[ "$defgw" ] || defgw=`echo $address | sed "s/\([0-9]*\.[0-9]*\.[0-9]*\.\).*/\11/g"`
+[ "$defgw" = "none" ] && defgw=
+[ "$router" ] || router=$defgw
+
+
+# Save any current -A IPs entered
+IPSALLOWED=`iptables -L OUTPUT -n -v | egrep -v "0.0.0.0" | egrep "eth0" | awk '{print $9}'`
+if [ "$IPSALLOWED" ] ; then
+	echo Preserving allowed IPs: $IPSALLOWED
+fi
+
+# Clear firewall rules
+CALLEDBYSCRUBHANDS=`ps -p \`echo $PPID\` | grep -v "PID TTY" | grep scrubhands | wc -l`
+if [ $CALLEDBYSCRUBHANDS == 0 ] ; then
+	fwrules.py -c || warn Could not clear rules with: fwrules.py -c, proceeding anyway
+else
+	echo "Not running fwrules.py -c (we were called by scrubhands)"
+fi
+
+case "$os$version" in
+    SunOS5*)
+	ifconfig le0 down
+	ifconfig le0 $address up netmask $netmask
+	route add default $router 1
+	;;
+    Linux2.0*)
+	ifconfig $INTERFACE down
+	if [ -x /bin/ipcalc ]; then
+	    eval `/bin/ipcalc --network ${address} ${netmask}`
+	    eval `/bin/ipcalc --broadcast ${address} ${netmask}`
+	else
+	    echo -n "Enter network: "
+	    read NETWORK
+	    echo -n "Enter broadcast: "
+	    read BROADCAST
+	fi
+	ifconfig $INTERFACE $address up netmask $netmask broadcast $BROADCAST
+	route add -net $NETWORK netmask $netmask $INTERFACE
+	route add default gw $router
+	;;
+    Linux2.*)
+	if [ -x /bin/ipcalc ]; then
+	    eval `/bin/ipcalc --network ${address} ${netmask}`
+	    eval `/bin/ipcalc --broadcast  ${address} ${netmask}`
+	else
+	    echo -n "Enter network: "
+	    read NETWORK
+	    echo -n "Enter broadcast: "
+	    read BROADCAST
+	fi
+        ifconfig $INTERFACE down
+	ifconfig $INTERFACE $address up netmask $netmask broadcast $BROADCAST
+	route add default gw $router
+	;;
+    *)
+	echo "Unknown OS version: $os$version"
+	exit 1
+	;;
+esac
+ifconfig -a
+netstat -rn
+
+
+echo Restarting samba...
+service smb restart
+
+
+
+echo Resetting Firewall
+fwrules.py -r || die Could not reset firewall rules to new IP $address
+
+if [ "$IPSALLOWED" ] ; then
+	echo Adding allowed IPs:
+	for IP in $IPSALLOWED ; do
+	    echo "       $IP:"
+	    fwrules.py -A $IP || die Could not add destination $IP
+	done
+fi

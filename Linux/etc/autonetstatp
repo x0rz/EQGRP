@@ -1,0 +1,339 @@
+#!/usr/bin/env perl
+
+$VER="1.0.0.3";
+$| = 1;
+
+my $show_tcp = 1;
+my $show_udp = 1;
+
+
+my $netstat = "";
+my $pfiles = "";
+myinit();
+
+my @pslist = ();
+my %psnetmap = ();		# contains port/pid mapping for local side of connections
+my %psnetmap_remote = ();	# contains port/pid mapping for remote side of connections
+my %procname = ();		# Procname per pid
+my @checkbins = ();
+foreach my $remotecmd (@checkbins =
+                       (
+                        "netstat",
+                        "pfiles",
+                       )) {
+  last if ($remotecmd eq "pfiles" and $linuxtarget);
+  my ($shelloutput) = nopenlss("-PQ",$remotecmd);
+  mydie("
+
+shelloutput = $shelloutput =
+
+Cannot continue, required remote command ($remotecmd) not available.\n".
+        "Consider adding to your PATH with -addpath so $prog can find it.")
+    unless ($shelloutput =~ m,[l-]r.x.*/$remotecmd,);
+}
+
+
+my $egrep = "";
+if ($g_regexp or $V_regexp) {
+  $egrep = " | egrep$insensitive \"$g_regexp\"" if $g_regexp;
+  $egrep = " | egrep$insensitive -v \"$V_regexp\"" if $V_regexp;
+}
+
+
+if ($solaristarget) {
+  # run a netstat on target and save the output
+  doit("netstat -an > L:$nettmpfile");
+  @netlines = split(/\n/, `cat $nettmpfile`);
+
+  # run pfiles on each pid, grep'ing for socket info
+  #    doit("cd /proc; for pid in [0-9]*; do [ \$pid -lt 2 ] && continue; echo \"\$pid\"; pfiles \$pid ; done > L:$pfilesfile");
+  doit("cd /proc; for pid in [0-9]*; do [ \$pid -lt 2 ] && continue; pfiles \$pid ; done > L:$pfilesfile");
+  @pflines = split(/\n/, `cat $pfilesfile |egrep "^[0-9]|AF_INET"`);
+
+  $curr_pid = "";
+
+  # Goes through each line of the pfiles output, populating the hashes
+  # with the port as the key and a list of (pid,address) as the value.
+  foreach $pfline (@pflines) {
+
+    if ($pfline =~ /^(\d{1,5}):\s*(.*)/) # line with the pid
+      {
+	$curr_pid = $1;
+	$curr_name = $2;
+	$procname{$curr_pid} = $curr_name;
+      } elsif ($pfline =~ /sockname: AF_INET6? ([\S]+) +port: (\d{1,5})/) # local connection line
+        {
+	  $addr = $1;
+	  $port = $2;
+
+	  if (exists $psnetmap{$port}) {
+	    $pids_ptr = $psnetmap{$port};
+	    @pids = @$pids_ptr;
+	    push(@pids, "$curr_pid,$addr");
+	    $psnetmap{$port} = [@pids];
+	  } else {
+	    $psnetmap{$port} = ["$curr_pid,$addr"];
+	  }
+        } elsif ($pfline =~ /peername: AF_INET6? ([\S]+) +port: (\d{1,5})/) # remote connection line
+	  {
+            $addr = $1;
+            $port = $2;
+
+            if (exists $psnetmap_remote{$port}) {
+	      $pids_ptr = $psnetmap_remote{$port};
+	      @pids = @$pids_ptr;
+	      push(@pids, "$curr_pid,$addr");
+	      $psnetmap_remote{$port} = [@pids];
+            } else {
+	      $psnetmap_remote{$port} = ["$curr_pid,$addr"];
+            }
+	  }
+  }
+
+  # remove duplicate pids in hash table
+  foreach $key (keys %psnetmap) {
+    $list_ptr = $psnetmap{$key};
+    @list = @$list_ptr;
+
+    undef %h;
+    @h{@list} = ();
+    @list = sort(keys %h);
+
+    $psnetmap{$key} = [@list];
+  }
+
+  # remove duplicate pids in hash table
+  foreach $key (keys %psnetmap_remote) {
+    $list_ptr = $psnetmap_remote{$key};
+    @list = @$list_ptr;
+
+    undef %h;
+    @h{@list} = ();
+    @list = sort(keys %h);
+
+    $psnetmap_remote{$key} = [@list];
+  }
+
+  $section = "";
+    
+  open OUT, ">$psnetmapfile";
+  printf(OUT " \n%5s  %21s  %21s  %11s  %7s:%s\n", "Proto", "Local Address", "Foreign Address", "State", "PID","PROGRAM NAME");
+
+  # Go through each line if the netstat output, writing the reformatted
+  # line with the related PID from the port-to-pid hash table.
+  foreach $line (@netlines) {
+    chomp $line;
+        
+    if ($line =~ /^UDP: IPv4.*$/) {
+      $section = "udp";
+    }
+    if ($line =~ /^UDP: IPv6.*$/) {
+      $section = "udp6";
+    } elsif ($line =~ /^TCP: IPv4.*$/) {
+      $section = "tcp";
+    } elsif ($line =~ /^TCP: IPv6.*$/) {
+      $section = "tcp6";
+    } elsif ($line =~ /^.*\.\d{1,5} .*/) # at a line showing a connection
+      {
+	# remove leading spaces
+	$line =~ s/^ +//;
+
+	if ($show_udp && ($section eq "udp" || $section eq "udp6")) {
+	  @conn = split(/ +/, $line);
+	  @conn = ($section, $conn[0], "*:*", $conn[1]);
+
+	  $conn[1] =~ s/\*\./0.0.0.0./;
+	  @local_ip = split(/\./, $conn[1]);
+	  $conn[1] = "$local_ip[0].$local_ip[1].$local_ip[2].$local_ip[3]:$local_ip[4]";
+	  $loc_port = $local_ip[4];
+
+	  $conn[2] =~ s/\*\./0.0.0.0:/;
+
+	  $pid_list_ptr = $psnetmap{$loc_port};
+	  @pid_list = @$pid_list_ptr;
+
+	  for ($i = 0; $i < @pid_list; $i += 1) {
+	    @tmp_arr = split(/,/, $pid_list[$i]);
+	    $pid_list[$i] = $tmp_arr[0];
+	  }
+
+	  undef %h;
+	  @h{@pid_list} = ();
+	  @pid_list = sort(keys %h);
+	  $pids_str = sprintf("%7s",$pid_list[0]);
+	  $pids_str .= ":".$procname{shift @pid_list}
+	    if $procname{$pid_list[0]};
+	  foreach (@pid_list) {
+	    $pids_str .= ",$_";
+	    $pids_str .= ":$procname{$_}"
+	      if $procname{$_};
+	  }
+	  #$pids_str = join(",", @pid_list);
+		
+	  printf(OUT "%5s  %21s  %21s  %11s  %s\n", @conn, $pids_str);
+	} elsif ($show_tcp && ($section eq "tcp" || $section eq "tcp6")) {
+	  @conn = split(/ +/, $line);
+	  @conn = ($section, $conn[0], $conn[1], $conn[6]);
+
+	  $conn[1] =~ s/\*\./0.0.0.0./;
+	  @local_ip = split(/\./, $conn[1]);
+	  $conn[1] = "$local_ip[0].$local_ip[1].$local_ip[2].$local_ip[3]:$local_ip[4]";
+	  $loc_port = $local_ip[4];
+
+	  $conn[2] =~ s/\*\./0.0.0.0./;
+	  @remote_ip = split(/\./, $conn[2]);
+	  $conn[2] = "$remote_ip[0].$remote_ip[1].$remote_ip[2].$remote_ip[3]:$remote_ip[4]";
+	  $rem_port = $remote_ip[4];
+	  $pids_str = "";
+
+	  if ($conn[2] =~ /^0.0.0.0/) # at a line with no remote side
+	    {
+	      $pid_list_ptr = $psnetmap{$loc_port};
+	      @pid_list = @$pid_list_ptr;
+                    
+	      for ($i = 0; $i < @pid_list; $i += 1) {
+		@tmp_arr = split(/,/, $pid_list[$i]);
+		if ($tmp_arr[1] eq "0.0.0.0" || $tmp_arr[1] eq "::") {
+
+		  $pids_str = sprintf("%7s",$tmp_arr[0]);
+		  $pids_str .= ":".$procname{@tmp_arr[0]}
+		    if $procname{$tmp_arr[0]};
+		}
+	      }
+	    } else		# at a connection line
+	      {
+		$pid_list_ptr = $psnetmap_remote{$rem_port};
+		@pid_list_rem = @$pid_list_ptr;
+
+		for ($i = 0; $i < @pid_list_rem; $i += 1) {
+		  @tmp_arr = split(/,/, $pid_list_rem[$i]);
+		  $pid_list_rem[$i] = $tmp_arr[0];
+		}
+
+		$pid_list_ptr = $psnetmap{$loc_port};
+		@pid_list_loc = @$pid_list_ptr;
+
+		for ($i = 0; $i < @pid_list_loc; $i += 1) {
+		  @tmp_arr = split(/,/, $pid_list_loc[$i]);
+		  $pid_list_loc[$i] = $tmp_arr[0];
+		}
+
+		@pid_list = ();
+
+		# Of the pids in the list, find the ones where the
+		# local and remote ports match between the two lists.
+		for ($i = 0; $i < @pid_list_rem; $i += 1) {
+		  for ($j = 0; $j < @pid_list_loc; $j += 1) {
+		    if ($pid_list_rem[$i] eq $pid_list_loc[$j]) {
+		      push(@pid_list, $pid_list_rem[$i]);
+		    }
+		  }
+		}
+
+		# remove duplicate pid from list
+		undef %h;
+		@h{@pid_list} = ();
+		@pid_list = sort(keys %h);
+		$pids_str = sprintf("%7s",$pid_list[0]);
+		$pids_str .= ":".$procname{shift @pid_list}
+		  if $procname{$pid_list[0]};
+		foreach (@pid_list) {
+		  $pids_str .= ",$_";
+		  $pids_str .= ":$procname{$_}"
+		    if $procname{$_};
+		}
+		    
+		#                    $pids_str = join(",", @pid_list);
+	      }
+
+	  printf(OUT "%5s  %21s  %21s  %11s  %s\n", @conn, $pids_str);
+	}
+      }
+  }
+
+  close OUT;
+  doit("-lsh cat $psnetmapfile$egrep");
+} elsif ($linuxtarget) {
+  # why can't solaris do this
+  my $u = "u" if $show_udp;
+  my $t = "t" if $show_tcp;
+  doit("netstat -pan$t$u$egrep");
+} else {
+  mydie("Script not supported for this OS (Linux/Solaris only)");
+}
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  # $calleddirect is set if 
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs netpid @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog = "-gs netstatp" ;
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless $nopen_rhostname;
+  }
+  $nettmpfile = "$opdown/netstat.$nopen_rhostname";
+  $pstmpfile = "$opdown/ps.$nopen_rhostname";
+  $psnetmapfile = "$opdown/psnetmap.$nopen_rhostname";
+  $pfilesfile = "$opdown/pfiles.$nopen_rhostname";
+  preservefile(
+	       $nettmpfile,
+	       $pstmpfile,
+	       $psnetmapfile,
+	       $pfilesfile,
+	      );    
+    
+  mydie("bad option(s)") if (! Getopts( "htug:V:i" ) ) ;
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"$prog\" is used.
+
+";
+  $gsusagetext="Usage: $prog [-t] [-u]
+
+$prog shows what netstat connections are connected with which PIDS.
+On Linux, it does so with a simple \"netstat -pantu\" command.
+On Solaris, it uses a combination of \"netstat -an\" and a loop running
+pfiles against every PID greater than one.
+
+The working files created on Solaris will be saved in $opdown as:
+
+  $opdown/netstat.\$nopen_rhostname
+  $opdown/ps.\$nopen_rhostname
+  $opdown/psnetmap.\$nopen_rhostname
+
+ OPTIONS
+    -h           prints this usage statement
+    -g  expr     show only output matching this expr
+    -V  expr     show only output NOT matching this expr
+    -i           case insensitive -g/-V
+    -t           show only tcp connections
+    -u           show only udp connections
+";
+    
+  usage() if ($opt_h);
+  $show_tcp = $opt_t;
+  $show_udp = $opt_u;
+  $g_regexp = $opt_g;
+  $V_regexp = $opt_V;
+  $insensitive = " -i" if $opt_i;
+  $show_tcp = $show_udp = 1
+    unless ($show_tcp or $show_udp);
+
+  $socket = pilotstart(quiet) unless $socket;
+
+}				#myinit

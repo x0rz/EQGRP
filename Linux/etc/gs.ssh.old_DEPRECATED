@@ -1,0 +1,4 @@
+#NOGS
+-lsh /current/etc/autossh.old $GSOPTIONS -nohist
+-gs /port -nohist
+

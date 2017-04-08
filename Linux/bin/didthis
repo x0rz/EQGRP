@@ -1,0 +1,10 @@
+#!/bin/sh
+echo -e "\n\n"
+if [ ! "$1" ] ; then
+  LIST=`ls -rt1 /current/down/did* 2>/dev/null`
+  [ "$LIST" ] || exit
+  more $LIST | cat | sed "s/^::/+::/g" | sed "s/::$/::+/g" | tr "+" "\012"
+else
+  cat /current/down/didthis 2>/dev/null
+fi
+echo -e "\n\n"

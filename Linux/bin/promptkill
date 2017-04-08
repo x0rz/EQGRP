@@ -1,0 +1,151 @@
+#!/usr/bin/env perl
+$VER = "2.0.0.2" ;
+myinit() ;
+unless ($parent) {
+    my $junk = "" ;
+    $ppid = getppid ;
+    (my @parent) = split (/\s+/,`ps -wef | grep "^[^0-9]*$ppid"`) ;
+    # Throw away from timestamp forward in line
+    # to get just parent and its args
+    $junk = shift(@parent) until ($junk =~ /\d\d:\d\d:\d\d/) ;
+    chomp($parent = "@parent") ;
+    $parent.="[pid=$ppid]" ;
+}
+
+$xargs="-title \"Kill process $pid?\" -name \"Kill process $pid?\" -bg white -fg red -geometry 202x19+0+0" ;
+
+$tag = $$ ;
+open(OUT,"> /current/tmp/promptkill.kid.$tag") || die("$!") ;
+print OUT <<"EOF";
+#!/usr/bin/env perl
+\$| = 1 ;
+sleep 1;
+unlink("/current/tmp/promptkill.kid.$tag") ;
+#use Time::HiRes qw( sleep );
+print "\a\npromptkill v$VER \[$$:\$\$]" ;
+sleep 1 ;
+print( "\n\n\a\n\n\n\n\n\n$parent thinks this process seems to be hung:\n\n
+    $pidps\n\n
+Which has ancestry:\n\n
+$ppidps\n\n\n");
+
+sleep 1 ;
+print "\a" ;
+\$ans = getinput("Do you want to kill process $pid?","N") ;
+
+if (\$ans =~ /y/i) {
+  my \$wiped = "";
+  foreach (split(/ /,"@wipefiles")) {
+    next unless -e;
+    \$wiped .= "=================\n\$_\n=================\n".\`cat \$_\`."=================\n";
+    unlink(\$_);
+  }
+  print "\n\n Also wiped these file(s):\n\$wiped\n" if \$wiped;
+
+  $morekill
+  \$c .= kill "TERM",$pid ;
+  if ("$notifyfile" and open(OUT2,"> $notifyfile")) {
+    print OUT2 "process(es) $pid (and @morepids) killed by user. success=\$c\n";
+    close(OUT2);
+  }
+  print "\n\nSent SIG TERM to $pid\n\n";
+} else {
+  print "\n\nLeft $pid running then...\n\n";
+}
+\$delay=5;
+print "This window will close in \$delay seconds..";
+while (\$delay--) {
+  sleep 1;
+  print "\$delay..";
+}
+sleep 1;
+exit; # die quietly
+
+sub getinput() {
+  local(\$prompt,\$default,\@junk) = \@_;
+  local(\$ans,\$tmp) = ("","");
+  
+  chomp(\$tmp = \$default);
+
+  print \$prompt;
+  if (\$default) {
+    print " [\$default] ";
+  } else {
+    print " ";
+  }
+  chomp(\$ans = <STDIN>);
+  \$ans = \$default if ( \$ans eq "" );
+  return \$ans;
+} # end sub getinput()
+
+EOF
+close(OUT) ;
+chmod (0755,"/current/tmp/promptkill.kid.$tag");
+
+close(STDIN) ;
+close(STDERR) ;
+close(STDOUT) ;
+unless (fork) {
+  exec("xterm $xargs -e /current/tmp/promptkill.kid.$tag $pid");
+}
+sub usage {
+  local ($stuff) = @_;
+  if ($stuff eq "V") {
+    print $vertext;
+  } else {
+    print $usagetext . $vertext;
+  }
+  exit;
+}
+
+sub myinit {
+  use File::Basename ;
+  close(STDERR) ;
+  $prog = basename $0 ;
+  ($pid,$notifyfile,$parent,@wipefiles) = @ARGV;
+  if (-e $parent) {
+    unshift(@wipefiles,$parent);
+    $parent="";
+  }
+  ($pid,@morepids) = split(/:/,$pid);
+  foreach my $pid2 (@morepids) {
+    $morekill .=   "  \$c .= kill \"TERM\",$pid2;\n" if ($pid2 > 1) ;
+  }
+  chomp($pkps = `ps -wef | grep "$prog.* $pid" | egrep -v "$$|grep|vi |vim "`) ;
+  die("Only one $prog at a time please") if $pkps;			# only one $prog for this $pid at a time please
+  $vertext = "\n$prog version $VER\n" ;
+  $usagetext="
+Usage: $prog pidtokill[:pid2tokill[:pid3tokill]] [notifyfile [parentstring] ] [FILES-TO-WIPE]
+
+   $prog pops up a window prompting whether or not to kill process
+   number pidtokill, if it exists. If pid2tokill is also included,
+   both will be killed when you answer yes.
+
+   If notifyfile is also provided, $prog writes its success or
+   failure to that file.
+
+   If parentstring is NOT also provided, $prog attempts to find the
+   name/pid of the process that called it.
+
+   If any full paths to files that exist on the local file system
+   are given as arguments, and then if the user chooses to kill the
+   process, these files are also removed.
+" ;
+
+  usage("V") if ($pid eq "-v" or $pid =~ /version/) ;
+  usage() if ($pid eq "-h" or $pid =~ /help/) ;
+  close(STDIN);
+  close(STDOUT);
+  close(STDERR);
+  die("$pid") unless ($pid > 1) ;
+  chomp(my @tmpps = split(/\n/,`pschain $pid`));
+  $pidps = shift(@tmpps);
+  unless ($pidps) {
+    chomp($pidps = `ps -wef | grep "^[^0-9]*$pid"`) ;
+    die unless $pidps;		# die quietly if no such pid to worry about
+  }
+  foreach $line (@tmpps) {
+    $ppidps .= "    $line\n";
+    last if $line =~ /ourtn/;
+  }
+}

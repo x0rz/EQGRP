@@ -1,0 +1,4 @@
+#NOGS
+-lsh /current/etc/autokernelstuff.linux $GSOPTIONS -nohist
+-gs /port -nohist
+

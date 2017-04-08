@@ -1,0 +1,4 @@
+PITCHIMPAIR___ci970000.sut.ac.jp___133.31.106.46___20090610-093954() {
+    ## PATCHICILLIN Version:1.1.2.1 OS:sparc-sun-solaris2.6 
+    export CV="57dc5a15 e3fefede 3ba78138"
+}

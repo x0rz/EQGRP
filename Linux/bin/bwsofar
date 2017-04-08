@@ -1,0 +1,40 @@
+#!/bin/sh
+VER=1.0.0.1
+
+usage() {
+    cat <<EOF
+Usage:   bwsofar [MGKB]
+
+Shows the bandwidth so far (per bwmonitor.txt). Default shows all units:
+
+E.g.:
+
+        15:28:09 [/current/down]# bwsofar
+        0 GB
+        112 MB
+        114790 KB
+        117544993 bytes
+        15:36:31 [/current/down]# bwsofar M
+        112 MB
+         
+bwsofar v. $VER
+EOF
+    exit
+}
+U=$1
+[ "${1:0:1}" = "-" ] && usage
+ALL=""
+[ "$*" ] || ALL=yes
+echo "$*" | grep -q M && M=yes
+echo "$*" | grep -q G && G=yes
+echo "$*" | grep -q K && K=yes
+echo "$*" | grep -q B && B=yes
+BYTES=`tail -15 /current/down/bwmonitor.txt 2>/dev/null | grep RX 2>/dev/null | tail -1 2>/dev/null | sed "s/.*RX bytes://" | sed "s/ .*//g" 2>/dev/null`
+KB=`echo $BYTES/1024 | bc`
+MEG=`echo $KB/1024 | bc`
+GIG=`echo $MEG/1024 | bc`
+[ "$G" -o "$ALL" ] && echo $GIG GB
+[ "$M" -o "$ALL" ] && echo $MEG MB
+[ "$K" -o "$ALL" ] && echo $KB KB
+[ "$B" -o "$ALL" ] && echo $BYTES bytes
+

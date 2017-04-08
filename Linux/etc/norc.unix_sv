@@ -1,0 +1,18 @@
+
+# UnixWare 7.0.1 (satan)
+
+:PATH=/bin:/usr/bin:/sbin:/etc
+
+alias -pacct=-ls -t /var/adm/*acct* /var/*acc* /var/log/account/*acct*
+
+alias =ps=ps -ef
+alias =psg=ps -ef | grep
+alias =nsg=netstat -an | grep 
+alias =arp=arp -an
+alias =ping=ping -c 1
+alias =df=df -k
+alias =alwaysdothis=
+alias =autorpc=-scan rpc 127.0.0.1 one
+
+alias =pse=ps -ef | egrep
+alias =psgv=ps -ef | egrep -v 

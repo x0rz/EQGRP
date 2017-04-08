@@ -1,0 +1,1917 @@
+#!/usr/bin/env bash
+
+##
+## Global variables used.
+##
+
+## Uncomment & set keys/rootdns if you don't want to be prompted.
+
+#keys=TARGET
+[ ${rootdns:+1} ] || rootdns=dontcare
+#rootdns=localip
+
+PATH=$PATH:$(dirname $0):.
+
+cmdline=$@
+
+dnslist="rs.internic.net	venera.isi.edu		ns.psi.net
+	 noc.umd.edu		gw.home.vix.com		nic.nordu.net
+	 localip		remoteip 		dontcare"
+
+
+##
+## Functions to setup the root server used for the trigger packet.
+##	These functions export environment variables
+##	needed by `ish' in crafting the trigger packet.
+##		DNS_NAME
+##		DNS_IP
+##		DNS_SOA
+##
+
+rs.internic.net() {				# A.ROOT-SERVERS.NET
+	export DNS_NAME=rs.internic.net
+	export DNS_IP=198.41.0.4
+	export DNS_SOA=markk
+}
+
+venera.isi.edu() {				# B.ROOT-SERVERS.NET
+	export DNS_NAME=venera.isi.edu
+	export DNS_IP=128.9.0.107
+	export DNS_SOA=koda
+}
+
+ns.psi.net() {					# C.ROOT-SERVERS.NET
+	export DNS_NAME=ns.psi.net
+	export DNS_IP=192.33.4.12
+	export DNS_SOA=hostmaster
+}
+
+noc.umd.edu() {					# D.ROOT-SERVERS.NET
+	export DNS_NAME=NOC.UMD.EDU
+	export DNS_IP=128.8.10.90
+	export DNS_SOA=hostmaster
+}
+
+gw.home.vix.com() {				# F.ROOT-SERVERS.NET
+	export DNS_NAME=gw.home.vix.com
+	export DNS_IP=192.5.5.241
+	export DNS_SOA=postmaster
+}
+
+nic.nordu.net() {				# I.ROOT-SERVERS.NET
+	export DNS_NAME=nic.nordu.net
+	export DNS_IP=192.36.148.17
+	export DNS_SOA=hostmaster
+}
+
+mindspring.net() {
+	export DNS_NAME=itchy.mindspring.net
+	export DNS_IP=207.69.200.210
+	export DNS_SOA=hostmaster
+}
+
+remoteip() {
+        export DNS_NAME=ns2.ix.netcom.com
+        export DNS_IP=$L_ip
+        export DNS_SOA=hostmaster
+        echo "*** Using Remote IP for trigger ***"
+}
+
+localip() {
+	export DNS_NAME=ns2.ix.netcom.com
+	getipaddr
+	export DNS_IP=$ip
+	export DNS_SOA=hostmaster
+	echo "*** Using local IP for trigger ***"
+}
+
+dontcare() {
+	case $(date +%a) in
+		Mon ) venera.isi.edu	;;
+		Tue ) ns.psi.net	;;
+		Wed ) rs.internic.net	;;
+		Thu ) gw.home.vix.com	;;
+		Fri ) nic.nordu.net	;;
+		*   ) rs.internic.net	;;
+	esac
+}
+
+lab.test.net() {
+	export DNS_NAME=lab.test.net
+	export DNS_IP=10.1.2.3
+	export DNS_SOA=markk
+}
+
+
+##
+## Functions to setup the target's keys
+##	These functions export the environment variables
+##	needed by `tn' for operation.
+##	TARG_TEL	key used during the telnet session
+##			If this is not defined, then assume we're using the
+##			new public key capability.
+##	TARG_AYT	key used in the DNS trigger packet
+##	O_TARG_AYT	key used prior to an upgrade. Remove after reboot.
+##	UTC_OFFSET	target UTC adjustment
+##			expr $(date -u +%Y%j%H%M) - $(date -u +%Y%j%H%M)
+##				  theirs		 ours
+##
+## If needed, the "special" port 17325 gives dst port 53 in triggers.
+##
+########## 231 INCISION keys included below ##########
+
+keylist="
+	A_______________a.a_____________________________1.1.1.1
+	BOBBY___________bob.bob.com_____________________1.2.3.4
+	BOBB____________bob.bob_________________________1.2.3.4
+	BOO_____________boo.boo.net_____________________1.2.3.4
+	CHAZZTEST_______test..nonet.net_________________1.2.3.4
+	CRYPTICSENTINEL_host1.domain____________________1.2.3.4
+	DEMO____________a.a.b.c_________________________1.2.3.4
+	DEMO____________a.b.c.d_________________________1.2.3.4
+	DORKUS__________bob.dork.com____________________1.2.3.4
+	DORK____________bob.bob.com_____________________1.2.3.4
+	DORK____________dork.dork.com___________________1.2.3.4
+	GOSPELHOGGING___pbx.none________________________1.2.3.4
+	INTONATION______METCOC5CM.clarent.com___________213.132.50.10
+	INTONATION______MTCCSUN.imtech.ernet.in_________202.141.121.198
+	INTONATION______Ns2.rosprint.ru_________________194.84.23.125
+	INTONATION______bgl1dr1-a-fixed.sancharnet.in___61.1.128.17
+	INTONATION______bgl1pp1-a-fixed.sancharnet.in___61.1.128.71
+	INTONATION______bj02.cww.com____________________202.84.16.34
+	INTONATION______butt-head.mos.ru________________10.30.1.130
+	INTONATION______dcproxy1.thrunet.com____________210.117.65.44
+	INTONATION______dns2.net1.it____________________213.140.195.7
+	INTONATION______enterprise.telesat.com.co_______66.128.32.67
+	INTONATION______gate.technopolis.kirov.ru_______217.9.148.61
+	INTONATION______imms1.macau.ctm.net_____________202.175.36.54
+	INTONATION______indy.fjmu.edu.cn________________202.112.176.3
+	INTONATION______kacstserv.kacst.edu.sa__________212.26.44.132
+	INTONATION______known.counsellor.gov.cn_________61.151.243.13
+	INTONATION______laleh.itrc.ac.ir._______________80.191.2.2
+	INTONATION______mail.bangla.net_________________203.188.252.3
+	INTONATION______mail.edi.edu.cn_________________218.104.71.61
+	INTONATION______mail.hallym.ac.kr_______________210.115.225.25
+	INTONATION______mail.hangzhouit.gov.cn__________202.107.197.199
+	INTONATION______mail.hz.zh.cn___________________202.101.172.6
+	INTONATION______mail.imamu.edu.sa_______________212.138.48.8
+	INTONATION______mail.siom.ac.cn_________________210.72.9.2
+	INTONATION______mail.tropmet.res.in_____________203.199.143.2
+	INTONATION______mail.tsinghua.edu.cn____________166.111.8.17
+	INTONATION______mail.zzu.edu.cn_________________222.22.32.88
+	INTONATION______mail1.371.net___________________218.29.0.195
+	INTONATION______mailgw.thtf.com.cn______________218.107.133.12
+	INTONATION______mailhub.minaffet.gov.rw_________62.56.174.152
+	INTONATION______mails.cneic.com.cn______________218.247.159.113
+	INTONATION______mailscan3.cau.ctm.net___________202.175.36.180
+	INTONATION______mailsrv02.macau.ctm.net_________202.175.3.120
+	INTONATION______mailsvra.macau.ctm.net__________202.175.3.119
+	INTONATION______mbi3.kuicr.kyoto-u.ac.jp________133.103.101.21
+	INTONATION______mcd-su-2.mos.ru_________________10.34.100.2
+	INTONATION______mipsa.ciae.ac.cn________________202.38.8.1
+	INTONATION______mpkhi-bk.multi.net.pk___________202.141.224.40
+	INTONATION______msgstore2.pldtprv.net___________192.168.120.3
+	INTONATION______n02.unternehmen.com_____________62.116.144.147
+	INTONATION______ndl1mc1-a-fixed.sancharnet.in___61.0.0.46
+	INTONATION______ndl1mx1-a-fixed.sancharnet.in___61.0.0.46
+	INTONATION______ndl1pp1-a-fixed.sancharnet.in___61.0.0.71
+	INTONATION______no1.unternehemen.com____________62.116.144.150
+	INTONATION______no3.unternehmen.org_____________62.116.144.190
+	INTONATION______ns.cac.com.cn___________________202.98.102.5
+	INTONATION______ns1.2911.net____________________202.99.41.9
+	INTONATION______ns1.multi.net.pk________________202.141.224.34
+	INTONATION______ns2.xidian.edu.cn_______________202.117.112.4
+	INTONATION______orion.platino.gov.ve____________161.196.215.67
+	INTONATION______outweb.nudt.edu.cn______________202.197.0.185
+	INTONATION______pop.net21pk.com_________________203.135.45.66
+	INTONATION______post.netchina.com.cn____________202.94.1.48
+	INTONATION______public2.zz.ha.cn________________218.29.0.200
+	INTONATION______sea.net.edu.cn__________________202.112.5.66
+	INTONATION______smmu-ipv6.smmu.edu.cn___________202.121.224.5
+	INTONATION______smtp.2911.net___________________218.245.255.5
+	INTONATION______smtp.macau.ctm.net______________202.175.36.220
+	INTONATION______sonatns.sonatrach.dz____________193.194.75.35
+	INTONATION______sparc.nour.net.sa_______________212.12.160.26
+	INTONATION______sps01.office.ctm.net____________202.175.4.38
+	INTONATION______sunhe.jinr.ru___________________159.93.18.100
+	INTONATION______sussi.cressoft.com.pk___________202.125.140.194
+	INTONATION______ultra2.tsinghua.edu.cn__________166.111.120.10
+	INTONATION______unknown.counsellor.gov.cn_______61.151.243.13
+	INTONATION______voyager1.telesat.com.co_________66.128.32.68
+	INTONATION______webserv.mos.ru__________________10.30.10.2
+	INTONATION______www.siom.ac.cn__________________202.127.16.44
+	INTONATION______www21.counsellor.gov.cn_________130.34.115.132
+	INTONATION______www21.counsellor.gov.cn_________61.151.243.13
+	JOHNS_OP________bob.bob.com_____________________1.2.3.4
+	JOHNTEST________bob.bob.com_____________________1.2.3.4
+	JOHNTEST________john.john.com___________________1.2.3.4
+	LAMPSWITCH______unknown.unknown_________________1.2.3.4
+	PITCHIMPAIR_____Spirit.das2.ru__________________81.94.47.83
+	PITCHIMPAIR_____anie.sarenet.es_________________192.148.167.2
+	PITCHIMPAIR_____aries.ficnet.net________________202.145.137.19
+	PITCHIMPAIR_____asic.e-technik.uni-rostock.de___139.30.202.8
+	PITCHIMPAIR_____burgoa.sarenet.es_______________194.30.32.242
+	PITCHIMPAIR_____cad-server1.EE.NCTU.edu.tw______140.113.212.150
+	PITCHIMPAIR_____ciidet.rtn.net.mx_______________204.153.24.32
+	PITCHIMPAIR_____cmusun8.unige.ch________________129.194.97.8
+	PITCHIMPAIR_____colpisaweb.sarenet.es___________194.30.32.229
+	PITCHIMPAIR_____connection1.connection.com.br___200.160.208.4
+	PITCHIMPAIR_____connection2.connection.com.br___200.160.208.8
+	PITCHIMPAIR_____dns1.unam.mx____________________132.248.204.1
+	PITCHIMPAIR_____dns2.chinamobile.com____________211.137.241.34
+	PITCHIMPAIR_____dns2.unam.mx____________________132.248.10.2
+	PITCHIMPAIR_____dragon.unideb.hu________________193.6.138.65
+	PITCHIMPAIR_____dukas.upc.es____________________147.83.2.62
+	PITCHIMPAIR_____e3000.hallym.ac.kr______________210.115.225.16
+	PITCHIMPAIR_____electra.otenet.gr_______________195.170.2.3
+	PITCHIMPAIR_____fl.sun-ip.or.jp_________________150.27.1.10
+	PITCHIMPAIR_____ftp.hyunwoo.co.kr_______________211.232.97.195
+	PITCHIMPAIR_____ganeran.sarenet.es______________194.30.32.177
+	PITCHIMPAIR_____geosun1.unige.ch________________129.194.41.4
+	PITCHIMPAIR_____giada.ing.unirc.it______________192.167.50.14
+	PITCHIMPAIR_____hk.sun-ip.or.jp_________________150.27.1.5
+	PITCHIMPAIR_____iconoce1.sarenet.es_____________194.30.0.16
+	PITCHIMPAIR_____icrsun.kuicr.kyoto-u.ac.jp______133.3.5.20
+	PITCHIMPAIR_____ids2.int.ids.pl_________________195.117.3.32
+	PITCHIMPAIR_____iti-idsc.net.eg_________________163.121.12.2
+	PITCHIMPAIR_____kommsrv.RZ.UniBw-Muenchen.de____137.193.10.8
+	PITCHIMPAIR_____logos.uba.uva.nl________________145.18.84.96
+	PITCHIMPAIR_____ltv.com.ve______________________200.75.112.26
+	PITCHIMPAIR_____mail.a-1.net.cn_________________210.77.147.84
+	PITCHIMPAIR_____mail.bhu.ac.in__________________202.141.107.15
+	PITCHIMPAIR_____mail.btbu.edu.cn________________211.82.112.23
+	PITCHIMPAIR_____mail.dyu.edu.tw_________________163.23.1.73
+	PITCHIMPAIR_____mail.et.ntust.edu.tw____________140.118.2.53
+	PITCHIMPAIR_____mail.hanseo.ac.kr_______________203.234.72.4
+	PITCHIMPAIR_____mail.hccc.gov.tw________________210.241.6.97
+	PITCHIMPAIR_____mail.howon.ac.kr________________203.246.64.14
+	PITCHIMPAIR_____mail.irtemp.na.cnr.it___________140.164.20.20
+	PITCHIMPAIR_____mail.jccs.com.sa________________212.70.32.100
+	PITCHIMPAIR_____mail.lzu.edu.cn_________________202.201.0.136
+	PITCHIMPAIR_____mail.mae.co.kr__________________210.118.179.1
+	PITCHIMPAIR_____mail.must.edu.tw________________203.68.220.40
+	PITCHIMPAIR_____mail.ncue.edu.tw________________163.23.225.100
+	PITCHIMPAIR_____mail.tccn.edu.tw________________203.64.35.108
+	PITCHIMPAIR_____mail.tpo.fi_____________________193.185.60.42
+	PITCHIMPAIR_____mail.univaq.it__________________192.150.195.10
+	PITCHIMPAIR_____mail.utc21.co.kr________________211.40.103.194
+	PITCHIMPAIR_____mail1.imtech.res.in_____________203.90.127.22
+	PITCHIMPAIR_____mailer.ing.unirc.it_____________192.167.50.202
+	PITCHIMPAIR_____mailgw.idom.es__________________194.30.33.29
+	PITCHIMPAIR_____matematica.univaq.it____________192.150.195.38
+	PITCHIMPAIR_____mbox.com.eg_____________________213.212.208.10
+	PITCHIMPAIR_____milko.stacken.kth.se____________130.237.234.3
+	PITCHIMPAIR_____moneo.upc.es____________________147.83.2.91
+	PITCHIMPAIR_____mtrader2.grupocorreo.es_________194.30.32.29
+	PITCHIMPAIR_____mxtpa.biglobe.net.tw____________202.166.255.103
+	PITCHIMPAIR_____myhome.elim.net_________________203.239.130.7
+	PITCHIMPAIR_____newin.int.rtbf.be_______________212.35.107.2
+	PITCHIMPAIR_____niveau.math.uni-bremen.de_______134.102.124.201
+	PITCHIMPAIR_____nl37.yourname.nl________________82.192.68.37
+	PITCHIMPAIR_____noc25.corp.home.ad.jp___________203.165.5.82
+	PITCHIMPAIR_____noc33.corp.home.ad.jp___________203.165.5.74
+	PITCHIMPAIR_____noc35.corp.home.ad.jp___________203.165.5.114
+	PITCHIMPAIR_____noc37.corp.home.ad.jp___________203.165.5.117
+	PITCHIMPAIR_____noc38.corp.home.ad.jp___________203.165.5.118
+	PITCHIMPAIR_____nodep.sun-ip.or.jp______________150.27.1.2
+	PITCHIMPAIR_____noya.bupt.edu.cn________________202.112.96.2
+	PITCHIMPAIR_____ns.anseo.dankook.ac.kr__________203.237.216.2
+	PITCHIMPAIR_____ns.bigobe.net.tw________________202.166.255.98
+	PITCHIMPAIR_____ns.bur.hiroshima-u.ac.jp________133.41.145.11
+	PITCHIMPAIR_____ns.cec.uchile.cl________________200.9.97.3
+	PITCHIMPAIR_____ns.chining.com.tw_______________202.39.26.50
+	PITCHIMPAIR_____ns.eyes.co.kr___________________210.98.224.88
+	PITCHIMPAIR_____ns.gabontelecom.com_____________217.77.71.52
+	PITCHIMPAIR_____ns.global-one.dk________________194.234.33.5
+	PITCHIMPAIR_____ns.hallym.ac.kr_________________210.115.225.11
+	PITCHIMPAIR_____ns.hanseo.ac.kr_________________203.234.72.1
+	PITCHIMPAIR_____ns.hufs.ac.kr___________________203.253.64.1
+	PITCHIMPAIR_____ns.icu.ac.kr____________________210.107.128.31
+	PITCHIMPAIR_____ns.ing.unirc.it_________________192.167.50.2
+	PITCHIMPAIR_____ns.khmc.or.kr___________________203.231.128.1
+	PITCHIMPAIR_____ns.kimm.re.kr___________________203.241.84.10
+	PITCHIMPAIR_____ns.kix.ne.kr____________________202.30.94.10
+	PITCHIMPAIR_____ns.rtn.net.mx___________________204.153.24.1
+	PITCHIMPAIR_____ns.stacken.kth.se_______________130.237.234.17
+	PITCHIMPAIR_____ns.unam.mx______________________132.248.253.1
+	PITCHIMPAIR_____ns.univaq.it____________________192.150.195.20
+	PITCHIMPAIR_____ns.youngdong.ac.kr______________202.30.58.1
+	PITCHIMPAIR_____ns1.bangla.net__________________203.188.252.2
+	PITCHIMPAIR_____ns1.btc.bw______________________168.167.168.34
+	PITCHIMPAIR_____ns1.bttc.ru_____________________80.82.162.118
+	PITCHIMPAIR_____ns1.gx.chinamobile.com__________211.138.252.30
+	PITCHIMPAIR_____ns1.ias.ac.in___________________203.197.183.66
+	PITCHIMPAIR_____ns1.starnets.ro_________________193.226.61.68
+	PITCHIMPAIR_____ns1.sun-ip.or.jp________________150.27.1.8
+	PITCHIMPAIR_____ns1.youngdong.ac.kr_____________202.30.58.5
+	PITCHIMPAIR_____ns2-backup.tpo.fi_______________193.185.60.40
+	PITCHIMPAIR_____ns2.ans.co.kr___________________210.126.104.74
+	PITCHIMPAIR_____ns2.chem.tohoku.ac.jp___________130.34.115.132
+	PITCHIMPAIR_____ns2.otenet.gr___________________195.170.2.1
+	PITCHIMPAIR_____nsce1.ji-net.com________________203.147.62.229
+	PITCHIMPAIR_____oiz.sarenet.es__________________192.148.167.17
+	PITCHIMPAIR_____orhi.sarenet.es_________________192.148.167.5
+	PITCHIMPAIR_____pastow.e-technik.uni-rostock.de_139.30.200.36
+	PITCHIMPAIR_____pfdsun.kuicr.kyoto-u.ac.jp______133.3.5.2
+	PITCHIMPAIR_____pitepalt.stacken.kth.se_________130.237.234.151
+	PITCHIMPAIR_____proxy1.tcn.ed.jp________________202.231.176.242
+	PITCHIMPAIR_____rabbit.uj.edu.pl________________149.156.89.33
+	PITCHIMPAIR_____s03.informatik.uni-bremin.de____134.102.201.53
+	PITCHIMPAIR_____saturn.mni.fh-giessen.de________212.201.7.21
+	PITCHIMPAIR_____sci.s-t.au.ac.th________________168.120.9.1
+	PITCHIMPAIR_____scsun25.unige.ch________________129.194.49.47
+	PITCHIMPAIR_____seoildsp.co.kr__________________218.36.28.250
+	PITCHIMPAIR_____servidor2.upc.es________________147.83.2.3
+	PITCHIMPAIR_____smuc.smuc.ac.kr_________________203.237.176.1
+	PITCHIMPAIR_____snacks.stacken.kth.se___________130.237.234.152
+	PITCHIMPAIR_____son-goki.sun-ip.or.jp___________150.27.1.11
+	PITCHIMPAIR_____sparc20mc.ing.unirc.it__________192.167.50.12
+	PITCHIMPAIR_____spin.lzu.edu.cn_________________202.201.0.131
+	PITCHIMPAIR_____splash-atm.upc.es_______________147.83.2.116
+	PITCHIMPAIR_____sun.bq.ub.es____________________161.116.154.1
+	PITCHIMPAIR_____sunbath.rrze.uni-erlangen.de____131.188.3.200
+	PITCHIMPAIR_____sunfirev250.cancilleria.gob.ni__165.98.181.5
+	PITCHIMPAIR_____tamarugo.cec.uchile.cl__________200.9.97.3
+	PITCHIMPAIR_____tayuman.info.com.ph_____________203.172.11.21
+	PITCHIMPAIR_____theta.uoks.uj.edu.pl____________149.156.89.30
+	PITCHIMPAIR_____tologorri.grupocorreo.es________194.30.32.109
+	PITCHIMPAIR_____tuapewa.polytechnic.edu.na______196.31.225.2
+	PITCHIMPAIR_____uji.kyoyo-u.ac.jp_______________133.3.5.33
+	PITCHIMPAIR_____ultra10.nanya.edu.tw____________203.68.40.6
+	PITCHIMPAIR_____unknown.unknown_________________555.10.31.145
+	PITCHIMPAIR_____v244.kyoyo-u.ac.jp______________133.3.5.33
+	PITCHIMPAIR_____v246.kyoyo-u.ac.jp______________133.3.5.2
+	PITCHIMPAIR_____war.rkts.com.tr_________________195.142.144.125
+	PITCHIMPAIR_____webmail.s-t.au.ac.th____________168.120.9.2
+	PITCHIMPAIR_____win.hallym.ac.kr________________210.115.225.17
+	PITCHIMPAIR_____winner.hallym.ac.kr_____________210.115.225.10
+	PITCHIMPAIR_____winners.yonsei.ac.kr____________210.115.225.14
+	PITCHIMPAIR_____www.bygden.nu___________________192.176.10.178
+	PITCHIMPAIR_____www.cfd.or.jp___________________210.198.16.75
+	PITCHIMPAIR_____www.pue.uia.mx__________________192.100.196.7
+	PITCHIMPAIR_____zanburu.grupocorreo.es__________194.30.32.113
+	TEST____________bob.bob.com_____________________1.2.3.4
+	TEST____________test.test_______________________1.2.3.4
+	"
+
+A_______________a.a_____________________________1.1.1.1() {
+# A___a.a___1.1.1.1___20040716-152133
+    ## INCISION Version:1.0 OS:i386-unknown-freebsd4.4
+    export TARG_AYT="7146d5c2 7eebf9b0 da807511"
+}
+
+BOBBY___________bob.bob.com_____________________1.2.3.4() {
+# BOBBY___bob.bob.com___1.2.3.4___20060803-114950
+    ## INCISION Version:4.10.2.15 OS:sparc-sun-solaris2.8
+    export TARG_AYT="86eaef4e add2891c 482c8820"
+}
+
+BOBB____________bob.bob_________________________1.2.3.4() {
+# BOBB___bob.bob___1.2.3.4___20051129-152402
+    ## INCISION Version:4.10.2.11 OS:i386-pc-solaris2.8
+    export TARG_AYT="b956823b c66a8023 57678869"
+}
+
+BOO_____________boo.boo.net_____________________1.2.3.4() {
+# BOO___boo.boo.net___1.2.3.4___20050711-151306
+    ## INCISION Version:4.11.5.3 OS:i686-pc-linux-gnu-2.4.29
+    export TARG_AYT="4f325019 f457af10 b951a7f3"
+}
+
+CHAZZTEST_______test..nonet.net_________________1.2.3.4() {
+# CHAZZTEST___test..nonet.net___1.2.3.4___20060921-114719
+    ## INCISION Version:4.10.2.15 OS:sparc-sun-solaris2.8
+    export TARG_AYT="1715060c 415ce5e0 f7145b8b"
+}
+
+CRYPTICSENTINEL_host1.domain____________________1.2.3.4() {
+# CRYPTICSENTINAL___host1.domain___1.2.3.4___20051223-111017
+    ## INCISION Version:4.11.8.2 OS:i686-pc-linux-gnu-2.4.21-37.EL
+    export TARG_AYT="12345678 9abcdef0 12345678"
+}
+
+DEMO____________a.a.b.c_________________________1.2.3.4() {
+# DEMO___a.a.b.c___1.2.3.4___20030328-152608
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="93a544a1 3e8fe558 f030a425"
+}
+
+DEMO____________a.b.c.d_________________________1.2.3.4() {
+# DEMO___a.b.c.d___1.2.3.4___20030825-140652
+    ## INCISION Version:4.9 OS:sparc-sun-solaris2.6
+    export TARG_AYT="5cc7316e 99efbf83 b55c1af5"
+}
+
+DORKUS__________bob.dork.com____________________1.2.3.4() {
+# DORKUS___bob.dork.com___1.2.3.4___20061005-181733
+    ## INCISION Version:4.11.8.2 OS:i686-pc-linux-gnu-2.4.21-37.EL
+    export TARG_AYT="bb4b8c9d 82c66f97 431ec980"
+}
+
+DORK____________bob.bob.com_____________________1.2.3.4() {
+# DORK___bob.bob.com___1.2.3.4___20060724-173621
+    ## INCISION Version:4.10.2.14 OS:sparc-sun-solaris2.7
+    export TARG_AYT="df2f5e3f e195725c 74248bbe"
+}
+
+DORK____________dork.dork.com___________________1.2.3.4() {
+# DORK___dork.dork.com___1.2.3.4___20060724-183505
+    ## INCISION Version:4.10.2.14 OS:sparc-sun-solaris2.7
+    export TARG_AYT="b7d09e55 6c778b3b b88d3c4c"
+}
+
+GOSPELHOGGING___pbx.none________________________1.2.3.4() {
+# ICEWARRIOR___pbx.none___1.2.3.4___20041222-091442
+    ## INCISION Version:4.11.4.1 OS:avaya-linux-2.4.20-AV14
+    export TARG_AYT="f894d75b 9cc46a53 0db9cd1a"
+}
+
+INTONATION______METCOC5CM.clarent.com___________213.132.50.10() {
+# INTONATION___METCOC5CM.clarent.com___213.132.50.10___20031010-151735
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="65c67e1d 7f972d4b 7a2a9c53"
+}
+
+INTONATION______MTCCSUN.imtech.ernet.in_________202.141.121.198() {
+# INTONATION___MTCCSUN.imtech.ernet.in___202.141.121.198___20041018-145536
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="688cd98e c94b4689 40dd5001"
+}
+
+INTONATION______Ns2.rosprint.ru_________________194.84.23.125() {
+# INTONATION___Ns2.rosprint.ru___194.84.23.125___20060322-144346
+    ## INCISION Version:4.10.2.15 OS:sparc-sun-solaris2.8
+    export TARG_AYT="9a3c4c8e ab3d55da f5a598e3"
+    [ "$UTC_OFFSET" ] || export UTC_OFFSET=-1099
+}
+
+INTONATION______bgl1dr1-a-fixed.sancharnet.in___61.1.128.17() {
+# INTONATION___bgl1dr1-a-fixed.sancharnet.in___61.1.128.17___20040323-141833
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="36eb9564 129b94c7 695de5dc"
+}
+
+INTONATION______bgl1pp1-a-fixed.sancharnet.in___61.1.128.71() {
+# INTONATION___bgl1pp1-a-fixed.sancharnet.in___61.1.128.71___20040603-151945
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="48d49f80 a37227ba e6a1989c"
+}
+
+INTONATION______bj02.cww.com____________________202.84.16.34() {
+# INTONATION___bj02.cww.com___202.84.16.34___20020808-173544
+    ## INCISION Version:4.8.2 OS:sparc-sun-solaris2.6
+    export TARG_AYT="37176c26 02d784a7 23b3ebd6"
+}
+
+INTONATION______butt-head.mos.ru________________10.30.1.130() {
+# INTONATION___butt-head.mos.ru___10.30.1.130___20061116-130237
+    ## INCISION Version:4.10.2.13 OS:sparc-sun-solaris2.6
+    export TARG_AYT="0f706922 e577b1ab 1792b625"
+}
+
+INTONATION______dcproxy1.thrunet.com____________210.117.65.44() {
+# INTONATION___dcproxy1.thrunet.com___210.117.65.44___20011107-121854
+    ## INCISION Version:4.6 OS:sparc-sun-solaris2.7
+    export TARG_AYT="d3760159 9cd3188e b06d8031"
+}
+
+INTONATION______dns2.net1.it____________________213.140.195.7() {
+# INTONATION___dns2.net1.it___213.140.195.7___20030327-165934
+    ## INCISION Version:4.8.3 OS:i686-pc-linux-gnu-2.4.7-10
+    export TARG_AYT="5e54ea5e 6b12400d e1d1f239"
+}
+
+INTONATION______enterprise.telesat.com.co_______66.128.32.67() {
+# INTONATION___enterprise.telesat.com.co___66.128.32.67___20030124-001006
+    ## INCISION Version:4.9 OS:sparc-sun-solaris2.8
+    export TARG_AYT="efe39b08 465a338c db5d9532"
+    [ "$UTC_OFFSET" ] || export UTC_OFFSET=-60
+}
+
+INTONATION______gate.technopolis.kirov.ru_______217.9.148.61() {
+# INTONATION___gate.technopolis.kirov.ru___217.9.148.61___20060912-073905
+    ## INCISION Version:4.10.3.1 OS:sparc-sun-solaris2.9
+    export TARG_AYT="54a5142a 7a08fc53 0bbff46b"
+}
+
+INTONATION______imms1.macau.ctm.net_____________202.175.36.54() {
+# INTONATION___imms1.macau.ctm.net___202.175.36.54___20040917-170702
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="f604d849 5b6bda89 2f392cc2"
+}
+
+INTONATION______indy.fjmu.edu.cn________________202.112.176.3() {
+# INTONATION___indy.fjmu.edu.cn___202.112.176.3___20060509-093858
+    ## INCISION Version:4.10.2.15 OS:sparc-sun-solaris2.8
+    export TARG_AYT="f2f7bf00 a31fe8c0 905fd227"
+}
+
+INTONATION______kacstserv.kacst.edu.sa__________212.26.44.132() {
+# INTONATION___kacstserv.kacst.edu.sa___212.26.44.132___20060925-112731
+    ## INCISION Version:4.10.3.1 OS:sparc-sun-solaris2.9
+    export TARG_AYT="cfac60dc f21f219e 71af6c6f"
+}
+
+INTONATION______known.counsellor.gov.cn_________61.151.243.13() {
+# INTONATION___known.counsellor.gov.cn___61.151.243.13___20040414-095522
+    ## INCISION Version:4.9 OS:sparc-sun-solaris2.6
+    export TARG_AYT="684a97df c02068dc d8d3a90f"
+}
+
+INTONATION______laleh.itrc.ac.ir._______________80.191.2.2() {
+# INTONATION___laleh.itrc.ac.ir___80.191.2.2___20030411-160713
+    ## INCISION Version:4.9 OS:sparc-sun-solaris2.7
+    export TARG_AYT="61b44674 9ca936ab 524bb920"
+}
+
+INTONATION______mail.bangla.net_________________203.188.252.3() {
+# INTONATION___mail.bangla.net___203.188.252.3___20011023-135858
+    ## INCISION Version:4.6 OS:sparc-sun-solaris2.6
+    export TARG_AYT="6d8275f8 c5835609 f103e472"
+}
+
+INTONATION______mail.edi.edu.cn_________________218.104.71.61() {
+# INTONATION___mail.edi.edu.cn___218.104.71.61___20030619-160701
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.7
+    export TARG_AYT="8ffee519 2e38f356 a878d119"
+}
+
+INTONATION______mail.hallym.ac.kr_______________210.115.225.25() {
+# INTONATION___mail.hallym.ac.kr___210.115.225.25___20031204-110826
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="86f0747e 348f2a59 2b887cc7"
+}
+
+INTONATION______mail.hangzhouit.gov.cn__________202.107.197.199() {
+# INTONATION___mail.hangzhouit.gov.cn___202.107.197.199___20050124-103318
+    ## INCISION Version:4.11.2 OS:i686-pc-linux-gnu-2.4.20-8
+    export TARG_AYT="e544d069 6240e572 f86fb848"
+}
+
+INTONATION______mail.hz.zh.cn___________________202.101.172.6() {
+# INTONATION___mail.hz.zh.cn___202.101.172.6___20030806-135014
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.7
+    export TARG_AYT="1a8c4bd0 3ae72d69 38da97b2"
+}
+
+INTONATION______mail.imamu.edu.sa_______________212.138.48.8() {
+# INTONATION___mail.imamu.edu.sa___212.138.48.8___20021002-194811
+    ## INCISION Version:4.9 OS:sparc-sun-solaris2.8
+    export TARG_AYT="057f2b44 02dbac88 a7cdcc70"
+    [ "$UTC_OFFSET" ] || export UTC_OFFSET=600
+}
+
+INTONATION______mail.siom.ac.cn_________________210.72.9.2() {
+# INTONATION___mail.siom.ac.cn___210.72.9.2___20040130-100754
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="c9d117fe 0627c192 232facf8"
+}
+
+INTONATION______mail.tropmet.res.in_____________203.199.143.2() {
+# INTONATION___mail.tropmet.res.in___203.199.143.2___20061205-165032
+    ## INCISION Version:4.11.2.1 OS:i686-pc-linux-gnu-2.4.20-8
+    export TARG_AYT="e8880256 5ab23bee edc0b76f"
+}
+
+INTONATION______mail.tsinghua.edu.cn____________166.111.8.17() {
+# INTONATION___mail.tsinghua.edu.cn___166.111.8.17___20070125-153203
+    ## INCISION Version:4.10.2.14 OS:sparc-sun-solaris2.7
+    export TARG_AYT="a2ee200f 10a539c7 822de499"
+}
+
+INTONATION______mail.zzu.edu.cn_________________222.22.32.88() {
+# INTONATION___mail.zzu.edu.cn___222.22.32.88___20050203-113356
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="3ddb2dd5 9ae410c0 c26b2cf6"
+}
+
+INTONATION______mail1.371.net___________________218.29.0.195() {
+# INTONATION___mail1.371.net___218.29.0.195___20021219-153821
+    ## INCISION Version:4.9 OS:sparc-sun-solaris2.7
+    export TARG_AYT="d3b68be6 cad0d93d 99dbbf17"
+}
+
+INTONATION______mailgw.thtf.com.cn______________218.107.133.12() {
+# INTONATION___mailgw.thtf.com.cn___218.107.133.12___20050506-111956
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.7
+    export TARG_AYT="d6dd2c7c 27aaf4fb 1bbea7af"
+}
+
+INTONATION______mailhub.minaffet.gov.rw_________62.56.174.152() {
+# INTONATION___mailhub.minaffet.gov.rw___62.56.174.152___20030123-190431
+    ## INCISION Version:4.9 OS:sparc-sun-solaris2.8
+    export TARG_AYT="7a5129ae 352d9fec 27198c00"
+}
+
+INTONATION______mails.cneic.com.cn______________218.247.159.113() {
+# INTONATION___mails.cneic.com.cn___218.247.159.113___20040506-152938
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="f1383417 fae9919f 7211d56d"
+}
+
+INTONATION______mailscan3.cau.ctm.net___________202.175.36.180() {
+# INTONATION___mailscan3.cau.ctm.net___202.175.36.180___20040203-125322
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="6da2bd5a 5f020634 63650677"
+}
+
+INTONATION______mailsrv02.macau.ctm.net_________202.175.3.120() {
+# INTONATION___mailsrv02.macau.ctm.net___202.175.3.120___20041110-164323
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="9bbede35 a442d90a 23251cb2"
+}
+
+INTONATION______mailsvra.macau.ctm.net__________202.175.3.119() {
+# INTONATION___mailsvra.macau.ctm.net___202.175.3.119___20041129-140502
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="3af90a70 e2334caf 49a568f0"
+}
+
+INTONATION______mbi3.kuicr.kyoto-u.ac.jp________133.103.101.21() {
+# INTONATION___mbi3.kuicr.kyoto-u.ac.jp___133.103.101.21___20020725-132154
+    ## INCISION Version:4.8.2 OS:sparc-sun-solaris2.6
+    export TARG_AYT="c9a9589d 87af7062 f9075a12"
+}
+
+INTONATION______mcd-su-2.mos.ru_________________10.34.100.2() {
+# INTONATION___mcd-su-2.mos.ru___10.34.100.2___20070206-140548
+    ## INCISION Version:4.10.2.13 OS:sparc-sun-solaris2.6
+    export TARG_AYT="116ac87d a98f7729 71c38ebc"
+}
+
+INTONATION______mipsa.ciae.ac.cn________________202.38.8.1() {
+# INTONATION___mipsa.ciae.ac.cn___202.38.8.1___20040909-115106
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="9ac49d9e 7c49d97e 2236c777"
+}
+
+INTONATION______mpkhi-bk.multi.net.pk___________202.141.224.40() {
+# INTONATION___mpkhi-bk.multi.net.pk___202.141.224.40___20020826-172332
+    ## INCISION Version:4.9 OS:sparc-sun-solaris2.8
+    export TARG_AYT="37b1ec88 7961dbac 4dbf0daf"
+    [ "$UTC_OFFSET" ] || export UTC_OFFSET=660
+}
+
+INTONATION______msgstore2.pldtprv.net___________192.168.120.3() {
+# INTONATION___msgstore2.pldtprv.net___192.168.120.3___20021114-120148
+    ## INCISION Version:4.9 OS:sparc-sun-solaris2.8
+    export TARG_AYT="e2d817a0 39231c16 a515e43a"
+}
+
+INTONATION______n02.unternehmen.com_____________62.116.144.147() {
+# INTONATION___n02.unternehmen.com___62.116.144.147___20050705-151139
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="f30e0607 75d845af 6396e155"
+}
+
+INTONATION______ndl1mc1-a-fixed.sancharnet.in___61.0.0.46() {
+# INTONATION___ndl1mx1-a-fixed.sancharnet.in___61.0.0.46___20031204-134957
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="c401fa75 f7e66e09 4b8c6f9d"
+    [ "$UTC_OFFSET" ] || export UTC_OFFSET=60
+}
+
+INTONATION______ndl1mx1-a-fixed.sancharnet.in___61.0.0.46() {
+# INTONATION___ndl1mx1-a-fixed.sancharnet.in___61.0.0.46___20060606-162122
+    ## INCISION Version:4.10.2.15 OS:sparc-sun-solaris2.8
+    export TARG_AYT="34a8db49 c873525e 4bbbbe1c"
+}
+
+INTONATION______ndl1pp1-a-fixed.sancharnet.in___61.0.0.71() {
+# INTONATION___ndl1pp1-a-fixed.sancharnet.in___61.0.0.71___20040406-142721
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="8bf5dd52 c3ab4318 2acb40de"
+}
+
+INTONATION______no1.unternehemen.com____________62.116.144.150() {
+# INTONATION___no1.unternehemen.com___62.116.144.150___20050127-173545
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="83a1ca9a e6d626ab 3081ad25"
+}
+
+INTONATION______no3.unternehmen.org_____________62.116.144.190() {
+# INTONATION___no3.unternehmen.org___62.116.144.190___20050920-130356
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="ec96bd02 bdfa6528 769db161"
+}
+
+INTONATION______ns.cac.com.cn___________________202.98.102.5() {
+# INTONATION___ns.cac.com.cn___202.98.102.5___20030325-142643
+    ## INCISION Version:4.9 OS:sparc-sun-solaris2.6
+    export TARG_AYT="3101bbd2 986a801c b4f87169"
+}
+
+INTONATION______ns1.2911.net____________________202.99.41.9() {
+# INTONATION___ns1.2911.net___202.99.41.9___20041103-115142
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.7
+    export TARG_AYT="0df2b008 189b3465 ad9c5b14"
+}
+
+INTONATION______ns1.multi.net.pk________________202.141.224.34() {
+# INTONATION___ns1.multi.net.pk___202.141.224.34___20020826-161236
+    ## INCISION Version:4.9 OS:sparc-sun-solaris2.8
+    export TARG_AYT="0fec50bf 8aea8798 feb3d724"
+    [ "$UTC_OFFSET" ] || export UTC_OFFSET=660
+}
+
+INTONATION______ns2.xidian.edu.cn_______________202.117.112.4() {
+# INTONATION___ns2.xidian.edu.cn___202.117.112.4___20041025-142854
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.9
+    export TARG_AYT="30cac4b5 442673a3 b0074e86"
+}
+
+INTONATION______orion.platino.gov.ve____________161.196.215.67() {
+# INTONATION___orion.platino.gov.ve___161.196.215.67___20030124-003332
+    ## INCISION Version:4.8.2 OS:sparc-sun-solaris2.6
+    export TARG_AYT="df0fe25c 2e83f666 6d0b4682"
+}
+
+INTONATION______outweb.nudt.edu.cn______________202.197.0.185() {
+# INTONATION___outweb.nudt.edu.cn___202.197.0.185___20031113-142441
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.7
+    export TARG_AYT="b0cd0f85 f68ed634 3b36e295"
+}
+
+INTONATION______pop.net21pk.com_________________203.135.45.66() {
+# INTONATION___pop.net21pk.com___203.135.45.66___20011109-094618
+    ## INCISION Version:4.8 OS:i386-pc-solaris2.7
+    export TARG_AYT="60cbe3ed c8524547 3be1117a"
+}
+
+INTONATION______post.netchina.com.cn____________202.94.1.48() {
+# INTONATION___post.netchina.com.cn___202.94.1.48___20020221-095050
+    ## INCISION Version:4.8.2 OS:sparc-sun-solaris2.6
+    export TARG_AYT="d0eab020 8b499a7e ae3a5c1d"
+}
+
+INTONATION______public2.zz.ha.cn________________218.29.0.200() {
+# INTONATION___public2.zz.ha.cn___218.29.0.200___20021024-130727
+    ## INCISION Version:4.9 OS:sparc-sun-solaris2.7
+    export TARG_AYT="7fcf9429 e0ee0c9b 92154b17"
+}
+
+INTONATION______sea.net.edu.cn__________________202.112.5.66() {
+# INTONATION___sea.net.edu.cn___202.112.5.66___20031023-175518
+    ## INCISION Version:4.9 OS:sparc-sun-solaris2.6
+    export TARG_AYT="c712883b 6565d449 78b12df6"
+}
+
+INTONATION______smmu-ipv6.smmu.edu.cn___________202.121.224.5() {
+# INTONATION___smmu-ipv6.smmu.edu.cn___202.121.224.5___20070126-160444
+    ## INCISION Version:4.11.2.1 OS:i686-pc-linux-gnu-2.4.20-8
+    export TARG_AYT="a339824d 338cc069 3360d5ea"
+}
+
+INTONATION______smtp.2911.net___________________218.245.255.5() {
+# INTONATION___smtp.2911.net___218.245.255.5___20041208-155757
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.7
+    export TARG_AYT="876ef40b 35821f19 c0b61c74"
+}
+
+INTONATION______smtp.macau.ctm.net______________202.175.36.220() {
+# INTONATION___smtp.macau.ctm.net___202.175.36.220___20040310-144519
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="9fd58b50 0de85148 2cbc3bbe"
+}
+
+INTONATION______sonatns.sonatrach.dz____________193.194.75.35() {
+# INTONATION___sonatns.sonatrach.dz___193.194.75.35___20020418-113439
+    ## INCISION Version:4.8.2 OS:sparc-sun-solaris2.6
+    export TARG_AYT="e7a5aeec 422041ec 00a32f82"
+    [ "$UTC_OFFSET" ] || export UTC_OFFSET=120
+}
+
+INTONATION______sparc.nour.net.sa_______________212.12.160.26() {
+# INTONATION___sparc.nour.net.sa___212.12.160.26___20040920-165854
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.9
+    export TARG_AYT="41d49a3a 8232e0f1 e527a917"
+}
+
+INTONATION______sps01.office.ctm.net____________202.175.4.38() {
+# INTONATION___sps01.office.ctm.net___202.175.4.38___20040803-134817
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="65587160 81a0acdd a9e0eea1"
+}
+
+INTONATION______sunhe.jinr.ru___________________159.93.18.100() {
+# INTONATION___sunhe.jinr.ru___159.93.18.100___20070117-184531
+    ## INCISION Version:4.10.2.10 OS:i386-pc-solaris2.7
+    export TARG_AYT="e61da076 fac29c1e 81fb53bf"
+}
+
+INTONATION______sussi.cressoft.com.pk___________202.125.140.194() {
+# INTONATION___sussi.cressoft.com.pk___202.125.140.194___20011101-145536
+    ## INCISION Version:4.6 OS:sparc-sun-solaris2.7
+    export TARG_AYT="a856ccdc f2332998 8d582007"
+}
+
+INTONATION______ultra2.tsinghua.edu.cn__________166.111.120.10() {
+# INTONATION___ultra2.tsinghua.edu.cn___166.111.120.10___20060823-114519
+    ## INCISION Version:4.10.2.15 OS:sparc-sun-solaris2.8
+    export TARG_AYT="148f6d55 041f5110 c3ff2269"
+}
+
+INTONATION______unknown.counsellor.gov.cn_______61.151.243.13() {
+# INTONATION___unknown.counsellor.gov.cn___61.151.243.13___20040414-090039
+    ## INCISION Version:4.9 OS:sparc-sun-solaris2.6
+    export TARG_AYT="b1407a1a 358e2d36 1c2566dd"
+}
+
+INTONATION______voyager1.telesat.com.co_________66.128.32.68() {
+# INTONATION___voyager1.telesat.com.co___66.128.32.68___20030821-014410
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="ac0bd167 749b69ec 4d4c889f"
+}
+
+INTONATION______webserv.mos.ru__________________10.30.10.2() {
+# INTONATION___webserv.mos.ru___10.30.10.2___20061102-153710
+    ## INCISION Version:4.10.2.13 OS:sparc-sun-solaris2.6
+    export TARG_AYT="a7b25fd8 ec73c517 e58328b9"
+}
+
+INTONATION______www.siom.ac.cn__________________202.127.16.44() {
+# INTONATION___www.siom.ac.cn___202.127.16.44___20040130-100548
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="2316009b e3666f77 a2265fbf"
+}
+
+INTONATION______www21.counsellor.gov.cn_________130.34.115.132() {
+# INTONATION___www21.counsellor.gov.cn___130.34.115.132___20040414-114204
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="051fe7c6 32aa93d2 5ddf61be"
+}
+
+INTONATION______www21.counsellor.gov.cn_________61.151.243.13() {
+# INTONATION___www21.counsellor.gov.cn___61.151.243.13___20040414-120150
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="39d5b872 6e8808a2 1dbba278"
+}
+
+JOHNS_OP________bob.bob.com_____________________1.2.3.4() {
+# JOHNS_OP___bob.bob.com___1.2.3.4___20051003-142757
+    ## INCISION Version:4.10.2.15 OS:sparc-sun-solaris2.8
+    export TARG_AYT="ec76b54a 1a0c917d 8e102407"
+}
+
+JOHNTEST________bob.bob.com_____________________1.2.3.4() {
+# JOHNTEST___bob.bob.com___1.2.3.4___20060721-191129
+    ## INCISION Version:4.10.3.1 OS:sparc-sun-solaris2.9
+    export TARG_AYT="1aef6232 f5ba9631 1f3acb9e"
+}
+
+JOHNTEST________john.john.com___________________1.2.3.4() {
+# JOHNTEST___john.john.com___1.2.3.4___20060921-162307
+    ## INCISION Version:1.1.2.1 OS:hppa2.0w-hp-hpux11.00
+    export TARG_AYT="NOT KEYED"
+}
+
+LAMPSWITCH______unknown.unknown_________________1.2.3.4() {
+# LAMPSWITCH___unknown.unknown___1.2.3.4___20050111-110013
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="ab076006 1d6e3cec 4fe10591"
+}
+
+PITCHIMPAIR_____Spirit.das2.ru__________________81.94.47.83() {
+# PITCHIMPAIR___Spirit.das2.ru___81.94.47.83___20050314-174949
+    ## INCISION Version:4.9.1 OS:i386-pc-solaris2.8
+    export TARG_AYT="e7b1cc4b e322deb3 dc090a11"
+}
+
+PITCHIMPAIR_____anie.sarenet.es_________________192.148.167.2() {
+# PITCHIMPAIR___anie.sarenet.es___192.148.167.2___20010919-094131
+    ## INCISION Version:4.6 OS:sparc-sun-solaris2.6
+    export TARG_AYT="ebfd82cd afbc1fe0 6a2fbcd5"
+#    [ "$UTC_OFFSET" ] || export UTC_OFFSET=60
+}
+
+PITCHIMPAIR_____aries.ficnet.net________________202.145.137.19() {
+# PITCHIMPAIR_TW___mx.iplus.net.tw___202.145.137.19___20010905-143819
+    ## INCISION Version:4.6 OS:sparc-sun-solaris2.7
+    export TARG_AYT="1662b4de 966aea14 10622227"
+}
+
+PITCHIMPAIR_____asic.e-technik.uni-rostock.de___139.30.202.8() {
+# PITCHIMPAIR___asic.e-technik.uni-rostock.de___139.30.202.8___20070124-134252
+    ## INCISION Version:4.10.3.1 OS:sparc-sun-solaris2.9
+    export TARG_AYT="4f49f0f1 9aff3a76 ccbb6d0e"
+}
+
+PITCHIMPAIR_____burgoa.sarenet.es_______________194.30.32.242() {
+# PITCHIMPAIR___burgoa.sarenet.es___194.30.32.242___20010919-094002
+    ## INCISION Version:4.6 OS:sparc-sun-solaris2.7
+    export TARG_AYT="1c4dfce1 8bca119e 7ce71ae3"
+}
+
+PITCHIMPAIR_____cad-server1.EE.NCTU.edu.tw______140.113.212.150() {
+# PITCHIMPAIR___cad-server1.EE.NCTU.edu.tw___140.113.212.150___20040322-113315
+    ## INCISION Version:4.9 OS:sparc-sun-solaris2.5.1
+    export TARG_AYT="dba1abf2 c5b1b090 ace01585"
+}
+
+PITCHIMPAIR_____ciidet.rtn.net.mx_______________204.153.24.32() {
+# PITCHIMPAIR___ciidet.rtn.net.mx___204.153.24.32___20060928-005616
+    ## INCISION Version:4.10.2.14 OS:sparc-sun-solaris2.7
+    export TARG_AYT="3545126d 3b4d7202 9cd26095"
+}
+
+PITCHIMPAIR_____cmusun8.unige.ch________________129.194.97.8() {
+# PITCHIMPAIR___cmusun8.unige.ch___129.194.97.8___20040408-215133
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.9
+    export TARG_AYT="f864fded c74315bc e5fd7109"
+}
+
+PITCHIMPAIR_____colpisaweb.sarenet.es___________194.30.32.229() {
+# PITCHIMPAIR___colpisaweb.sarenet.es___194.30.32.229___20041202-195849
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="2bd4cb74 18f3e9d7 99316a48"
+}
+
+PITCHIMPAIR_____connection1.connection.com.br___200.160.208.4() {
+# PITCHIMPAIR___connection1.connection.com.br___200.160.208.4___20070907-122727
+    ## INCISION Version:4.10.2.13 OS:sparc-sun-solaris2.6
+    export TARG_AYT="6e25159c 46d85529 11f73e34"
+}
+
+PITCHIMPAIR_____connection2.connection.com.br___200.160.208.8() {
+# PITCHIMPAIR___connection2.connection.com.br___200.160.208.8___20051027-184836
+    ## INCISION Version:4.10.2.13 OS:sparc-sun-solaris2.6
+    export TARG_AYT="6b841bb9 d8bb6e2c 2660759c"
+}
+
+PITCHIMPAIR_____dns1.unam.mx____________________132.248.204.1() {
+# PITCHIMPAIR___dns1.unam.mx___132.248.204.1___20050525-033556
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="54dae6e7 aa9a3382 b45e6372"
+}
+
+PITCHIMPAIR_____dns2.chinamobile.com____________211.137.241.34() {
+# PITCHIMPAIR___dns2.chinamobile.com___211.137.241.34___20060222-114032
+    ## INCISION Version:4.10.2.15 OS:sparc-sun-solaris2.8
+    export TARG_AYT="05d4ede8 c5575d0e b661a4a5"
+}
+
+PITCHIMPAIR_____dns2.unam.mx____________________132.248.10.2() {
+# PITCHIMPAIR___dns2.unam.mx___132.248.10.2___20030514-214806
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.7
+    export TARG_AYT="89fb31ab 7f5fb21b 8aae3d47"
+}
+
+PITCHIMPAIR_____dragon.unideb.hu________________193.6.138.65() {
+# PITCHIMPAIR___dragon.unideb.hu___193.6.138.65___20040929-215658
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.6
+    export TARG_AYT="bb7c47f0 ecd2b8c0 338fccee"
+}
+
+PITCHIMPAIR_____dukas.upc.es____________________147.83.2.62() {
+# PITCHIMPAIR___dukas.upc.es___147.83.2.62___20031119-174549
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="97e9b702 8e634360 fc9dc8d3"
+#    [ "$UTC_OFFSET" ] || export UTC_OFFSET=60
+}
+
+PITCHIMPAIR_____e3000.hallym.ac.kr______________210.115.225.16() {
+# PITCHIMPAIR___e3000.hallym.ac.kr___210.115.225.16___20050308-122314
+    ## INCISION Version:4.10.1.2 OS:sparc-sun-solaris2.9
+    export TARG_AYT="fda8f372 60167c38 f0013225"
+}
+
+PITCHIMPAIR_____electra.otenet.gr_______________195.170.2.3() {
+# PITCHIMPAIR___electra.otenet.gr___195.170.2.3___20060117-111026
+    ## INCISION Version:4.10.2.15 OS:sparc-sun-solaris2.8
+    export TARG_AYT="fafcdfec 8a830c16 2167276d"
+}
+
+PITCHIMPAIR_____fl.sun-ip.or.jp_________________150.27.1.10() {
+# PITCHIMPAIR___fl.sun-ip.or.jp___150.27.1.10___20040415-105302
+    ## INCISION Version:4.9 OS:sparc-sun-solaris2.6
+    export TARG_AYT="9b1be55a c3e93b7c 5e533337"
+}
+
+PITCHIMPAIR_____ftp.hyunwoo.co.kr_______________211.232.97.195() {
+# PITCHIMPAIR___ftp.hyunwoo.co.kr___211.232.97.195___20050830-140317
+    ## INCISION Version:4.10.1.2 OS:sparc-sun-solaris2.9
+    export TARG_AYT="fe2c7c71 c9a3416a 63f9a7ef"
+}
+
+PITCHIMPAIR_____ganeran.sarenet.es______________194.30.32.177() {
+# PITCHIMPAIR___ganeran.sarenet.es___194.30.32.177___20040408-204729
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="8f8e2041 bb85fc5b ed121e5a"
+}
+
+PITCHIMPAIR_____geosun1.unige.ch________________129.194.41.4() {
+# PITCHIMPAIR___geosun1.unige.ch___129.194.41.4___20050609-030034
+    ## INCISION Version:4.10.1.2 OS:sparc-sun-solaris2.9
+    export TARG_AYT="14736d79 d5201861 9363f6a0"
+}
+
+PITCHIMPAIR_____giada.ing.unirc.it______________192.167.50.14() {
+# PITCHIMPAIR___giada.ing.unirc.it___192.167.50.14___20030424-144321
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="e67bd879 0107a9b7 467fd886"
+}
+
+PITCHIMPAIR_____hk.sun-ip.or.jp_________________150.27.1.5() {
+# PITCHIMPAIR___hk.sun-ip.or.jp___150.27.1.5___20020503-112719
+    ## INCISION Version:4.8.2 OS:sparc-sun-solaris2.6
+    export TARG_AYT="17a46133 1378224a d5e183b7"
+}
+
+PITCHIMPAIR_____iconoce1.sarenet.es_____________194.30.0.16() {
+# PITCHIMPAIR___iconoce1.sarenet.es___194.30.0.16___20050307-184346
+    ## INCISION Version:4.10.1.2 OS:sparc-sun-solaris2.9
+    export TARG_AYT="3c256e0a 0fbc627f 903581a6"
+}
+
+PITCHIMPAIR_____icrsun.kuicr.kyoto-u.ac.jp______133.3.5.20() {
+# PITCHIMPAIR___icrsun.kuicr.kyoto-u.ac.jp___133.3.5.20___20030708-151922
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="76d97f78 d66f71fc a2f6cd48"
+}
+
+PITCHIMPAIR_____ids2.int.ids.pl_________________195.117.3.32() {
+# PITCHIMPAIR___ids2.int.ids.pl___195.117.3.32___20050308-174411
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="2528958b b8e22b7f d18334b9"
+}
+
+PITCHIMPAIR_____iti-idsc.net.eg_________________163.121.12.2() {
+# PITCHIMPAIR___iti-idsc.net.eg___163.121.12.2___20030807-171521
+    ## INCISION Version:4.9 OS:i386-pc-solaris2.8
+    export TARG_AYT="daa2e382 6562c43f 0b8956bf"
+}
+
+PITCHIMPAIR_____kommsrv.RZ.UniBw-Muenchen.de____137.193.10.8() {
+# PITCHIMPAIR___kommsrv.RZ.UniBw-Muenchen.de___137.193.10.8___20050705-171558
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="aebd9d0b 16d5a8ba 4003ab97"
+}
+
+PITCHIMPAIR_____logos.uba.uva.nl________________145.18.84.96() {
+# PITCHIMPAIR___logos.uba.uva.nl___145.18.84.96___20050830-155753
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.7
+    export TARG_AYT="9612b0f0 7fd7c68c 67f6f2ba"
+}
+
+PITCHIMPAIR_____ltv.com.ve______________________200.75.112.26() {
+# PITCHIMPAIR___ltv.com.ve___200.75.112.26___20050323-215019
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="9b241b8b 25b2b914 871fe97f"
+}
+
+PITCHIMPAIR_____mail.a-1.net.cn_________________210.77.147.84() {
+# PITCHIMPAIR___mail.a-1.net.cn___210.77.147.84___20050916-161008
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.7
+    export TARG_AYT="44f8cc98 4a0c5b9f dc04d75a"
+}
+
+PITCHIMPAIR_____mail.bhu.ac.in__________________202.141.107.15() {
+# PITCHIMPAIR___mail.bhu.ac.in___202.141.107.15___20050629-115843
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="cb2c8f78 04ac605c d27d569f"
+}
+
+PITCHIMPAIR_____mail.btbu.edu.cn________________211.82.112.23() {
+# PITCHIMPAIR___mail.btbu.edu.cn___211.82.112.23___20060531-165405
+    ## INCISION Version:4.10.2.15 OS:sparc-sun-solaris2.8
+    export TARG_AYT="cd79cf28 5d1471a8 f5127255"
+}
+
+PITCHIMPAIR_____mail.dyu.edu.tw_________________163.23.1.73() {
+# PITCHIMPAIR___mail.dyu.edu.tw___163.23.1.73___20050901-122929
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="27d6c216 597d457b 73c6a442"
+}
+
+PITCHIMPAIR_____mail.et.ntust.edu.tw____________140.118.2.53() {
+# PITCHIMPAIR___mail.et.ntust.edu.tw___140.118.2.53___20050315-111913
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="f442cc15 9c07e0df 3be0a297"
+}
+
+PITCHIMPAIR_____mail.hanseo.ac.kr_______________203.234.72.4() {
+# PITCHIMPAIR___mail.hanseo.ac.kr___203.234.72.4___20050321-110247
+    ## INCISION Version:4.10.1.2 OS:sparc-sun-solaris2.9
+    export TARG_AYT="b840ebfe 057cab3d 8d15bce5"
+}
+
+PITCHIMPAIR_____mail.hccc.gov.tw________________210.241.6.97() {
+# PITCHIMPAIR___mail.hccc.gov.tw___210.241.6.97___20050425-144217
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="0004b8b2 8bc04e1a 6a1d51af"
+}
+
+PITCHIMPAIR_____mail.howon.ac.kr________________203.246.64.14() {
+# PITCHIMPAIR___mail.howon.ac.kr___203.246.64.14___20051101-143337
+    ## INCISION Version:4.10.2.15 OS:sparc-sun-solaris2.8
+    export TARG_AYT="a8c02468 ad3fc94a 2448a0f1"
+}
+
+PITCHIMPAIR_____mail.irtemp.na.cnr.it___________140.164.20.20() {
+# PITCHIMPAIR___mail.irtemp.na.cnr.it___140.164.20.20___20040929-200426
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.7
+    export TARG_AYT="c82e4be3 d00f89bb 7b27d0a6"
+}
+
+PITCHIMPAIR_____mail.jccs.com.sa________________212.70.32.100() {
+# PITCHIMPAIR___mail.jccs.com.sa___212.70.32.100___20031016-185322
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.7
+    export TARG_AYT="2c750c82 ea9736a6 ec815225"
+}
+
+PITCHIMPAIR_____mail.lzu.edu.cn_________________202.201.0.136() {
+# PITCHIMPAIR___mail.lzu.edu.cn___202.201.0.136___20050331-143207
+    ## INCISION Version:4.10.1.2 OS:sparc-sun-solaris2.9
+    export TARG_AYT="a93a0064 ba051b6d a8765bdb"
+}
+
+PITCHIMPAIR_____mail.mae.co.kr__________________210.118.179.1() {
+# PITCHIMPAIR___mail.mae.co.kr___210.118.179.1___20041022-114228
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.6
+    export TARG_AYT="b1159736 6eeb838c 8843911c"
+}
+
+PITCHIMPAIR_____mail.must.edu.tw________________203.68.220.40() {
+# PITCHIMPAIR___mail.must.edu.tw___203.68.220.40___20041022-133501
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="04e59402 3ed51d1f f348279e"
+}
+
+PITCHIMPAIR_____mail.ncue.edu.tw________________163.23.225.100() {
+# PITCHIMPAIR___mail.ncue.edu.tw___163.23.225.100___20041022-122302
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="1bbb6cde 44602da5 5e0c95b3"
+}
+
+PITCHIMPAIR_____mail.tccn.edu.tw________________203.64.35.108() {
+# PITCHIMPAIR___mail.tccn.edu.tw___203.64.35.108___20041018-114628
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="2ac7d02e 3b342f0b 333bc759"
+}
+
+PITCHIMPAIR_____mail.tpo.fi_____________________193.185.60.42() {
+# PITCHIMPAIR___mail.tpo.fi___193.185.60.42___20020515-152758
+    ## INCISION Version:4.6 OS:sparc-sun-solaris2.5.1
+    export TARG_AYT="a0cdadb7 1469cde5 4cbe7a44"
+}
+
+PITCHIMPAIR_____mail.univaq.it__________________192.150.195.10() {
+# PITCHIMPAIR___mail.univaq.it___192.150.195.10___20030728-140532
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.9
+    export TARG_AYT="b2713e94 e7d4ab0e bc859b1a"
+}
+
+PITCHIMPAIR_____mail.utc21.co.kr________________211.40.103.194() {
+# PITCHIMPAIR___mail.utc21.co.kr___211.40.103.194___20050523-143213
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="bf69a63f fa1e8e4e 922ad014"
+}
+
+PITCHIMPAIR_____mail1.imtech.res.in_____________203.90.127.22() {
+# PITCHIMPAIR___mail1.imtech.res.in___203.90.127.22___20050523-163201
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="b996d4a0 daf603d5 326257fb"
+}
+
+PITCHIMPAIR_____mailer.ing.unirc.it_____________192.167.50.202() {
+# PITCHIMPAIR___mailer.ing.unirc.it___192.167.50.202___20030728-150749
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.9
+    export TARG_AYT="557f0bb4 240a7be1 dbfa0ebb"
+}
+
+PITCHIMPAIR_____mailgw.idom.es__________________194.30.33.29() {
+# PITCHIMPAIR___mailgw.idom.es___194.30.33.29___20050812-162609
+    ## INCISION Version:4.10.1.2 OS:sparc-sun-solaris2.9
+    export TARG_AYT="50532db8 350bf5ef d3e67af6"
+}
+
+PITCHIMPAIR_____matematica.univaq.it____________192.150.195.38() {
+# PITCHIMPAIR___matematica.univaq.it___192.150.195.38___20060222-105137
+    ## INCISION Version:4.10.3.1 OS:sparc-sun-solaris2.9
+    export TARG_AYT="b5e674e8 b6688253 9272a307"
+}
+
+PITCHIMPAIR_____mbox.com.eg_____________________213.212.208.10() {
+# PITCHIMPAIR___mbox.com.eg___213.212.208.10___20041119-101453
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="bfed4ee4 a1d80857 45faf680"
+}
+
+PITCHIMPAIR_____milko.stacken.kth.se____________130.237.234.3() {
+# PITCHIMPAIR___milko.stacken.kth.se___130.237.234.3___20060330-161350
+    ## INCISION Version:4.10.3.1 OS:sparc-sun-solaris2.9
+    export TARG_AYT="904a9515 6aaf6e79 7cd2085d"
+}
+
+PITCHIMPAIR_____moneo.upc.es____________________147.83.2.91() {
+# PITCHIMPAIR___moneo.upc.es___147.83.2.91___20041202-201020
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="77e3faa7 94516ce4 e7789cdf"
+}
+
+PITCHIMPAIR_____mtrader2.grupocorreo.es_________194.30.32.29() {
+# PITCHIMPAIR___mtrader2.grupocorreo.es___194.30.32.29___20050310-182126
+    ## INCISION Version:4.10.1.2 OS:sparc-sun-solaris2.9
+    export TARG_AYT="92722e8b 434d2b21 8dafb4ae"
+}
+
+PITCHIMPAIR_____mxtpa.biglobe.net.tw____________202.166.255.103() {
+# PITCHIMPAIR___mxtpa.biglobe.net.tw___202.166.255.103___20060926-101014
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.5.1
+    export TARG_AYT="222c40da 12db893a 45dc9286"
+}
+
+PITCHIMPAIR_____myhome.elim.net_________________203.239.130.7() {
+# PITCHIMPAIR___myhome.elim.net___203.239.130.7___20020313-133407
+    ## INCISION Version:4.6 OS:sparc-sun-solaris2.5.1
+    export TARG_AYT="8ff62019 f4c6611f eb80eee7"
+}
+
+PITCHIMPAIR_____newin.int.rtbf.be_______________212.35.107.2() {
+# PITCHIMPAIR___newin.int.rtbf.be___212.35.107.2___20051013-182154
+    ## INCISION Version:4.10.2.15 OS:sparc-sun-solaris2.8
+    export TARG_AYT="6aae23fe 44ebf8a8 1f6f4927"
+}
+
+PITCHIMPAIR_____niveau.math.uni-bremen.de_______134.102.124.201() {
+# PITCHIMPAIR___niveau.math.uni-bremen.de ___134.102.124.201___20040503-185134
+    ## INCISION Version:4.9 OS:i386-pc-solaris2.8
+    export TARG_AYT="0cf16c0c d81d5581 2e59b6d7"
+}
+
+PITCHIMPAIR_____nl37.yourname.nl________________82.192.68.37() {
+# PITCHIMPAIR___nl37.yourname.nl___82.192.68.37___20071217-120020
+    ## INCISION Version:4.11.6.10 OS:i686-pc-linux-gnu-2.2.16C37_III
+    export TARG_AYT="c59c2d88 76744dbb 2fb28b35"
+}
+
+PITCHIMPAIR_____noc25.corp.home.ad.jp___________203.165.5.82() {
+# PITCHIMPAIR___noc25.corp.home.ad.jp___203.165.5.82___20050628-132937
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="01f00c47 66e80bec a4a9376c"
+}
+
+PITCHIMPAIR_____noc33.corp.home.ad.jp___________203.165.5.74() {
+# PITCHIMPAIR___noc33.corp.home.ad.jp___203.165.5.74___20050706-090330
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="4e253f0e ae3a87c3 7ce6def7"
+}
+
+PITCHIMPAIR_____noc35.corp.home.ad.jp___________203.165.5.114() {
+# PITCHIMPAIR___noc35.corp.home.ad.jp___203.165.5.114___20050706-102150
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="50c9dc62 36b930cf 9d078c3c"
+}
+
+PITCHIMPAIR_____noc37.corp.home.ad.jp___________203.165.5.117() {
+# PITCHIMPAIR___noc37.corp.home.ad.jp___203.165.5.117___20060330-141728
+    ## INCISION Version:4.10.3.1 OS:sparc-sun-solaris2.9
+    export TARG_AYT="49484ede ff2adb0b ba936f3e"
+}
+
+PITCHIMPAIR_____noc38.corp.home.ad.jp___________203.165.5.118() {
+# PITCHIMPAIR___noc38.corp.home.ad.jp___203.165.5.118___20070123-094326
+    ## INCISION Version:4.10.3.1 OS:sparc-sun-solaris2.9
+    export TARG_AYT="88abf272 53a3c7dc 52095494"
+}
+
+PITCHIMPAIR_____nodep.sun-ip.or.jp______________150.27.1.2() {
+# PITCHIMPAIR___nodep.sun-ip.or.jp___150.27.1.2___20020417-152328
+    ## INCISION Version:4.8.2 OS:sparc-sun-solaris2.6
+    export TARG_AYT="a1f0b9e0 5884cf8d f495dbfd"
+}
+
+PITCHIMPAIR_____noya.bupt.edu.cn________________202.112.96.2() {
+# DIABLO___noya.bupt.edu.cn___202.112.96.2___20011022-132036
+    ## INCISION Version:4.6 OS:sparc-sun-solaris2.7
+    export TARG_AYT="c3c721dd 77802f80 93b955d8"
+}
+
+PITCHIMPAIR_____ns.anseo.dankook.ac.kr__________203.237.216.2() {
+# PITCHIMPAIR___ns.anseo.dankook.ac.kr___203.237.216.2___20051206-131305
+    ## INCISION Version:4.10.2.15 OS:sparc-sun-solaris2.8
+    export TARG_AYT="24da6c35 09155fce 8f4ec920"
+}
+
+PITCHIMPAIR_____ns.bigobe.net.tw________________202.166.255.98() {
+# PITCHIMPAIR___ns.bigobe.net.tw___202.166.255.98___20041022-125517
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.9
+    export TARG_AYT="2c11e1e3 35bc836c fec18b08"
+}
+
+PITCHIMPAIR_____ns.bur.hiroshima-u.ac.jp________133.41.145.11() {
+# PITCHIMPAIR___ns.bur.hiroshima-u.ac.jp___133.41.145.11___20030708-114853
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="6ea29b22 d350e5f0 932b74bb"
+}
+
+PITCHIMPAIR_____ns.cec.uchile.cl________________200.9.97.3() {
+# PITCHIMPAIR___ns.cec.uchile.cl___200.9.97.3___20041020-213753
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.6
+    export TARG_AYT="8f7c55be 1dffc9a5 8a591689"
+}
+
+PITCHIMPAIR_____ns.chining.com.tw_______________202.39.26.50() {
+# PITCHIMPAIR___ns.chining.com.tw___202.39.26.50___20041022-114055
+    ## INCISION Version:4.9.1 OS:i386-pc-solaris2.8
+    export TARG_AYT="bbef51da f5e991db 55275bfc"
+}
+
+PITCHIMPAIR_____ns.eyes.co.kr___________________210.98.224.88() {
+# PITCHIMPAIR___ns.eyes.co.kr___210.98.224.88___20041022-152559
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.6
+    export TARG_AYT="f94f7aa3 246662f1 e87dcb37"
+}
+
+PITCHIMPAIR_____ns.gabontelecom.com_____________217.77.71.52() {
+# PITCHIMPAIR___ns.gabontelecom.com___217.77.71.52___20060822-134452
+    ## INCISION Version:4.10.2.14 OS:sparc-sun-solaris2.7
+    export TARG_AYT="17d339d5 bcbf7447 d5f97fad"
+}
+
+PITCHIMPAIR_____ns.global-one.dk________________194.234.33.5() {
+# PITCHIMPAIR___ns.global-one.dk___194.234.33.5___20041102-170945
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.7
+    export TARG_AYT="a77ed7ae ff8a1def a4a7f4c4"
+}
+
+PITCHIMPAIR_____ns.hallym.ac.kr_________________210.115.225.11() {
+# PITCHIMPAIR___ns.hallym.ac.kr___210.115.225.11___20030811-151127
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="be775dc5 0af32bc2 285af271"
+}
+
+PITCHIMPAIR_____ns.hanseo.ac.kr_________________203.234.72.1() {
+# PITCHIMPAIR___ns.hanseo.ac.kr___203.234.72.1___20060822-135236
+    ## INCISION Version:4.10.2.14 OS:sparc-sun-solaris2.7
+    export TARG_AYT="059a4645 034aadff 4a7db3fb"
+}
+
+PITCHIMPAIR_____ns.hufs.ac.kr___________________203.253.64.1() {
+# PITCHIMPAIR___ns.hufs.ac.kr___203.253.64.1___20051026-084427
+    ## INCISION Version:4.10.2.15 OS:sparc-sun-solaris2.8
+    export TARG_AYT="dc150ab0 3b143979 747f4610"
+}
+
+PITCHIMPAIR_____ns.icu.ac.kr____________________210.107.128.31() {
+# PITCHIMPAIR___ns.icu.ac.kr___210.107.128.31___20051101-133018
+    ## INCISION Version:4.10.2.15 OS:sparc-sun-solaris2.8
+    export TARG_AYT="4d4a64ab 74c90cbd 1be8f03e"
+}
+
+PITCHIMPAIR_____ns.ing.unirc.it_________________192.167.50.2() {
+# PITCHIMPAIR___ns.ing.unirc.it___192.167.50.2___20030417-130101
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="fa3c8afa 7b86200c 67246442"
+}
+
+PITCHIMPAIR_____ns.khmc.or.kr___________________203.231.128.1() {
+# PITCHIMPAIR___ns.khmc.or.kr___203.231.128.1___20030710-132145
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="36a5ef6d 52bf9844 870cbaa7"
+}
+
+PITCHIMPAIR_____ns.kimm.re.kr___________________203.241.84.10() {
+# PITCHIMPAIR___ns.kimm.re.kr___203.241.84.10___20040219-112228
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="1f9527ad 68b0d84c 03855ee3"
+}
+
+PITCHIMPAIR_____ns.kix.ne.kr____________________202.30.94.10() {
+# PITCHIMPAIR___ns.kix.ne.kr___202.30.94.10___20020607-104147
+    ## INCISION Version:4.8.2 OS:sparc-sun-solaris2.6
+    export TARG_AYT="a4c76aa5 fdf20deb 87fd54df"
+}
+
+PITCHIMPAIR_____ns.rtn.net.mx___________________204.153.24.1() {
+# PITCHIMPAIR___ns.rtn.net.mx___204.153.24.1___20050524-231351
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="90513cb5 a3bbe85d 54c070a2"
+}
+
+PITCHIMPAIR_____ns.stacken.kth.se_______________130.237.234.17() {
+# PITCHIMPAIR___ns.stacken.kth.se___130.237.234.17___20031106-172718
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.9
+    export TARG_AYT="a86ee269 1fe0972b cfe3b1f7"
+#    [ "$UTC_OFFSET" ] || export UTC_OFFSET=60
+}
+
+PITCHIMPAIR_____ns.unam.mx______________________132.248.253.1() {
+# PITCHIMPAIR___ns.unam.mx___132.248.253.1___20021202-145306
+    ## INCISION Version:4.9 OS:sparc-sun-solaris2.7
+    export TARG_AYT="243d1ce0 2618f2e0 3f287db4"
+}
+
+PITCHIMPAIR_____ns.univaq.it____________________192.150.195.20() {
+# PITCHIMPAIR___ns.univaq.it___192.150.195.20___20030728-130223
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.9
+    export TARG_AYT="cf5e8ab3 1ac35359 a181301a"
+}
+
+PITCHIMPAIR_____ns.youngdong.ac.kr______________202.30.58.1() {
+# PITCHIMPAIR___ns.youngdong.ac.kr___202.30.58.1___20040607-105509
+    ## INCISION Version:4.9 OS:sparc-sun-solaris2.6
+    export TARG_AYT="67741d71 ce7681b8 56e94b9e"
+}
+
+PITCHIMPAIR_____ns1.bangla.net__________________203.188.252.2() {
+# PITCHIMPAIR_ns1.bangla.net__203.188.252.2__20050323-175921
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="829eb50f d0d18787 aa4d4cf5"
+}
+
+PITCHIMPAIR_____ns1.btc.bw______________________168.167.168.34() {
+# PITCHIMPAIR___ns1.btc.bw___168.167.168.34___20041102-175138
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="0537ac08 e35c67a7 984865ec"
+}
+
+PITCHIMPAIR_____ns1.bttc.ru_____________________80.82.162.118() {
+# PITCHIMPAIR___ns1.bttc.ru___80.82.162.118___20050314-164736
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="c7c079e5 85eee306 294f02c7"
+}
+
+PITCHIMPAIR_____ns1.gx.chinamobile.com__________211.138.252.30() {
+# PITCHIMPAIR___ns1.gx.chinamobile.com___211.138.252.30___20060307-112158
+    ## INCISION Version:4.10.2.15 OS:sparc-sun-solaris2.8
+    export TARG_AYT="a4946d67 4e35eee5 89b17f82"
+}
+
+PITCHIMPAIR_____ns1.ias.ac.in___________________203.197.183.66() {
+# PITCHIMPAIR___ns1.ias.ac.in___203.197.183.66___20060927-151626
+    ## INCISION Version:4.10.2.14 OS:sparc-sun-solaris2.7
+    export TARG_AYT="af7f20bc 3d349a8f 1a132882"
+}
+
+PITCHIMPAIR_____ns1.starnets.ro_________________193.226.61.68() {
+# PITCHIMPAIR___ns1.starnets.ro___193.226.61.68___20041102-175718
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.9
+    export TARG_AYT="204fe963 3c39bcd9 da18f868"
+}
+
+PITCHIMPAIR_____ns1.sun-ip.or.jp________________150.27.1.8() {
+# PITCHIMPAIR___ns1.sun-ip.or.jp___150.27.1.8___20050830-144704
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="065c1c74 dec7ce4f 6fffd6ac"
+}
+
+PITCHIMPAIR_____ns1.youngdong.ac.kr_____________202.30.58.5() {
+# PITCHIMPAIR___ns1.youngdong.ac.kr___202.30.58.5___19691231-190000
+    ## INCISION Version:1.1.2.1 OS:hppa2.0w-hp-hpux11.00
+    export TARG_AYT="NOT KEYED"
+}
+
+PITCHIMPAIR_____ns2-backup.tpo.fi_______________193.185.60.40() {
+# PITCHIMPAIR___ns2-backup.tpo.fi___193.185.60.40___20021010-101507
+    ## INCISION Version:4.8.2 OS:sparc-sun-solaris2.6
+    export TARG_AYT="a7e63e6e 1e0bbfbd 95fcc780"
+}
+
+PITCHIMPAIR_____ns2.ans.co.kr___________________210.126.104.74() {
+# PITCHIMPAIR___ns2.ans.co.kr___210.126.104.74___20040316-114321
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.7
+    export TARG_AYT="d6d34b00 8ff41929 77f6bc18"
+}
+
+PITCHIMPAIR_____ns2.chem.tohoku.ac.jp___________130.34.115.132() {
+# PITCHIMPAIR___ns2.chem.tohoku.ac.jp___130.34.115.132___20031027-132012
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="b15ddeeb 7a3d3528 601fa067"
+}
+
+PITCHIMPAIR_____ns2.otenet.gr___________________195.170.2.1() {
+# PITCHIMPAIR___ns2.otenet.gr___195.170.2.1___20020513-135956
+    ## INCISION Version:4.8.2 OS:sparc-sun-solaris2.8
+    export TARG_AYT="06016d21 6c0b9610 e153452a"
+}
+
+PITCHIMPAIR_____nsce1.ji-net.com________________203.147.62.229() {
+# PITCHIMPAIR___nsce1.ji-net.com___203.147.62.229___20080208-141051
+    ## INCISION Version:4.10.2.13 OS:sparc-sun-solaris2.6
+    export TARG_AYT="84b8d198 d7058b04 787bab57"
+}
+
+PITCHIMPAIR_____oiz.sarenet.es__________________192.148.167.17() {
+# PITCHIMPAIR___oiz.sarenet.es___192.148.167.17___20011016-000000
+    ## INCISION Version:4.6 OS:sparc-sun-solaris2.7
+    export TARG_AYT="12345678 9abcdef0 12345678"
+}
+
+PITCHIMPAIR_____orhi.sarenet.es_________________192.148.167.5() {
+# PITCHIMPAIR___orhi.sarenet.es___192.148.167.5___20030701-144321
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="f0301471 98e4aa69 60d99234"
+}
+
+PITCHIMPAIR_____pastow.e-technik.uni-rostock.de_139.30.200.36() {
+# PITCHIMPAIR___pastow.e-technik.uni-rostock.de___139.30.200.36___20040929-213949
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="d85e40b8 17b797a0 7175ffd0"
+}
+
+PITCHIMPAIR_____pfdsun.kuicr.kyoto-u.ac.jp______133.3.5.2() {
+# INTONATION___pfdsun.kuicr.kyoto-u.ac.jp___133.3.5.2___20020702-135908
+    ## INCISION Version:4.8.2 OS:sparc-sun-solaris2.6
+    export TARG_AYT="b1b1509e 818ca176 fdc324dd"
+    [ "$UTC_OFFSET" ] || export UTC_OFFSET=0
+}
+
+PITCHIMPAIR_____pitepalt.stacken.kth.se_________130.237.234.151() {
+# PITCHIMPAIR___pitepalt.stacken.kth.se___130.237.234.151___20040929-184655
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.9
+    export TARG_AYT="3fdbfa28 8814fd26 db99cc78"
+}
+
+PITCHIMPAIR_____proxy1.tcn.ed.jp________________202.231.176.242() {
+# PITCHIMPAIR___proxy1.tcn.ed.jp___202.231.176.242___20050815-150857
+    ## INCISION Version:4.9.1 OS:i386-pc-solaris2.8
+    export TARG_AYT="17be0dd5 df71b5c4 febb1811"
+}
+
+PITCHIMPAIR_____rabbit.uj.edu.pl________________149.156.89.33() {
+# PITCHIMPAIR___rabbit.uj.edu.pl___149.156.89.33___20060404-163839
+    ## INCISION Version:4.10.3.1 OS:sparc-sun-solaris2.9
+    export TARG_AYT="f28ab17d dd772038 eae33e1b"
+}
+
+PITCHIMPAIR_____s03.informatik.uni-bremin.de____134.102.201.53() {
+# PITCHIMPAIR___s03.informatik.uni-bremin.de___134.102.201.53___20040309-184913
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.9
+    export TARG_AYT="a18bce43 389dca2a 765eb66d"
+}
+
+PITCHIMPAIR_____saturn.mni.fh-giessen.de________212.201.7.21() {
+# PITCHIMPAIR___saturn.mni.fh-giessen.de___212.201.7.21___20041202-223050
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="43f68770 91377c9f bd9f7feb"
+}
+
+PITCHIMPAIR_____sci.s-t.au.ac.th________________168.120.9.1() {
+# PITCHIMPAIR___sci.s-t.au.ac.th___168.120.9.1___20020501-104838
+    ## INCISION Version:4.8.2 OS:sparc-sun-solaris2.8
+    export TARG_AYT="082fefdd 88678c58 39cf6a9c"
+    [ "$UTC_OFFSET" ] || export UTC_OFFSET=840
+}
+
+PITCHIMPAIR_____scsun25.unige.ch________________129.194.49.47() {
+# PITCHIMPAIR___scsun25.unige.ch___129.194.49.47___20040309-164903
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="a8c58620 9fe14156 050245a7"
+}
+
+PITCHIMPAIR_____seoildsp.co.kr__________________218.36.28.250() {
+# PITCHIMPAIR___seoildsp.co.kr___218.36.28.250___20040406-132009
+    ## INCISION Version:4.9 OS:sparc-sun-solaris2.6
+    export TARG_AYT="5f70a916 3f4ab64a 6659ef8d"
+}
+
+PITCHIMPAIR_____servidor2.upc.es________________147.83.2.3() {
+# INTONATION___servidor2.upc.es___147.83.2.3___20020214-203036
+    ## INCISION Version:4.8.2 OS:sparc-sun-solaris2.7
+    export TARG_AYT="3ee4ba5a 21cdbc29 56bf444e"
+    [ "$UTC_OFFSET" ] || export UTC_OFFSET=-60
+}
+
+PITCHIMPAIR_____smuc.smuc.ac.kr_________________203.237.176.1() {
+# PITCHIMPAIR___smuc.smuc.ac.kr___203.237.176.1___20051026-101551
+    ## INCISION Version:4.10.2.16 OS:sparc-sun-solaris2.9
+    export TARG_AYT="5ae19c18 3712bbc3 6c3da38e"
+}
+
+PITCHIMPAIR_____snacks.stacken.kth.se___________130.237.234.152() {
+# PITCHIMPAIR___snacks.stacken.kth.se___130.237.234.152___20040929-194106
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.9
+    export TARG_AYT="4abd95ea 9c717544 8fc65152"
+}
+
+PITCHIMPAIR_____son-goki.sun-ip.or.jp___________150.27.1.11() {
+# PITCHIMPAIR___son-goki.sun-ip.or.jp___150.27.1.11___20020503-112843
+    ## INCISION Version:4.8.2 OS:sparc-sun-solaris2.6
+    export TARG_AYT="c7ec86d5 483191b8 968549a2"
+    [ "$UTC_OFFSET" ] || export UTC_OFFSET=0
+}
+
+PITCHIMPAIR_____sparc20mc.ing.unirc.it__________192.167.50.12() {
+# PITCHIMPAIR___sparc20mc.ing.unirc.it___192.167.50.12___20030728-162858
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.9
+    export TARG_AYT="3cbe3269 72239859 87c08d89"
+}
+
+PITCHIMPAIR_____spin.lzu.edu.cn_________________202.201.0.131() {
+# PITCHIMPAIR___spin.lzu.edu.cn___202.201.0.131___20060329-121203
+    ## INCISION Version:4.10.3.1 OS:sparc-sun-solaris2.9
+    export TARG_AYT="319e4fff d73ca482 505203d0"
+}
+
+PITCHIMPAIR_____splash-atm.upc.es_______________147.83.2.116() {
+# PITCHIMPAIR___splash-atm.upc.es___147.83.2.116___20020214-223010
+    ## INCISION Version:4.8.2 OS:sparc-sun-solaris2.6
+    export TARG_AYT="5350ff15 689693ae ec1946b9"
+    [ "$UTC_OFFSET" ] || export UTC_OFFSET=-60
+}
+
+PITCHIMPAIR_____sun.bq.ub.es____________________161.116.154.1() {
+# PITCHIMPAIR___sun.bq.ub.es___161.116.154.1___20020523-221508
+    ## INCISION Version:4.8.2 OS:sparc-sun-solaris2.7
+    export TARG_AYT="9bcd984f 684c80d3 8f88ff47"
+}
+
+PITCHIMPAIR_____sunbath.rrze.uni-erlangen.de____131.188.3.200() {
+# PITCHIMPAIR___sunbath.rrze.uni-erlangen.de___131.188.3.200___20050309-182517
+    ## INCISION Version:4.10.1.2 OS:sparc-sun-solaris2.9
+    export TARG_AYT="e8c27050 b174b79a e9251c76"
+}
+
+PITCHIMPAIR_____sunfirev250.cancilleria.gob.ni__165.98.181.5() {
+# PITCHIMPAIR___sunfirev250.cancilleria.gob.ni___165.98.181.5___20070323-083334
+    ## INCISION Version:4.10.3.1 OS:sparc-sun-solaris2.9
+    export TARG_AYT="fce700a8 1ce9df01 aa2e1457"
+}
+
+PITCHIMPAIR_____tamarugo.cec.uchile.cl__________200.9.97.3() {
+# PITCHIMPAIR___tamarugo.cec.uchile.cl___200.9.97.3___20061208-070727
+    ## INCISION Version:4.10.2.13 OS:sparc-sun-solaris2.6
+    export TARG_AYT="9cd50ff4 e8be0042 b79a82e9"
+}
+
+PITCHIMPAIR_____tayuman.info.com.ph_____________203.172.11.21() {
+# PITCHIMPAIR___tayuman.info.com.ph___203.172.11.21___20031027-173055
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8
+    export TARG_AYT="930e7947 b53525b6 631e4330"
+}
+
+PITCHIMPAIR_____theta.uoks.uj.edu.pl____________149.156.89.30() {
+# PITCHIMPAIR___theta.uoks.uj.edu.pl___149.156.89.30___20050705-175454
+    ## INCISION Version:4.10.1.2 OS:sparc-sun-solaris2.9
+    export TARG_AYT="013d06f7 fcceea49 2d2693ad"
+}
+
+PITCHIMPAIR_____tologorri.grupocorreo.es________194.30.32.109() {
+# PITCHIMPAIR___tologorri.grupocorreo.es___194.30.32.109___20060612-165029
+    ## INCISION Version:4.10.2.15 OS:sparc-sun-solaris2.8
+    export TARG_AYT="b29e4b51 88af0b1f 79067ede"
+}
+
+PITCHIMPAIR_____tuapewa.polytechnic.edu.na______196.31.225.2() {
+# PITCHIMPAIR___tuapewa.polytechnic.edu.na___196.31.225.2___20050331-163949
+    ## INCISION Version:4.10.1.2 OS:sparc-sun-solaris2.9
+    export TARG_AYT="0c70d658 a342495a dd4e802c"
+}
+
+PITCHIMPAIR_____uji.kyoyo-u.ac.jp_______________133.3.5.33() {
+# PITCHIMPAIR___uji.kyoyo-u.ac.jp___133.3.5.33___20060425-140836
+    ## INCISION Version:4.10.2.15 OS:sparc-sun-solaris2.8
+    export TARG_AYT="2f2882df 9c1d23ac 078a7a09"
+}
+
+PITCHIMPAIR_____ultra10.nanya.edu.tw____________203.68.40.6() {
+# PITCHIMPAIR___ultra10.nanya.edu.tw___203.68.40.6___20041227-123134
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="df07f4a6 014490d7 43c80581"
+}
+
+PITCHIMPAIR_____unknown.unknown_________________555.10.31.145() {
+# PITCHIMPAIR___unknown.unknown___555.10.31.145___20060811-141834
+    ## INCISION Version:4.10.2.15 OS:sparc-sun-solaris2.8
+    export TARG_AYT="5fee1cde b7151aba ad895e9c"
+}
+
+PITCHIMPAIR_____v244.kyoyo-u.ac.jp______________133.3.5.33() {
+# PITCHIMPAIR___v244.kyoyo-u.ac.jp___133.3.5.33___20070323-094310
+    ## INCISION Version:4.10.3.1 OS:sparc-sun-solaris2.9
+    export TARG_AYT="1d6e72df 4c5f1c9f c4370584"
+}
+
+PITCHIMPAIR_____v246.kyoyo-u.ac.jp______________133.3.5.2() {
+# PITCHIMPAIR___v246.kyoyo-u.ac.jp___133.3.5.2___20070323-104937
+    ## INCISION Version:4.10.3.1 OS:sparc-sun-solaris2.9
+    export TARG_AYT="dfa4c164 0eb005f3 82a38dc8"
+}
+
+PITCHIMPAIR_____war.rkts.com.tr_________________195.142.144.125() {
+# GRAPEUNIQUE___war.rkts.com.tr___195.142.144.125___20011101-171614
+    ## INCISION Version:4.6 OS:sparc-sun-solaris2.7
+    export TARG_AYT="70ef9240 4eb54947 fc951434"
+}
+
+PITCHIMPAIR_____webmail.s-t.au.ac.th____________168.120.9.2() {
+# PITCHIMPAIR___webmail.s-t.au.ac.th___168.120.9.2___20020507-121447
+    ## INCISION Version:4.8.2 OS:sparc-sun-solaris2.8
+    export TARG_AYT="31755052 1ca39d1f 7b15448a"
+    [ "$UTC_OFFSET" ] || export UTC_OFFSET=840
+}
+
+PITCHIMPAIR_____win.hallym.ac.kr________________210.115.225.17() {
+# PITCHIMPAIR___win.hallym.ac.kr___210.115.225.17___20050308-131417
+    ## INCISION Version:4.10.1.2 OS:sparc-sun-solaris2.9
+    export TARG_AYT="ad31401a 1f0e2874 fcf516a7"
+}
+
+PITCHIMPAIR_____winner.hallym.ac.kr_____________210.115.225.10() {
+# PITCHIMPAIR___winner.hallym.ac.kr___210.115.225.10___20050408-132327
+    ## INCISION Version:4.10.1.2 OS:sparc-sun-solaris2.9
+    export TARG_AYT="4885787a 9605002b 61107b5f"
+}
+
+PITCHIMPAIR_____winners.yonsei.ac.kr____________210.115.225.14() {
+# PITCHIMPAIR___winners.yonsei.ac.kr___210.115.225.14___20041130-130403
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="3de8747f 02deca99 6eb06696"
+}
+
+PITCHIMPAIR_____www.bygden.nu___________________192.176.10.178() {
+# PITCHIMPAIR___www.bygden.nu___192.176.10.178___20031105-171204
+# PITCHIMPAIR___www.bygden.nu___192.176.10.178___20031105-171204
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.9
+    export TARG_AYT="1d7bb39c 2e7b6bc4 b501921a"
+}
+
+PITCHIMPAIR_____www.cfd.or.jp___________________210.198.16.75() {
+# PITCHIMPAIR___www.cfd.or.jp___210.198.16.75___20041130-110333
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.6
+    export TARG_AYT="5c0aa1e9 3b8b84da 5af135e1"
+}
+
+PITCHIMPAIR_____www.pue.uia.mx__________________192.100.196.7() {
+# PITCHIMPAIR___www.pue.uia.mx___192.100.196.7___20041202-214158
+    ## INCISION Version:4.10 OS:sparc-sun-solaris2.8
+    export TARG_AYT="e0453c36 6d027b6d 82699277"
+}
+
+PITCHIMPAIR_____zanburu.grupocorreo.es__________194.30.32.113() {
+# PITCHIMPAIR___zanburu.grupocorreo.es___194.30.32.113___20040614-190127
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.7
+    export TARG_AYT="277a7150 faa87f10 d64f01cc"
+    [ "$UTC_OFFSET" ] || export UTC_OFFSET=120
+}
+
+TEST____________bob.bob.com_____________________1.2.3.4() {
+# TEST___bob.bob.com___1.2.3.4___20070907-111900
+    ## INCISION Version:4.10.2.13 OS:sparc-sun-solaris2.6
+    export TARG_AYT="3a098dbb 3ed7c38a 3be9659b"
+}
+
+TEST____________test.test_______________________1.2.3.4() {
+# TEST___test.test___1.2.3.4___20060721-155412
+    ## INCISION Version:4.10.3.1 OS:sparc-sun-solaris2.9
+    export TARG_AYT="e3637fba a7d9dd40 95a01656"
+}
+
+########## 231 INCISION keys included above ##########
+
+
+##
+## Utility functions
+##
+
+setupkeys() {
+	local host=$1
+
+	case $host in
+		-h | -?	  ) usage		;;
+		*	  )
+			if [ $keys ]; then
+				$keys
+				return
+			fi
+
+			echo
+			echo -e "\t--- Select target keys ---"
+			echo
+
+			PS3=$(echo -e "\nkeys? ")
+			select keyinitfct in $keylist; do
+				if [ $keyinitfct ]; then
+					$keyinitfct
+					break
+				else
+					echo "Select a listed number."
+					echo
+				fi
+			done
+			;;
+	esac
+}
+
+ckupgrade() {
+	if [ ${O_TARG_AYT:+1} ]; then
+		echo -n "Do you want to use the old keys? [n] "
+		read ans
+		if [ ${ans:-"n"} = "y" ]; then
+			export TARG_AYT_new=$TARG_AYT
+			export TARG_AYT=$O_TARG_AYT
+		fi
+	fi
+}
+
+setupdns() {
+	if [ $rootdns ]; then
+		$rootdns
+		return
+	fi
+
+	echo
+	echo -e "\t--- Select root DNS server for trigger ---"
+	echo
+
+	PS3=$(echo -e "\nDNS? ")
+	select rootdns in $dnslist; do
+		if [ $rootdns ]; then
+			$rootdns
+			break
+		else
+			echo "Select a listed number."
+			echo
+		fi
+	done
+}
+
+dooptions() {
+	getipaddr
+	local i_opt="-i $ip "
+	local o_opt=${UTC_OFFSET:+"-o $UTC_OFFSET "}
+
+	n=1
+        g_set=0
+	while [ $# -gt 0 ]; do
+		case $1 in
+		-i | -c )	i_set=1
+                                L_ip=${2%:*} ;; # xmit trigger from this IP addr
+		-o )		o_set=1 ;;	# make a time adj. in trigger
+		-l )		l_set=$n ;;	# use local IP for trigger
+		-g )		g_set=1 ;;  # WRT: Are we using a gateway ?
+		esac
+
+		## Build arg list without the "-l" option.
+		[ ${l_set:-0} -eq $n ] || no_l=$(echo "$no_l $1 ")
+
+		n=$((n+1))
+		shift
+	done
+
+	[ ${i_set:+1} ] || tn_options=$(echo "$tn_options $i_opt ")
+	[ ${o_set:+1} ] || tn_options=$(echo "$tn_options $o_opt ")
+	[ ${l_set:+1} ] && [ $g_set -eq 0 ] && localip && cmdline=$no_l
+        [ ${l_set:+1} ] && [ $g_set -eq 1 ] && remoteip && cmdline=$no_l
+}
+
+getipaddr() {
+    if [ ! "$NOppp" ] ; then
+	ifaddr ppp0
+	[ -n "$ifip" ] && ip=$ifip && echo "using ppp0" && return
+    fi
+
+	ifaddr eth0
+	[ -n "$ifip" ] && ip=$ifip && echo "using eth0" && return
+
+	ip=$(hostname -i)
+}
+
+ifaddr() {
+	ifip=$(ifconfig $1 2> /dev/null | grep "inet addr:" | \
+		cut -d: -f2 | cut -d' ' -f1 )
+}
+
+echoenv() {
+	echo
+	echo "- Environment variable setup..."
+	echo "    DNS_NAME   = $DNS_NAME"
+	echo "    DNS_IP     = $DNS_IP"
+	echo "    DNS_SOA    = $DNS_SOA"
+	echo "    TARG_TEL   = $TARG_TEL"
+	[ ${TARG_AYT_new:+1} ] &&
+	echo "    TARG_AYT   = $TARG_AYT_new   resetting to old keys..."
+	echo "    TARG_AYT   = $TARG_AYT"
+	[ ${O_TARG_AYT:+1} ] && echo "    O_TARG_AYT = $O_TARG_AYT"
+	[ ${UTC_OFFSET:+1} ] && echo "    UTC_OFFSET = $UTC_OFFSET"
+	echo
+}
+
+usage() {
+	echo
+	echo "  $0 is a bash shell script that sets up the"
+	echo "  environment for \`ish', the INCISION shell."
+	echo "  All command line args are passed along to \`ish'."
+	echo "  Options to \`ish' are..."
+	echo
+	ish -h
+	exit
+}
+
+
+##
+## Run the functions to setup the environment for INCISION's shell `ish'.
+##
+
+eval targ=\${$#}	# note: doesn't handle port arg at end of command line
+setupkeys $targ
+ckupgrade
+setupdns
+dooptions $cmdline
+
+echoenv
+echo running:  ish $tn_options $cmdline
+echo
+
+eval ish $tn_options \$cmdline

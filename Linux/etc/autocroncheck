@@ -1,0 +1,548 @@
+#!/usr/bin/env perl
+$VER="2.0.2.6" ;
+myinit() ;
+#
+#               field          allowed values
+#               minute         0 - 59
+#               hour           0 - 23
+#               day of month   1 - 31
+#               month          1 - 12 (or names, see below)
+#               day of week    0 - 7 (0 or 7 is Sun, or use names)
+
+docroncheck();
+
+# End with true value as we require this script elsewhere.
+1;
+#END MAIN LOGIC SUBS FOLLOW
+
+
+sub docroncheck {
+  if ($noget) {
+    mydie("Cannot use \"noget\" option unless $prog was run once without it")
+      unless open(INCRON,"$optmp/cronfiles.$nopen_rhostname");
+    while (<INCRON>) {
+      chomp;
+      push(@files,$_);
+    }
+  }
+  ($croncheckoutput,$nopenlines,@croncheckoutput) = doit("date ; date -u");
+  dbg("in autocroncheck, croncheckoutput = =$croncheckoutput=");
+  # In case there are errors AND valid dates in this output, 
+  # we clean those out:
+  @croncheckoutput = grep /(\d\d:\d\d\s|Sun |Mon |Tue |Wed |Thu |Fri |Sat )/,
+    @croncheckoutput;
+  if ($croncheckoutput eq "" or !$croncheckoutput) {
+    # Try again with -time.
+
+    ($timeoutput,$nopenlines,@timeoutput) = doit("-time");
+    foreach (@timeoutput) {
+      #dbg("in autocroncheck, timeoutput = =$_=");
+      next unless /^Remote.+\s(\S+)\s(\S+)\s+(\d{1,2})\s(\d{2}:\d{2}:\d{2})\s(\d{4})$/;
+      push(@croncheckoutput,"$1 $2 $3 $4 GMT $5");
+    }
+    myalert("Unable to continue; cannot get date/time from target");
+    return 0;
+  }
+  $ourgmt = gmtime();
+  $ourgmt =~ s/(\d\d\d\d)$/GMT $1/;
+  my @retval =  targettime(@croncheckoutput) ;
+  unless (@retval) {
+    return 0;
+  }
+  ($min,$hr,$mday,$mon,$wday,$loctime,$gmttime) = @retval;
+  unless (@files and !$forcedownload) {
+    # Not as simple as hoped...
+    #
+    # Because we need the original file listings to get the local paths,
+    # we can't use nopenlss() ourselves. Instead, we have to do the -ls -R
+    # ourselves, process it ourselves and check each path with gotlocalcopy().
+    my @cronfiles = ();
+    ($croncheckoutput,$nopenlines,@croncheckoutput) = doit("-ls -R $crondirs");
+    unless ($croncheckoutput) {
+      myalert("$crondirs do not exist on target");
+      return 0;
+    }
+    processnopenls(\@cronfiles,0,0,$sizecutoff,$croncheckoutput,$nopenlines,@croncheckoutput);
+    my (@crongets,$localcopy,$remotecopy) = ();
+    foreach (@cronfiles) {
+      ($localcopy,$null,$remotecopy,$null) = gotlocalcopy("$_");
+      next if ($localcopy and !$forcedownload);
+      dbg("in autocroncheck, pushing file =$_= =$remotecopy= to crongets array");
+      push(@crongets,"$_");
+    }
+    while (@crongets >= 100) {
+      my $listing = " ".join("\n ",@crongets);
+      my $now = "";	
+      my ($ans,$longans) = ("c","continue");
+      ($ans,$longans) = mygetinput
+	(".\n\n\nCRON LISTING THUS FAR HAS ".scalar @crongets." entries.\n\n".
+	 $listing."\n\n".
+	 "ABOVE CRON LISTING$now HAS ".scalar @crongets." entries.\n\n".
+	 "If you just want to pull them all, the default will do so.\n".
+	 "If instead you would like to slim down the list, enter a perl\n".
+	 "regexp to filter OUT some of the files.\n\n".
+	 "Either <S>kip the rest of autocroncheck, <C>ontinue, or enter some regular expression:","C","S","A",
+	) unless $gbl_nopromptsplease;
+      $ans = "s" if ($ans eq "a");
+      $now = " NOW";
+      last if ($ans eq "c" and $longans =~ /^c(ontinue){0,1}/i);
+      if ($ans eq "s" and $longans =~ /^s(kip){0,1}/i) {
+        progprint("User aborted the rest of autocroncheck") ;
+	sleep 4;
+	return 0;
+      }
+      @crongets = grep ! /$longans/ , @crongets ;
+      if (@crongets < 100) {
+	progprint("$COLOR_NORMAL\n\n".
+		  "CONTINUING, CRON LISTING$now HAS ".scalar @crongets." entries.");
+	sleep 3;	
+      }
+    }
+    dbg("in autocroncheck, retrieving these files =@crongets=");
+    
+    # If we have any entries at all in the array, call nopenlss() to retrieve
+    # the missing files. This prevents the wasteful redownloading of files
+    # because of the gotlocalcopy() checks above.
+    if ($crongets[-1]) {
+      my @lssargs = ("-rUFQGYM500000");
+      push(@lssargs,"-T50") unless $forcedownload;
+      ($lssoutput,$nopenlines,@lssoutput) = nopenlss(@lssargs,@crongets);
+    }
+    
+    (@asciifiles,%files) = ();
+    foreach (@cronfiles) {
+      $localfile = "$opdown/$nopen_rhostname$_";
+      $files{$localfile}++;
+    }
+    @files = sort keys %files;
+  }
+  foreach $file (@files) {
+    chomp(my $filecheck = `file $file 2>/dev/null`) ;
+    next unless ($filecheck =~ /(text|ascii)/i) ; # skip pesky binaries
+    next if ($filecheck =~ /shell/i) ; # skip pesky shell scripts
+    push(@asciifiles,$file);
+    if (($basefile) = $file =~ /(.*)\.\d+$/) {
+      # Skip dupes
+      next unless `diff $file $basefile` ;
+    }
+    if ($skipbaks and $file =~ /(\.bak|\.sav)/ ) {
+      $skippedfiles .= "\n\t$file" ;
+      next ;
+    }
+  $file =~ s,/current/(down|up|bin|etc|tmp)/../down,/current/down,;
+  push(@usetheselocalfiles,$file);
+  }
+  foreach $file (@usetheselocalfiles) {
+    ($size,$tmpfile) = `find $file -ls | cut -c 50-999`
+      =~ /^\s*(\d+)\s*(.*)\s*/;
+  #  my ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,$atime,
+  #      $mtime,$ctime,$blksize,$blocks) = stat($file);
+    $tmpfile =~ s,/current/down,../down,;
+    $uniquefiles .= sprintf("%7d %s\n",$size,$tmpfile);
+    $uniquefiles2 .= " $file" ;
+  #  progprint("In $file:\n");
+    unless (open(IN,"< $file")) {
+      mydie("cannot open $file");
+    }
+
+    while ($line = <IN>) {
+      next unless $line ;
+      next if $line =~ /^\#/ ;
+      parsecronline($line) ;
+      #$duh = <STDIN> ;
+    }# while (<IN>)
+    close(IN) ;
+    if (%{$warning{$file}}) {
+      my $tmp;
+      my @firetimes = sort by_num keys( %{$warning{$file}}) ;
+      $finaloutput .= "\nLINES FROM $file (minutes-until-fire: line)\n".
+        "$COLOR_FAILURE" ;
+        foreach my $t (@firetimes) {
+  	  $finaloutput .= sprintf("%02d:\t%s",$t,$warning{$file}{$t}) ;
+        }
+      $finaloutput .= "$COLOR_NOTE" ;
+    }
+  }# foreach $file
+  open(OUTCRON,"> $opdown/autocroncheckall.$nopen_rhostname") || die $! ;
+  print OUTCRON "Fire times shown from target LOCAL time:
+  their LOCAL: $loctime\ntheir   GMT: $gmttime\n  our   GMT: $ourgmt\n\n" ;
+  foreach (sort by_num keys %fires) {
+    # keys %fires are the timediffs
+    my $timestr = timetostr($_,"min") ;
+    print OUTCRON "Fires in $timestr ($_ minutes):\n$fires{$_}\n" ;
+  }
+
+  close(OUTCRONALL);
+  my $popwarn=0;
+  if ($finaloutput) {
+    $popwarn=1;
+    # $COLOR_NOTE for most of this output $COLOR_FAILURE for a few good lines
+    $finaloutput = "$who: THE FOLLOWING CRON TABLE ENTRIES WILL FIRE IN ".
+      "UNDER$COLOR_FAILURE $maxdiff MINUTES$COLOR_NORMAL:\n$finaloutput" ;
+  }
+  $finaloutput .= "\nTo see all cron entries sorted by fire-time:${COLOR_FAILURE}\n-lsh cat $opdown/autocroncheckall.$nopen_rhostname\n$COLOR_NOTE\n" ;
+  $finaloutput .= "### PASTABLES to list out files first (don't get giant ones)\n$pastables1\n\n" if $pastables1 ;
+  $finaloutput .= "### PASTABLES to maybe get files if not giant\n$pastables2" if $pastables2 ;
+
+  my $newuniquefiles = `echo -e \"$uniquefiles\" | lss 2>/dev/null`;
+  $uniquefiles = $newuniquefiles if (length $newuniquefiles);
+  $finaloutput .= "\nUnique $who crontabs now in $opdown (sorted by mtime):\n".$uniquefiles;
+
+  if (@asciifiles) {
+    # Add one or more -lsh more lines, making sure each is at most 2048 characters long
+    my ($moreline) = "";
+    $finaloutput .= "\nTake a look at the raw crontab files (sans comments) with this\n".
+      " in any NOPEN window (triple click it):${COLOR_FAILURE}\n\n";
+    while (@asciifiles) {
+      my $file = pop(@asciifiles);
+dbg("On $file");
+      $moreline .= "$file ";
+      if (2048 - length $moreline - 43 <= 0) {
+        $finaloutput .= "-lsh cd $opdown ; more $moreline | grep -v \"^#\"";
+        $moreline = "";
+      }
+    }
+    $finaloutput .= "-lsh cd $opdown ; more $moreline | grep -v \"^#\""
+      if $moreline;
+  }
+
+  $finaloutput .= "\n${COLOR_FAILURE}SKIPPED$COLOR_NOTE processing of these backup files: $skippedfiles\n" if $skippedfiles ;
+
+
+  unless ($noget) {
+    if (open(OUTCRON,"> $optmp/cronfiles.$nopen_rhostname")) {
+      foreach (@files) {
+        print OUTCRON "$_\n";
+      }
+    } else {
+      mydie("Cannot write $optmp/cronasciifiles.$nopen_rhostname");
+    }
+  }
+
+  if ($popwarn) {
+    dolocalecho("$finaloutput",1,
+	    "popup +cm -geometry 198x64+39+31 -font 6x12 ".
+	      "-title AUTOCRONCHECK-$who");
+    $more = "See popped up window with the same output shown here.";
+  } else {
+    $more = "No cron entries fire in under $maxdiff minutes.";
+  }
+
+  if ($nopen_server_os =~ /linux/i) {
+    $more2 .= "\n$COLOR_NOTE\nNOTE:$COLOR_FAILURE On this Linux system, there are likely shell scripts that
+$prog cannot process. All cron related files downloaded are being
+popped up in another window. $COLOR_NOTE SCAN THEM MANUALLY!!
+";
+  }
+  # TODO: OK need to do second window popup when linux
+  # But print it to noclient window either way
+  progprint(" \n\n\n\nProcessing done. $more\n".
+  	  $finaloutput.
+  	  $more2);
+
+  return 1;
+}#docroncheck
+
+sub timediff {
+  local ($min,$hr,$mday,$mon,$wday) = (@_) ;
+  # globals: ($cmin,$chr,$cmday,$cmon,$cwday) = cronline entries ;
+  # returns number of minutes until next firing of
+  # cron time ($cmin,$chr,$cmday,$cmon,$cwday) based on
+  # curr time ($min, $hr, $mday, $mon, $wday)
+  my $diff = 0;
+  unless ($cmin eq "*") {
+    if ($min <= $cmin) {
+      $diff += $cmin - $min ;
+    } else {
+      $diff += $cmin + 60 - $min ;
+      $hr++ ;
+    }
+  }
+  unless ($chr eq "*") {
+    if ($hr <= $chr) {
+      $diff += 60 * ($chr - $hr) ;
+    } else {
+      $diff += 60 * ($chr + 24 - $hr);
+      $mday++ ;
+      $wday++ ;
+    }
+  }
+  if ($cwday eq "*") {
+    unless ($cmday eq "*") {
+      if ($mday <= $cmday) {
+	$diff += 24 * 60 * ($cmday - $mday) ;
+      } else {
+	$diff += 24 * 60 * ( $mday + $cmday);
+	$mon++ unless ($cmon eq "*");
+      }
+    }
+    unless ($cmon eq "*") {
+      if ($mon <= $cmon) {
+	$diff += 60 * ($cmon - $mon) ;
+      } else {
+	$diff += 60 * (24 - $mon + $cmon);
+	$what++ unless ($cwhat eq "*");
+      }
+    }
+  } else { # We have a day-of-week fire
+    $cwday = 0 if ($cwday == 7) ;
+    if ($wday <= $cwday) {
+      $diff += 24 * 60 * ($cwday - $wday) ;
+    } else {
+      $diff += 24 * 60 * ($cwday + 7 - $wday);
+    }
+  }
+  return $diff ;
+}#timediff
+
+sub targettime {
+  local (@dates) = (@_);
+  my ($tl,$tg)=@dates;
+  # NOTE: This regexp has been modified. It should now match a properly formatted date output such as
+  # Sat Jan 01 00:00:01 GMT 2009, a slightly broken date output like Sat Jan 01 00:00:01 GMT EDT 2009,
+  # or a thoroughly broken one such as Sat Jan 01 00:00:01 BORK BORK BORK 2009
+  unless ($tl =~ /((Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)\s+(\d\d):(\d\d):(\d\d)\s+(\S*){0,1}\s+(\S*\s*)*\s*(\d\d\d\d))/ ) {
+    myalert("Malformed date output from target: $tl");
+    return ();
+  }
+
+  my ($all,$daystr,$monstr,$mday,$hr,$min,$sec,$tz,$year,$altyear) = 
+    ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10);
+  # NOTE: Because $tz is sometimes set to bad and invalid values, we need to assume _something_ so that
+  # autocroncheck doesn't explode. Assume GMT.
+  $tz = "GMT" if ($tz eq "" or $all =~ /.*Local time zone.*/);
+  # Make sure the year is set from $altyear if we get bogus values from the regexp in $year.
+  $year = $altyear if ($year !~ /^\d{4}$/ and $altyear =~ /^\d{4}$/);
+  mydie("Malformed date -u output from target: $tg")
+    unless $tg =~ /((Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)\s+(\d\d):(\d\d):(\d\d)\s+(\S*){0,1}\s*(\d\d\d\d))/ ;
+  my $mon = $mon{uc $monstr};
+  my $wday = $day{uc $daystr};
+  return($min,$hr,$mday,$mon,$wday,$tl,$tg) ;
+}# targettime
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs croncheck @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+  }
+  $who = uc $nopen_rhostname ;
+  mydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless $nopen_rhostname;
+  mydie("bad option(s)") if (! Getopts( "hvl:Rm:AF" ) ) ;
+  while ( my $arg = shift @ARGV ) {
+    if (lc $arg eq "noget") {
+      my $checkfiles = `find $opdown/$nopen_rhostname 2>&1 | grep cron` ;
+      # Only skip getting if we already have them
+      $noget++ if (length($checkfiles));
+      next ;
+    } else {
+      mydie("arguments must be full paths") unless ($arg =~ /^\//) ;
+      push(@moredirs,$arg);
+    }
+  }
+  $skipbaks = (!$opt_A) ;
+  # Want to return right away so parent exits and both close stdin/out
+  # Only output: Via popped up windows.
+  $maxdiff = 200 ;
+  $maxdiff = int($opt_m) if ($opt_m and $opt_m == int($opt_m) and $opt_m > 0) ;
+  # Defaults
+  # Do not want to ever treat these as -get pastables
+  foreach $badfile ("/dev/null") {
+    $gotpastable{$badfile}++;
+  }
+  $defsizecutoff = 500 ;
+  # look where for crontabs
+  my $defcrondirs = "/var/spool/cron/ /etc/cron.d /etc/crontab /etc/periodic" ;
+  if ($nopen_server_os =~ /linux/i) {
+    $defcrondirs = "/var/spool/cron/ /etc/cron\\* /etc/crontab" ;
+  }
+#  if ($nopen_server_os =~ /freebsd/i) {
+#    $defcrondirs = "/etc/crontab";
+#  }
+  if ($nopen_server_os =~ /darwin/i) {
+    $defcrondirs .= " /Library/Launch\\* /System/Library/Launch\\*";
+  }
+  $crondirfile = "$optmp/.crondirs.$nopen_rhostname" ;
+  if (! -e "$crondirfile" or $opt_R) {
+    if (open(OUTCRON,"> $crondirfile")) {
+      print OUTCRON "$defcrondirs @moredirs\n";
+      close(OUTCRON);
+    } else {
+      mydie("Unable to open > $crondirfile");
+    }
+  }
+  mydie("Unable to open < $crondirfile") unless (open(IN2,"< $crondirfile")) ;
+  chomp($crondirs = <IN2>) ;
+  if (@moredirs) {
+    $crondirs = " $crondirs " ;
+    foreach (@moredirs) {
+      $crondirs .= "$_/ " unless $crondirs =~ / $_\/ / ;
+    }
+    $crondirs =~ s/  / /g ;
+    $crondirs =~ s/\/\//\//g ;
+    $crondirs =~ s/^\s*(.*)\s*$/\1/g ;
+    if (open(OUTCRON,"> $crondirfile")) {
+      print OUTCRON "$crondirs\n";
+      close(OUTCRON);
+    } else {
+      mydie("Unable to open > $crondirfile second time");
+    }
+  }
+  close(IN2) ;
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"-gs croncheck\" is used.
+
+";
+  $gsusagetext="Usage: -gs croncheck [options] [ dir [dir2] ... ]
+
+-gs croncheck lists cron directories recursively, then uses that output
+to determine which crontab files to bring back. Large files (over ${defsizecutoff}K
+by default) are skipped.
+
+If any crontab entries will fire in the next $maxdiff minutes (see -m# below),
+they are shown in a LARGE popup window, sorted by time, with pastables to
+maybe -ls or -get files/directories referenced by those crontab entries.
+
+If a \"dir\" is provided (must start with \"/\") it is also listed (this time
+and in future uses of autocroncheck for this host). Currently for
+$nopen_rhostname, these cron directories will be listed:
+
+           $crondirs
+
+OPTIONS
+
+  -l #     size, in K, greater than which NOT to download (default: ${defsizecutoff})
+  -R       reset log directories for this host to: /var/log /var/adm
+  -m #     # of minutes into future to show what will fire (default: $maxdiff)
+  -F       Force fresh download of crontabs, default re-uses ones already
+           downloaded previously.
+  -A       process ALL files found (default: skip .sav* and .bak* files)
+
+";
+  usage() if ($opt_h or $opt_v) ;
+  # How large to download?
+  $forcedownload = $opt_F;
+  $sizecutoff = $defsizecutoff ;
+  $sizecutoff = int($opt_l) if ($opt_l > 0 and ($opt_l == int($opt_l))) ;
+  $sizecutoff = $defsizecutoff if $sizecutoff > 1000000 ;
+  # now put it in bytes
+  $sizecutoff *= 1024 ;
+
+  %mon=(JAN,1,FEB,2,MAR,3,APR,4,MAY,5,JUN,6,JUL,7,AUG,8,SEP,9,OCT,10,NOV,11,DEC,12);
+  %day=(SUN,0,MON,1,TUE,2,WED,3,THU,4,FRI,5,SAT,6) ;
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+}#myinit
+
+sub parsecronentry {
+  local(@arr) = (@_);
+  my @lim = (60,24,32,13,8) ; # high end for ranges by field (min,hr,day,mo,dow)
+  return () if ($#arr < 4) ;
+  for (my $i=0 ; $i <= 4 ; $i++) {
+    if ($arr[$i] =~ /^(\d+)\/(\d+)$/ ) {
+      my $inc = int($2);
+      next unless $inc == $2;
+      my $comma = "" ;
+      $arr[$i] = "" ;
+      for (my $j=0 ; $j<$lim[$i] ; $j+=$inc) {
+	$arr[$i] .= "$comma$j" ;
+	$comma=",";
+      }
+    }
+  }
+  return @arr ;
+}
+
+sub parsecronline {
+  local ($_) = (@_);
+    s/[ \t]+/ /g;
+    ($cmin,$chr,$cmday,$cmon,$cwday) = parsecronentry(split) ;
+    @mn = split(/,/,$cmin) ;
+    @h  = split(/,/,$chr) ;
+    @d  = split(/,/,$cmday) ;
+    @m  = split(/,/,$cmon) ;
+    @w  = split(/,/,$cwday) ;
+    return unless(@mn and @h and @d and @m and @w) ;
+    foreach $cmin (@mn) {
+      foreach $chr (@h) {
+	foreach $cmday (@d) {
+	  foreach $cmon (@m) {
+	    foreach $cwday (@w) {
+	      $timediff = timediff($min,$hr,$mday,$mon,$wday) ;
+	      $fires{"$timediff"} .= $_ ;
+	      if ( ! $mindiff{$_} or $timediff < $mindiff{$_}) {
+		$mindiff{$_} = $timediff;
+	      }
+	      if ( ! $maxdiff{$_} or $timediff > $maxdiff{$_}) {
+		$maxdiff{$_} = $timediff;
+	      }
+	      if ($timediff < $maxdiff) {
+		$gotit{$timediff}{$_}++ ;
+#		sprintf($tmp,"%4d: %s",$timediff,$_) ;
+		$warning{$file}{$timediff} .= $_ ;
+		if ((@getfiles) = /(\/\S+)/g ) {
+		  foreach $getfile (@getfiles) {
+		    next if ($getfile =~ /^\/\d+$/) ;
+		    if ($getfile =~ m,[^\"].*\"$,) {
+		      chop($getfile);
+		    }
+		    unless ($gotpastable{$getfile}++) {
+		      $pastables1 = "-ls -R" unless $pastables1 ;
+		      $pastables1 .= " $getfile" ;
+		      $pastables2 .= "-vget $getfile\n" ;
+		    }
+		  }
+		}
+#		$warning{$file} .= $tmp unless
+		  $gotit{$file}{$_}++ ;
+	      }
+    } } } } } # $mn $hr $d $m $w
+
+}#parsecronline
+
+sub timetostr {
+  local ($total,$unit) = (@_) ;
+  $total *= 60 if ($unit eq "min") ;
+  # so $total is now in seconds
+  my $secs = $total % 60 ;
+  $total -= $secs;
+  my $mm = ($total/60) %60  ;
+  $total -= $mm * 60 ;
+  my $hh = (($total/60)  / 60) % 24  ;
+  $total -= $hh * 60 * 60 ;
+  my $dd = (($total/60)  / 60) / 24  ;
+  my $ssout = "$secs}s " unless ($unit eq "min") ;
+  my $mmout = "${mm}m " if $mm > 0;
+  my $hhout = "${hh}h " if $hh > 0;
+  my $ddout = "${dd}d " if $dd > 0;
+  return "$ddout$hhout$mmout$ssout" ;
+}
+
+__END__
+    $mm = $_ % 60 ;
+    if ($_ > 60) {
+      $hh = ($_ - $mm) / 60 ;
+      $hhout = "${hh}h " ;
+    }
+    if ($hh > 24) {
+      $dd = int ($hh / 24) ;
+      $dd .= "d " ;
+      $hh -= 24 * $dd ;
+      $hhout = "${hh}h " ;
+    }

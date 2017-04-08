@@ -1,0 +1,86 @@
+##### DRAFTBAGGER #####
+
+### Assumes have already talked to SNAT via SnatLp
+
+### Search/replace commands
+:%s/ROUTER_IP/ROUTER_IP/g
+:%s/PROXY_IP/PROXY_IP/g
+:%s/RADIUS_IP/RADIUS_IP/g
+:%s/RANDOM_HIGH/RANDOM_HIGH/g
+
+
+### These aren't really means to be used as search/replace in this script, more 
+### placeholders for the example commands, but here are the commands anyway,
+### commented out so you really shouldn't run them
+#:%s/LOCAL_TUNNEL_COMMANDS_PORT/LOCAL_TUNNEL_COMMANDS_PORT/g
+#:%s/NOPEN_PID/NOPEN_PID/g
+#:%s/PARTIAL_MATCH_TARGS/PARTIAL_MATCH_TARGS/g
+#:%s/EXACT_MATCH_TARGS/EXACT_MATCH_TARGS/g
+
+
+### get the date of the current radius log on the radius server
+-lt /var/log/radius/  # (find the most current, should be last file in list)
+-lt /var/log/radius/<date> # (file needed is the acct.log file)
+
+
+### run the following from radius server
+-gs parse_rads -h # (for -gs parse_rads usage syntax)
+
+-gs parse_rads ROUTER_IP RANDOM_HIGH /var/log/radius/CURRENT_DATE/acct.log
+
+
+### Will check to make sure the log file exists, check to makes sure the
+### "-tunnel LOCAL_TUNNEL_COMMANDS_PORT udp" command was run, and then
+### starts a "tail -f" on the logfile to constantly bring the file home, 
+### this gives you two pastables: a "-tunnel PORT udp" command to run on the
+### radius server, and a "parse_rads.pl" one to run in a locally scripted window
+
+
+### run the "-tunnel" (use the one spit out, the one below is an example) on
+### the box that will be talking to SNAT
+-tunnel LOCAL_TUNNEL_COMMANDS_PORT udp 
+
+
+### IN A LOCALLY SCRIPTED WINDOW (pastable given by -gs parse_rads command)
+parse_rads.pl -h         # for help with pastable options (run locally)
+
+
+### Below is an example command, will need to use the pastable spit out by
+### "-gs parse_rads" for the current session, but some things will need to
+### be added to the command spit out, i.e. -p/-P args (phone numbers), the
+### -R arg (treat already downloaded data as real-time, i.e. set up initial
+### rules based on it), the IP address of the proxy, and any other stuff to
+### play with
+###
+### -N -a -i are filled in by -gs parserads.  Others need to be added manually
+
+PORT=LOCAL_TUNNEL_COMMANDS_PORT parse_rads.pl -NRADIUS_IP:NOPEN_PID -a127.0.0.1:RANDOM_HIGH -i/current/down/HOSTNAME.RADIUS_IP/var/log/radius/CURRENT_DATE/acct.log -p PARTIAL_MATCH_TARGS -P EXACT_MATCH_TARGS -R PROXY_IP
+
+### Will ask for pager numbers, and ask for confirmation that a sufficiently
+### up-to-date version of SNAT is being used, go ahead and confirm these
+
+### Should be able to get other instructions for DRAFTBAGGER UI
+
+
+### when Op is complete, in the DB command window, run the following to close out
+### NOTE: ANSWER "no" TO THE PROMPT ASKING WHETHER TO KEEP THE SNAT
+###       FILTERS ACTIVE
+diediedie
+
+### Ctrl-C your "tail -f" command on RADIUS server, or kill the appropriate pid
+
+### In a local window, you can use the scripts "closetunnel" and "dotunnel" to
+### interact with a -tunnel listening on a port for commands rather than stdin
+### (i.e. "-tunnel LOCAL_TUNNEL_COMMANDS_PORT udp")
+### "dotunnel" will send all command line args to that port for -tunnel to get
+### "closetunnel" has hard-coded "c 1 2 3 4 5 6 7", and then "q"...this will
+### get the Nopen prompt back
+
+# Examples:
+dotunnel s
+dotunnel l 1390 1.2.3.4 139
+closetunnel
+
+### CLOSE OUT THE REST OF THE OP AS YOU WOULD NORMALLY
+
+

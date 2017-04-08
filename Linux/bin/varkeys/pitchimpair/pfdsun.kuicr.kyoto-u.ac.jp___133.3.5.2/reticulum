@@ -1,0 +1,20 @@
+INTONATION___pfdsun.kuicr.kyoto-u.ac.jp___133.3.5.2___20020702-135908() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.6 
+    #
+    set host pfdsun.kuicr.kyoto-u.ac.jp
+    set ip 133.3.5.2
+    set hostType "Solaris26"
+    set len 476
+    set cv0 fd788d6d
+    set cv1 1625c4c2
+    set cv2 8e44f9b9
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

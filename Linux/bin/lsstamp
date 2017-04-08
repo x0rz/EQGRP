@@ -1,0 +1,393 @@
+#!/usr/bin/env perl
+$VER="1.15.2.6";
+# ===============
+# 05 SEP 2013
+# Year was wrong with this format: Sep 04 14:18 2013
+# ===============
+# 28 FEB 2011
+# fixed bug: Missed years embedded in a line like this: Fri Feb 18 12:12:43 EST 2011: anchorpig.
+# ===============
+# 08 FEB 2008
+# fixed bug: last bugfix introduced a new one. It found the bad YYYY at the end of the line first,
+# ignoring the one IMMEDIATELY after the time. Duh.
+# ===============
+# 14 JAN 2008
+# fixed bug: bogus year in line like this:
+# 985401141611:738096  692 -rw-r--r--   1 root     root       700212 Jan 14 16:11 /current/down/script.19854
+# ===============
+# 09 NOV 2007
+# fixed bug: lost the year in input like this: Fri Nov 9 13:58:24 EST 2007
+# (because of the EST). Now the year may be the first or second word after the timestamp.
+# ===============
+# 10 JUN 2003
+# added -r option - like -s but newest first
+# -s is now default and ignored. -S shuts off sorting.
+# ===============
+# 08 OCT 2002
+# added -d option - directory entries not printed
+# ===============
+# 20 JULY 2002
+# fixed bug - /tmp/.lss$$ files not being wiped with unlink...
+# ===============
+# 23 May 2002
+# added -v and invalid option now terminates. 
+# usage now prints error before and after usagetext
+# ===============
+# 28 feb 2002
+# added -z option
+# ===============
+# 07 jan 2002
+#
+# now also allows for both time and year on same line, in that order,
+# a la nopen's -ls:
+#
+# eliminated bug where "Out" was a valid month--now must be in %nummon
+#
+#
+# Following from `man ls`:
+#                         If  the file is a special file, the size
+#               field instead contains the major and minor  device
+#               numbers.  If  the  time  of  last  modification is
+#               greater than six months ago, it is  shown  in  the
+#               format  `month  date  year'  for the POSIX locale.
+#               When the LC_TIME locale category is not set to the
+#               POSIX locale, a different format of the time field
+#               may be used. Files modified within six months show
+#               `month date time'.
+# ===============
+#  Aug 24  1999 >> time arbitrarily set to 0800
+#
+# look for timestamp in STDIN lines like any of:
+#  Mar 28 00:31 >> assume year =
+#                  1:year of file's mod time or year-1 if a filename is
+#                    given as argument and date found in line is within
+#                    six months before that time
+#                  2:current year if no filename on command line (STDIN)
+#
+
+myinit();
+
+#print STDERR "Using base time of $basetimestr for files not showing any year.\n\n";
+#sleep 1;
+
+$opt_C = 1 if ( $opt_c + $opt_C == 0 );
+$sizesum = 0;
+while (<>) {
+  # i.e. STDIN if redirected, file name on command line otherwise
+#dbg("LINE=$_=");
+  $count = $opt_c + $opt_C;
+  $rest = $_;
+  $origline = $_ ;
+  while ($count-- > 0) {
+    $matched = ($strmon,$day,$yearortime,$rest) =  $rest =~
+      /([ADFJMNOS][aceopu][bcglnprtvy])\s*([0-9]+)\s+([0-9:]*)\s+(.*)/ ;
+    $yearortime =~ s,:+$,,;
+#    dbg("
+#matched $matched = ($strmon,
+		#$day,
+		#YYEARORTIME=$yearortime=,
+		#REST=$rest=)
+#");
+#sleep 2;
+  }
+  # checks for Jan|Feb|Mar|Apr|etc...
+  # next line omits things like "Out"
+  if ($matched == 4 && $nummon{$strmon}) {
+    $nummon = $nummon{$strmon} + 1;
+    $nummon = &numpadto($nummon,2);
+    $day = &numpadto($day,2);
+    if ($yearortime =~ /(\d{4})($|:)/) {
+      $year = $1;
+      $time = "00:01";
+    } elsif (! ($yearortime =~ /\d{4}/) and $rest =~ /^\s*(\d{4})($|\D)/) {
+      $year = $1;
+      $time = $yearortime;
+    } else {
+      undef $year;
+      #dbg("post undef y=$y= year=$year yearortime=$yearortime");
+      $time = $yearortime;
+      my $y = "";
+      $y = $1 if ($rest =~ /\D(\d{4})(\D|$)/i);
+#dbg("y2=$y=");
+      unless ($y) {
+        $y = $1 if ($rest =~ /^(\d{4})(\D|$)/i);
+      }
+      #dbg("post undef y=$y= year=$year yearortime=$yearortime");
+
+#dbg("y0=$y=");
+      unless ($y) {
+	$y = $1 if ($rest =~ /\D(\d{4})(\D|$)/i);
+#dbg("y1=$y=");
+      }
+      my $ind = index($rest,$y);
+      #dbg("year starts as $year--maybe year=$1? ind=$ind or maybe y=$y=?");
+#dbg("matched $matched tokens ($strmon,$day,$yearortime,$rest) and $nummon{$strmon} gives us month number $nummon");
+      # If this match is not too far from the time and 
+      # not unreasonable  (fine, so we're not Y3K complient....sue me
+      #dbg("index(\$rest,$1) is ".scalar index($rest,$1));
+      if ($ind >= 0 and $ind < 10 and $y < 3000) {
+	$year = $y;
+#dbg("year is now $year");
+      }
+#dbg("$strmon=$nummon $day $time $year");
+      if (! $year) {
+	# need to compute $year here...
+	if ($nummon <= $basemonnum) {
+	  $year = $baseyear;
+	} else {
+	  $year = $baseyear - 1;
+	}
+      }
+    }
+    ($hr,$min) = $time =~ /(\d\d):(\d\d)/;
+    $hr  = &numpadto($hr,2);
+    $min = &numpadto($min,2);
+    #$sec = "00";
+    $nopenls = / \| [^|]* \| [^|]* \| [^|]* \|/ ;
+    if ( $opt_c ) {
+      $opt_c == 1 && s/ \| ([^|]*) \| [^|]* \| [^|]* \|[^\/]*/ \1 /  ;
+      $opt_c == 2 && s/ \| [^|]* \| ([^|]*) \| [^|]* \|[^\/]*/ \1 /  ;
+      $opt_c == 3 && s/ \| [^|]* \| [^|]* \| ([^|]*) \|[^\/]*/ \1 /  ;
+      my $what = $1 ;
+      s/$1$1/$1/ ; # some have dupes if from cmdout files
+      if ($nopenls) {
+	$origline =~
+	  s/ \| ([^|]*) \| ([^|]*) \| ([^|]*) \|/ \|m $1 \|a $2 \|c $3 \|/ ;
+	print OUT2 "$year$nummon$day$hr$min:$origline" if ($out2);
+      }
+    }
+    unless ($nodirs and /d([rsS-][wsS-][xsStTlL-]){3} /) {
+      print "$year$nummon$day$hr$min:$_" unless ($opt_c == 1 and ! $nopenls);
+    }
+    if ($dosize) {
+      s/ \| / /g;
+      $matched = ($type,$size) =
+	/^(.).*\s+(\d*)\s+[ADFJMNOS][aceopu][bcglnprtvy]\s+\d+\s+/ ;
+      # Here we count only type "-", so no dirs, no links, special files, etc.
+      $sizesum += $size if ($matched and $type eq "-");
+    }
+  }
+  # This block understands tar -tvf format, e.g.:
+  # -rwxr-x--- root/root     28232 2005-12-16 16:57:01 ./path/to/file
+  elsif ($matched = ($year,$nummon,$day,$hr,$min,$sec) =  
+	 /\s(\d{4})\-(\d{2})\-(\d{2})\s+(\d{2}):(\d{2})(:(\d{2})){0,1}\s/) {
+    print "$year$nummon$day$hr$min:$_" unless ($opt_c == 1 and ! $nopenls);
+  } else {
+    print "000000000000:$_" if (! $omit);
+  }
+}#while(<>)
+
+if ( $sort ) {
+  select(STDOUT) ;
+  close(OUT) ;
+  my $r = "-r" if $reverse ;
+  open(IN,"sort $r -k 1,12 < /tmp/.lss$$ |") || die "can't open pipe: $!" ;
+  while ( <IN> ) {
+    $_ = substr($_,13) ;
+    print ;
+  }
+  close(IN) ;
+  unlink("/tmp/.lss$$") ;
+  if ($cuttwo and $nopen_rhostname and !fork) {
+    # If we're building one more file, first fork and close
+    # to give someone back their prompt or whatever.
+    close(STDOUT);
+    close(STDERR);
+    close(OUT2);
+    open(OUT2,"> $out2file") or die "cannot open > $out2file: $!" ;
+    open(IN,"sort $r -k 1,12 < $out2tmpfile |") || die "can't open pipe: $!" ;
+    while ( <IN> ) {
+      $_ = substr($_,13) ;
+      print OUT2;
+    }
+    close(IN) ;
+    unlink("$out2tmpfile");
+    exit ;
+  }
+}
+if ($dosize) {
+  my $index=1;
+  # @size = (bytes,K,M);
+  my @size=($sizesum.".",$sizesum);
+  $size[1] /= 1024;
+  $size[2]=$size[1]/1024;
+  $size[1] = sprintf "%.02f",$size[1];
+  $size[2] = sprintf "%.02f",$size[2];
+  for ($i = 0 ; $i < @size ; $i++) {
+    while ($size[$i] =~ /^\d\d\d\d/) {
+      $size[$i] =~ s/(\d)(\d\d\d)([\.,])/$1,$2$3/;
+    }
+  }
+  chop($size[0]); # Take off that "." we put there so while loop would work
+  printf "\n\nCumulative size (files only): $size[0] bytes    $size[1] K    $size[2] M\n\n";
+}
+# END LOGIC
+sub numpadto() {
+  local($num,$len,@junk) = @_;
+  while ($len > length($num)){
+    $num = "0".$num;
+  }
+  return $num;
+}#numpadto
+sub usage {
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  print $usagetext;
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  exit;
+}#usage
+sub myinit {
+  use File::Basename;
+  require Time::Local;
+  require "getopts.pl";
+  #version:
+  $prog = basename ${0};
+  $opdir = "/current" ;
+  $opetc = "$opdir/etc" ;
+  $opbin = "$opdir/bin" ;
+  $opdown = "$opdir/down" ;
+  $nopen_mypid = $ENV{NOPEN_MYPID} ;
+  $nopen_mylog = $ENV{NOPEN_MYLOG} ;
+  $nopen_rhostname = $ENV{NOPEN_RHOSTNAME} ;
+  $usagetext = "
+Usage: $prog [-hosdz] [-c n | -C n] filename
+       $prog [-hosdz] [-c n | -C n] < stdin
+
+By default, $prog now outputs its results sorted by date, newest last.
+The \"-s\" option is no longer needed to do this (it is now ignored).
+
+ -h    show this usage statement and exit
+
+ -r    reverse sort order, putting newest dates first
+
+ -S    DO NOT sort output on the date found, newest dates last (which is
+       the default mode). This prints a \"YYYYMMDDHHMM:\" timestamp on
+       every line, using all zeros when none found.
+
+ -s    (deprecated but ignored option--this is now the default mode)
+
+ -o    omits lines where no date is found
+
+ -d    do not print directory entries matching this regular expression:
+                   /d([rsS-][wsS-][xsStTlL-]){3} /
+
+ -z    print summary of total of all file size (like du). Best done with:
+            grep \"dir/you/want\" findfile | lsstamp -z
+
+ -c n  uses the nth \" | \" delimited date found on the line, giving no
+       output if dates are not \" | \" delimited (like nopen's -ls does).
+       The other two dates are removed from the output.
+
+ -C n  uses the nth date found on the line (default is 1st), giving a date
+       of \"000000000000:\" if n-1 or less dates are on the line. Dates do
+       not have to be \" | \" delimited, and line is not modified except for
+       \"YYYYMMDDHHMM:\" timestamp.
+
+ -S    $prog takes input and preceeds each line with a timestamp in the
+       form of \"YYYYMMDDHHMM:\", suitable for sorting or grepping. If no
+       date is found in a line (and -o  parameter not used), it is instead
+       preceeded with \"000000000000:\" to preserve column width. Lines with
+       a year instead of HH:MM are set arbitrarily to 00:01. Lines with a
+       timestamp followed immediately by a year will use both the year and
+       time (e.g. nopen -ls command).
+
+       If filename on command line exists, it's modification time is used
+       as a base date for calculating years of files shown with an HH:MM
+       timestamp. If input is from STDIN, current time is used.  Note that
+       files modified within six months of when the output was created
+       show a timestamp of 'month date time' (see 'man ls') instead of
+       'month date year'.
+
+$prog version $VER
+";
+  usage("bad option(s)") if (! &Getopts( "dc:C:ovhszrS" ) );
+  #&Getopts( "c:C:ovhsz" ) ;
+  &usage("-c and -C cannot be used together")  if ($opt_C && $opt_c);
+  $cuttwo = $opt_c;
+  $nodirs = $opt_d;
+  $opt_c = 1 if ($opt_c && $opt_c <= 0) ;
+  $opt_c = int($opt_c);
+  $opt_C = 1 if ($opt_C && $opt_C <= 0) ;
+  &usage if ($opt_h);
+  if ($opt_v) {
+    print "$prog version $VER\n";
+    exit;
+  }
+  $header = "" ;
+  # base digits in time column on current gmtime
+  ($sec,$min,$hr,$mday,$mon,$year,$wday,$yday,$isdst) = gmtime ;
+  $now = Time::Local::timegm($sec,$min,$hr,$mday,$mon,$year,$wday,$yday,$isdst);
+  $timelen = length($now);
+
+  if (($file=$ARGV[0]) && -f $file) {
+    ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,
+     $atime,$mtime,$ctime,$blksize,$blocks) = lstat($file);
+    $basetime = &numpadto($mtime,$timelen);
+    chomp($header = `head $file | grep mtime.*atime.*ctime`) ;
+  } else {			# use current time
+    $file = "" ;
+    $basetime = $now;
+  }
+  $basetimestr =gmtime($basetime);
+  ($tsec,$tmin,$thr,$tmday,$basemonnum,$baseyear) = gmtime($basetime);
+  $basemonnum++;		# now 1=Jan based
+  $baseyear += 1900;
+  # now $sort is default mode--ignore $opt_s for backwards compatibility
+  $sort = ($opt_r or !$opt_S);
+  $reverse = $opt_r ;
+  $omit = $opt_o;
+  $dosize = $opt_z;
+  $out2 = 0 ;
+  $out2file = "" ;
+  $out2tmpfile = "" ;
+  if ($cuttwo and $nopen_rhostname) {
+    my $which = substr("mac",-1 + $opt_c,1);
+    $out2file = basename $file ;
+    $opdir = "." unless (-d $opdown);
+    $out2file =~ s/-find$// ;
+    $out2file = "/tmp/find" unless $out2file ;
+    $out2file .= ".find.sorted.time.all$which" ;
+    $out2tmpfile = "/tmp/$out2file" ;
+    $out2file = "$opdir/$out2file" if $out2file;
+    open(OUT2,"> $out2tmpfile") or die "cannot open > $out2tmpfile: $!" ;
+    print OUT2 "000000000000:   $header\n000000000000:\n" if $header ;
+    $out2 = 1 ;
+  }
+  if ($sort) {
+    open(OUT,"> /tmp/.lss$$") || die "can't open temporary file /tmp/.lss$$ to write: $!";
+    select(OUT) ;
+  } else {
+    select(STDOUT) ;
+  }
+  @mons = ( Jan,		# 0=Jan
+	    Feb,
+	    Mar,
+	    Apr,
+	    May,
+	    Jun,
+	    Jul,
+	    Aug,
+	    Sep,
+	    Oct,
+	    Nov,
+	    Dec,
+	  );
+
+  %nummon = ( Jan, "00",
+	      Feb, "01",
+	      Mar, "02",
+	      Apr, "03",
+	      May, "04",
+	      Jun, "05",
+	      Jul, "06",
+	      Aug, "07",
+	      Sep, "08",
+	      Oct, "09",
+	      Nov, "10",
+	      Dec, "11",
+	    );
+  $debug = 1;
+}
+#sub dbg {
+#  print STDERR "DBG: @_\n";
+#  `echo "DBG: @_" >> /tmp/dammit` ;
+#}

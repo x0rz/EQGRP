@@ -1,0 +1,61 @@
+#!/bin/bash
+BETA=`echo $1 $2 | grep -i beta`
+ALPHA=`echo $1 $2 | grep -i alpha`
+HAVEALPHAUP=0
+HAVEBETAUP=0
+[ "$DIR" ] || DIR=/current
+[ "$DIR" = "." ] && DIR=`pwd`
+if [ "$ALPHA" -a -f "${DIR}/ALPHAwarez/up/morerats.tar.bz2" ] ; then
+    HAVEALPHAUP=1
+    mv ${DIR}/up/morerats.tar.bz2 ${DIR}/ORIGUP.morerats.tar.bz2 2>/dev/null
+    mv ${DIR}/ALPHAwarez/up/morerats.tar.bz2 ${DIR}/up
+fi
+if [ "$BETA" -a -f "${DIR}/BETAwarez/up/morerats.tar.bz2" ] ; then
+    HAVEBETAUP=1
+    if [ $HAVEALPHAUP -gt 0 ] ; then
+	mv ${DIR}/up/morerats.tar.bz2 ${DIR}/ORIGALPHAUP.morerats.tar.bz2 2>/dev/null
+    fi
+    mv ${DIR}/up/morerats.tar.bz2 ${DIR}/ORIGUP.morerats.tar.bz2 2>/dev/null
+    mv ${DIR}/BETAwarez/up/morerats.tar.bz2 ${DIR}/up
+fi
+if [ $HAVEALPHAUP -gt 0 -o $HAVEBETAUP -gt 0 ] ; then
+    if [ ! -e ${DIR}/etc/autoutils -a ! -e ${DIR}/etc/autodone ] ; then
+	if [ -e ${DIR}/*warez/etc/autoutils -a -e ${DIR}/*warez/etc/autodone ] ; then
+	    echo -e "\nWe have NOPEN in ALPHA or BETA but not in ${DIR}/etc*, so:\n\n"
+	    echo -e "COPYING contents of \n\a"`ls -ld ${DIR}/*warez`
+	    echo -e "\nInto ${DIR}/"
+	    cp -prv ${DIR}/ALPHAwarez/* ${DIR}/ 2>/dev/null
+	    cp -prv ${DIR}/BETAwarez/* ${DIR}/ 2>/dev/null
+	fi
+    fi
+fi
+if [ -f "${DIR}/up/morerats.tar.bz2" ] ; then
+    if [ -d "${DIR}/up/morerats" ] ; then
+	echo "Setting aside old morerats:"
+	mv  ${DIR}/up/morerats ${DIR}/UP.morerats.old.$$
+    fi
+    if [ -d "${DIR}/bin/morerats" ] ; then
+	echo "Setting aside old morerats:"
+	mv  ${DIR}/bin/morerats ${DIR}/BIN.morerats.old.$$
+    fi
+    echo -e "\t${DIR}/up/morerats.tar.bz2"
+    sleep 1
+    # Background this whole thing inside {}s with stderr NULLd
+    # This makes a new morerats/, but if the tarball starts at ./morerats,
+    # that gets fixed with the mv commands.
+    {
+	mkdir -p ${DIR}/up/morerats ${DIR}/bin/morerats
+	mv ${DIR}/up/morerats.tar.bz2 ${DIR}/up/morerats
+	cd ${DIR}/up/morerats
+	tar xjf morerats.tar.bz2
+	mv *client* ${DIR}/bin/morerats
+        [ -d ${DIR}/bin/morerats/morerats/ ] && mv ${DIR}/bin/morerats/morerats/* ${DIR}/bin/morerats/  && rmdir ${DIR}/bin/morerats/morerats/
+        [ -d ${DIR}/up/morerats/morerats/ ] && mv ${DIR}/up/morerats/morerats/* ${DIR}/up/morerats/  && rmdir ${DIR}/up/morerats/morerats/
+	chown -hR 0:0 ${DIR}/up/morerats ${DIR}/bin/morerats 2>/dev/null
+	(sum `find ${DIR}/up/morerats -type f` ; find ${DIR}/up/morerats -type f -ls ) 2>/dev/null > ${DIR}/up/morerats/sums 
+	(sum `find ${DIR}/bin/morerats -type f` ; find ${DIR}/bin/morerats -type f -ls ) 2>/dev/null > ${DIR}/bin/morerats/sums 
+    } 2>/dev/null  &
+else
+    # this saves time later for packrat
+    [ -d "${DIR}/up/morerats" ] && (sum ${DIR}/up/morerats/* ; ls -al ${DIR}/up/morerats/* ) 2>/dev/null > ${DIR}/up/morerats/sums &
+fi

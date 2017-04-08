@@ -1,0 +1,20 @@
+PITCHIMPAIR___mtrader2.grupocorreo.es___194.30.32.29___20040614-181443() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.7 
+    #
+    set host mtrader2.grupocorreo.es
+    set ip 194.30.32.29
+    set hostType "Solaris27"
+    set len 476
+    set cv0 6d155859
+    set cv1 364e52ef
+    set cv2 0e7667f7
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

@@ -1,0 +1,40 @@
+
+# DUMPPOPPY op script
+
+# DUMPPOPPY extracts POP3 mail between "RETR ###" commands from a file.
+# 
+# See usage with: dumppoppy -h
+
+
+# Use POP3 RETR commands to retrieve files in a scripted window.
+
+# The backtick here results in the name of your scripted file, though
+# this may fail if the script command does not have the full path to it.
+
+# Where are we putting the mails? Pick one as your DESTDIR.
+
+# The MBOXNAME should be the guy's name or maybe the box' name.
+
+find /current/down/mailpull
+
+# vi pastables
+mp
+:%s,DESTDIR,DESTDIR,g
+:%s,MBOXNAME,MBOXNAME,g
+`p
+
+# dumppoppy command to extract mail -- run in same scripted window you RETRieved it in.
+
+dumppoppy -d DESTDIR MBOXNAME `pschain $$ | grep script.-.*f | grep -v grep | sed "s/.* //g" | sort -u`
+
+
+# OR
+
+# dumppoppy commands to FIND all script files with RETR in them, then run dumppoppy on them.
+
+# Pastable to change  /current/down  to something else (or nothing):
+mp
+%s,/current/down/,,g
+for sc in `grep -l "^RETR [0-9]*$" /current/down/script*` ; do 
+  dumppoppy -d DESTDIR `basename $sc` $sc
+done

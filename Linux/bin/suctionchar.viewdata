@@ -1,0 +1,7 @@
+#!/bin/sh
+
+FILE=`tail -1 manifest | sed -e 's/\([^/]\)*\(.*\)/\2/'`
+DECRYPTED=$FILE.decrypted
+
+../bin/suctionchar.decrypt $FILE $DECRYPTED
+xterm -title 'Decrypted SUCTIONCHAR output' -e view $DECRYPTED &

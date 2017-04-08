@@ -1,0 +1,34 @@
+#!/bin/bash
+
+#
+# $Log: conf.iptables,v $
+# Attempt to identify OS and actual modules needed
+#
+
+# conf.iptables
+#	Run this to make sure you have the proper modules installed in
+#	order to properly run jackladder attacks
+
+KERNEL_VERSION=`uname -r`
+
+case $KERNEL_VERSION in
+	2.4*)
+		[ -n "`awk '/^ipchains/ {print $1}' < /proc/modules`" ] && \
+			rmmod ipchains 
+		IPTABLES=ip_tables
+		isthere=`awk '/^ip_tables/ {print $1}' < /proc/modules`
+		;;
+	*)
+		IPTABLES=iptables
+		isthere=`awk '/^iptables/ {print $1}' < /proc/modules`
+		;;
+
+esac
+[ -z "`awk '/^ip_conntrack/ {print $1}' < /proc/modules`" ] && \
+	/sbin/insmod ip_conntrack 
+[ -z "`awk '/^ip_conntrack_ftp/ {print $1}' < /proc/modules`" ] && \
+	/sbin/insmod ip_conntrack_ftp 
+[ x = x$isthere ] && \
+	/sbin/insmod $IPTABLES
+[ -z "`awk '/^ipt_state/ {print $1}' < /proc/modules`" ] && \
+	/sbin/insmod ipt_state 

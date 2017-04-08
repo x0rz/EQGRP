@@ -1,0 +1,20 @@
+INTONATION___mail.edi.edu.cn___218.104.71.61___20030619-160701() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.7 
+    #
+    set host mail.edi.edu.cn
+    set ip 218.104.71.61
+    set hostType "Solaris27"
+    set len 476
+    set cv0 7c2de6d5
+    set cv1 ec7caee3
+    set cv2 0b1777d6
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

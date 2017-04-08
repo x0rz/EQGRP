@@ -1,0 +1,127 @@
+#!/usr/bin/perl
+
+use Socket;
+use IO::Select;
+close(STDOUT);
+if(fork()){exit 1;}
+
+my $list;
+my $scanth = "";
+#$jscanpath = $ENV{JSCANPATH};
+$nopen = $ENV{NOPEN_MYPID};
+$rhost = $ENV{NOPEN_RHOSTNAME};
+$scandir = "/current/down/cmdout/jscans";
+if($nopen ne "" ){warn"*$nopen*\n";}
+$jscanpath = "/current/bin/jscanner_pkg";
+
+#// Parsing for some key options in the command line given to jscan to spawn jscanner 
+
+while (@ARGV){
+    $ARGV = shift @ARGV;
+#	warn $ARGV;
+#	warn "\n";
+    if($ARGV eq "-ri"){
+# check if redirection address given
+	$list = $list . " " . $ARGV;
+	$raddress = shift @ARGV;
+	$list = $list . " " . $raddress;
+#      warn "raddress: ";
+#      warn $raddress;
+#      warn "\n";
+		       }
+    elsif($ARGV eq "-rc"){ 
+# check if redirection control port given
+	$list = $list . " " . $ARGV;
+	$rcontrol = shift @ARGV;
+	$list = $list . " " . $rcontrol;
+	`echo "$rcontrol" > $optbin/.tunnelport`;
+#		warn "rcontrol: ";
+#		warn $rcontrol;
+#		warn "\n";
+    }
+    elsif($ARGV eq "-rp"){
+# check if redirection port given
+	$list = $list . " " . $ARGV;
+	$rport = shift @ARGV;
+	$list = $list . " " . $rport;
+#		warn "rport: ";
+#		warn $rport;
+#		warn "\n";
+    }
+    elsif($ARGV eq "-s"){
+# check if number of Max Scan Threads is set
+        $scanthreads = shift @ARGV;
+#      warn "scanthreads: ";
+#      warn $scanthreads;
+#      warn "\n";
+    }
+    elsif($ARGV eq "-o"){
+# check if scan output directory is changed
+	$output = shift @ARGV;
+#      warn "scanthreads: ";
+#      warn $scanthreads;
+#      warn "\n";
+    }
+    elsif($ARGV eq "-t"){
+# check if timeout is set at the command line
+        $timeo = shift @ARGV;
+	if($timeo > $timeout){
+	    $timeout = $timeo;
+	}
+    }
+    else{
+	$list = $list . " " . $ARGV;
+    } 
+}
+
+# if redirecting set max scan threads to 1
+if(($raddress) && ($rcontrol)){
+	$scanth = $scanth . " -s 1 ";
+}
+elsif($scanthreads){# otherwise set max scan threads if set on command line
+	$scanth = $scanth . " -s " . $scanthreads;
+}
+# if running through nopen set scan output directory to shown below
+if($nopen ne "" ){
+	if($rhost ne ""){
+		$scanth = $scanth . " -p $scandir.$rhost";
+	}
+	else{
+		$scanth = $scanth . " -p $scandir";
+	}
+}
+elsif($output){# otherwise set  scan output directory if set on command line
+	$scanth = $scanth . " -p " . $output;
+}
+if($timeout){
+    $timeout = $timeout * 1000;
+    $scanth .= " -t $timeout";
+}
+
+#warn "$list\n";
+sleep 1;
+chdir "$jscanpath";
+warn "java -jar jscanner.jar$scanth$list\n";
+warn "\n";
+warn `java -jar jscanner.jar$scanth$list`;
+warn "\n";
+#warn "*$rhost*\n";
+if($rhost ne ""){
+    #warn "cp -R $scandir.$rhost/* $scandir/\n";
+    if (! -d $scandir)
+    {
+	`mkdir -p $scandir`;
+    }
+    `cp -R $scandir.$rhost/* $scandir/`;
+}
+#if redirecting close out control channel
+if(($raddress) && ($rport)){
+    socket($sock, AF_INET, SOCK_DGRAM, getprotobyname("udp"));
+    $destaddr = sockaddr_in($rport, inet_aton($raddress));
+    @ee = ();
+    for($i = 0; $i < 128; $i++){
+	push @ee, 0xEE;
+    }
+    $count = send($sock, $ee, 0, $destaddr);
+    close($sock);
+}

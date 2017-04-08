@@ -1,0 +1,164 @@
+#!/usr/bin/env perl
+
+## This is meant to be run with -lsh /current/etc/nopennamefix. Reading
+## the NOPEN_RHOSTNAME variable, it echos out one or two lines.
+##
+## If that variable contains no "bad" characters, just the one line is
+## echoed out, NOPEN_RHOSTNAME=ORIGINALVALUE.
+##
+## If that variable DOES contain "bad" characters, two lines are output.
+## The NOPEN_RHOSTNAME=FIXEDVALUE line has those characters replaced with
+## others. The second line, NOPEN_RHOSTNAME_WITH_BADCHARS=ORIGINALVALUE,
+## contains the original definition of NOPEN_RHOSTNAME that was just cleaned.
+##
+## Any local -lsh commands using the NOPEN_RHOSTNAME variable should always
+## use the result of this command via source. The gs.auto script has this
+## in it now:
+##
+## /current/etc/nopennamefix | tee /current/tmp/$NOPEN_MYPID.namefix ; source  /current/tmp/$NOPEN_MYPID.namefix
+##
+## So any subsequent command in that NOPEN window will have that file to
+## source and must do so for ALL -lsh commands that use NOPEN_RHOSTNAME:
+## -lsh -nohist source /current/tmp/$NOPEN_MYPID.namefix  ; echo MORE STUFF with $NOPEN_RHOSTNAME
+##
+
+## 
+##
+$VER="1.0.0.1" ;
+$| = 1 ;
+
+myinit() ;
+
+my $original = $fixthis;
+
+#parens
+$fixthis =~ s,\(,_.,g;
+$fixthis =~ s,\),._,g;
+
+#brackets
+$fixthis =~ s,\{,_..,g;
+$fixthis =~ s,\},.._,g;
+
+#other brackets
+$fixthis =~ s,\[,_...,g;
+$fixthis =~ s,\],..._,g;
+
+#quotes
+$fixthis =~ s,\",_dblquote_,g;
+
+##slashes
+#$fixthis =~ s,/,_fwdslash_,g;
+#$fixthis =~ s,\\,_bwdslash_,g;
+
+#spaces
+$fixthis =~ s,\s,_space_,g;
+
+#dollar
+$fixthis =~ s,\$,_dollar_,g;
+
+if ($original eq $fixthis) {
+  print "NOPEN_RHOSTNAME=\"$original\"\n";
+} else {
+  print "NOPEN_RHOSTNAME_WITH_BADCHARS=\"$original\"\n";
+  my $mod = $original;
+  print "NOPEN_RHOSTNAME=\"$fixthis\"\n";
+  $mod =~  s,[\(\)\[\]\{\} \"\$],\?,g;
+  print "NOPEN_RHOSTNAME_WITH_BADCHARS_ESCAPED=\"$mod\"\n";
+  $mod = $original;
+  $mod =~  s,[\(\)\[\]\{\} \"\$],\.,g;
+  print "NOPEN_RHOSTNAME_WITH_BADCHARS_DOTTED=\"$mod\"\n";
+}
+
+
+# End with true value as we may someday require this script elsewhere.
+1;
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  # $calleddirect is set if 
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs namefix @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=0;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog = "-gs namefix" ;
+    $vertext = "$prog version $VER\n" ;
+  
+  dbg("in autonamefix, got ip = =$callbackip= and port = =$callbackport=");
+  
+  mydie("bad option(s)") if (! Getopts( "hv" ) ) ;
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"$prog\" is used.
+
+";
+  $gsusagetext="Usage: $prog [HOSTSTRING]
+
+$prog will use the environment variable NOPEN_RHOSTNAME to build a new
+clean hostname variable from. It removes messy characters like parentheses,
+dollar signs, etc. Output will consist of one or two lines. The first line,
+NOPEN_RHOSTNAME=CONTENT, will either be the original content or the
+\"cleaned\" content. If the latter, a second line also appears showing the
+original content, shown as NOPEN_RHOSTNAME_WITH_BADCHARS=ORIGCONTENT.
+
+Bad characters are replaced as follows:
+         THIS             BECOMES THIS
+          (                     _.
+          )                     ._
+          {                     _..
+          }                     .._
+          [                     _...
+          ]                     ..._
+          \$                     _dollar_
+     <whitespace>               _space_
+
+OPTIONS
+
+  -h/-v       Show usage statement/version number
+  
+  ";
+
+my $notdone = "
+          /                     _fwdslash_
+          \\                     _bwdslash_
+";
+
+
+  usage() if ($opt_h or $opt_v);
+
+    if ("@ARGV") {
+      mydie("See usage via -h");
+      mydie("trying this fix, look here for errors:\n".
+"mkdir -vp $opdown/\"@ARGV\" ; ls -aldrt $opdown/\"@ARGV\"\n".
+`mkdir -vp $opdown/\"@ARGV\" ; ls -aldrt $opdown/\"@ARGV\"`.
+"mkdir -vp $opdown/history/\"@ARGV\" ; ls -aldrt $opdown/history/\"@ARGV\"\n".
+`mkdir -vp $opdown/history/\"@ARGV\" ; ls -aldrt $opdown/history/\"@ARGV\"`.
+"mkdir -vp $opdown/sniffer/\"@ARGV\" ; ls -aldrt $opdown/sniffer/\"@ARGV\"\n".
+`mkdir -vp $opdown/sniffer/\"@ARGV\" ; ls -aldrt $opdown/sniffer/\"@ARGV\"`.
+"mkdir -vp $opdown/sniffer/\"@ARGV\" ; ls -aldrt $opdown/sniffer/\"@ARGV\"\n".
+`mkdir -vp $opdown/sniffer/\"@ARGV\" ; ls -aldrt $opdown/sniffer/\"@ARGV\"`.
+"\n\n".
+"find $opdir | grep \"@ARGV\"\n".
+`find $opdir | grep "@ARGV"`.
+"");
+    }
+  }
+
+
+  $fixthis = $ENV{NOPEN_RHOSTNAME};
+  $fixthis = $ARGV[0] if $ARGV[0];
+
+  mydie("No HOSTSTRING or NOPEN_RHOSTNAME variable to clean")
+    unless $fixthis;
+
+} #myinit

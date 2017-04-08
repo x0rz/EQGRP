@@ -1,0 +1,127 @@
+#!/usr/bin/env perl
+#select STDERR ;
+$| = 1 ;
+$ext = $$ ; # limits likelihood of concurrent autodone's colliding
+            # BUT: still possible.
+            # not too likely to happen.
+# myinit() either reads the scans files and builds a database or
+# reads in the database, whichever makes sense based on file
+# timestamps.
+myinit() ;
+# We can populate
+unlink("$opetc/autojscannext.$ext");
+unlink("$opetc/autojscannext");
+$sport = "";
+$dport = "";
+$rport = " $ext";#print "RP:$rport\n";
+$rip = " 127.0.0.1";#print "RI:$rip\n";
+if($ARGV[0] eq "-t"){#print "A: -t\n";
+    shift @ARGV;
+    $timeout = shift @ARGV;
+}
+elsif(($ARGV[0] eq "-h")||($ARGV[0] eq "help")){
+    `$opbin/jscan -h`;
+    exit 1;
+}
+elsif($ARGV[0] eq "scans"){
+    `$opbin/jscan scans`;
+    exit 1;
+}
+if(scalar(@ARGV) > 0){
+    $scan = shift @ARGV;
+    $scantype = $scan;
+    $scan = " $scan";#print "S:$scan\n";
+}
+else{die "invalid arguments";}
+if(scalar(@ARGV) > 0){
+    $target  = shift @ARGV;
+    $target = " $target";#print "T:$target\n";
+}
+else{die "invalid arguments";}
+if(scalar(@ARGV) > 0){
+    $dport = shift @ARGV;
+    $dport = " $dport";#print "DP:$dport\n";
+}
+else{$dport = "";}
+if(scalar(@ARGV) > 0){
+    $sport = shift @ARGV;
+    $sport = " $sport";#print "SP:$sport\n";
+}
+else{$sport = $ext+1;$sport = " $sport";}
+if(scalar(@ARGV) > 0){
+    die "invalid arguments";
+}
+
+$protocolline = `grep protocol $opbin/jscanner_pkg/scantypes/$scantype.xml`;
+$portline = `grep targetPort $opbin/jscanner_pkg/scantypes/$scantype.xml`;
+
+#warn "PORT: $portline\n";
+if($dport eq ""){
+    if($portline =~ /(\d+)/){
+	$dport = " $1";#print "DP2: $dport\n"
+    }
+}
+open(OUT1,"> $opetc/autojscannext.$ext") ||
+  mydie("cannot open $opetc/autojscannext.$ext");
+
+print OUT1 "#NOGS\n" ;
+
+if($protocolline =~ /tcp/i){
+    print OUT1 "-lsh $opbin/jscan.stun -ri $rip -rp $rport $scan $target $dport $sport -nohist\n";
+    print OUT1 "-nohist -stun$target$dport$rport$sport\n"; 
+    print OUT1 "-lsh sleep 2 -nohist\n";
+}
+elsif($protocolline =~ /udp/i){
+    print OUT1 "-lsh $opbin/jscan.sutun -ri $rip -rp $rport $scan $target $dport $sport -nohist\n";
+    print OUT1 "-nohist -sutun$target$dport$rport$sport\n"; 
+    #print OUT1 "-lsh sleep 5 -nohist\n";
+}
+else{die "invalid scan type";}
+close OUT1;
+`ln -s $opetc/autojscannext.$ext $opetc/autojscannext`;
+
+sub usage {
+  open(OUT,">> $opetc/autojscannext");
+  print OUT ("#NOGS\n") ;
+  close(OUT);
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  $usagetext = $gsusagetext if ($nopen_mypid) ;
+  print $usagetext unless $opt_v ;
+  print $vertext ;
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  exit;
+} # end sub usage
+
+sub myinit {
+  use File::Basename ;
+  require "getopts.pl";
+  $COLOR_SUCCESS="\033[1;32m";
+  $COLOR_FAILURE="\033[1;31m";
+  $COLOR_WARNING="\033[1;33m";
+  $COLOR_NORMAL="\033[0;39m";
+  $COLOR_NOTE="\033[0;34m";
+  $prog = basename $0 ;
+  $vertext = "$prog version $VER\n" ;
+  if (@ARGV) {
+    foreach (@ARGV) {
+      # quietly throw away any args not IPs
+      $calledfromautosploit++ if ($_ eq "FROMAUTOSPLOIT") ;
+      $calledfromautoscans++ if ($_ eq "FROMAUTOSCANS") ;
+    }
+    chop($gsoptions) ; # remove extra space
+  } else {
+    $gsoptions = $ENV{GSOPTIONS} ;
+  }
+  mydie("bad option(s)") if (! Getopts( "hv" ) ) ;
+  $| = 1;
+  $nopen_mypid = $ENV{NOPEN_MYPID} ;
+  $nopen_mylog = $ENV{NOPEN_MYLOG} ;
+  $nopen_rhostname = $ENV{NOPEN_RHOSTNAME} ;
+  $opdir = "/current" ;
+  $opbin = "$opdir/bin" ;
+  $opetc = "$opdir/etc" ;
+  $opdown = "$opdir/down" ;
+  $workdir = "/tmp/.scsi" ;
+  $ratname = "sendmail" ;
+} #myinit
+

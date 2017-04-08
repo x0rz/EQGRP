@@ -1,0 +1,4 @@
+#NOGS
+-lsh /current/etc/autochecklast $GSOPTIONS -nohist
+-gs /port -nohist
+

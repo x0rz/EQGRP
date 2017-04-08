@@ -1,0 +1,142 @@
+#!/usr/bin/env perl
+
+$VER="1.0.0.2" ;
+$| = 1 ;
+
+my @hashpaths = ();
+my @lsslist = ();
+my @sha1list = ();
+my %hashes = ();
+my ($hashcount,$proccount) = ();
+my $retrievepid = 0;
+
+myinit();
+
+my $hashstore = "$opdown/hashes.$nopen_rhostname";
+preservefile($hashstore);
+
+sub gethashes {
+  # This section should also work on AIX targets that set $aixtarget, but
+  # on some AIX targets, it hangs when it runs -sha1sum on everything...
+  if ($solaristarget) {
+    # Hard links to the binaries are stored in /proc/$pid/object/a.out
+    ($lsslist,$nopenlines,@nopenoutput) = nopenlss("-UQ","/proc/*/object/a.out");
+    @lsslist = split /\n/, $lsslist;
+    foreach (@lsslist) {
+      # Strip off the rest of the -ls output and give only the filename.
+      push (@hashpaths,$1) if /-.*\s(\/.*\/a\.out)$/;
+    }
+  }
+  elsif ($linuxtarget) {
+    # Symbolic links to the binaries are stored in /proc/$pid/exe
+    ($lsslist,$nopenlines,@nopenoutput) = nopenlss("-UQ","/proc/*/exe");
+    @lsslist = split /\n/, $lsslist;
+    foreach (@lsslist) {
+      # Strip off the rest of the -ls output and the symlink destinations and give
+      # only the filename.
+      push(@hashpaths,$1) if /l.*\s(\/.*\/exe)\s--\s\/.+$/;
+    }
+  }
+  elsif ($freebsdtarget) {
+    # Symbolic links to the binaries are stored in /proc/$pid/file
+    ($lsslist,$nopenlines,@nopenoutput) = nopenlss("-UQ","/proc/[0-9]*");
+    @lsslist = split /\n/, $lsslist;
+    foreach (@lsslist) {
+      # Strip off the rest of the -ls output and the symlink destinations and give
+      # only the filename. 
+      push(@hashpaths,$1) if /l.*\s(\/.*\/file)\s--\s\/.+$/;
+    }
+  }
+  else {
+    mydie("This script does not yet support this platform\n");
+  }
+  $proccount = scalar @hashpaths;
+
+  # Iterate over our file list and get the hashes.
+  ($sha1hash,$nopenlines,@nopenoutput) = doit("-sha1sum @hashpaths");
+  @sha1list = split /\n/, $sha1hash;
+  
+  foreach (@sha1list) {
+    my ($hash,$datestr,$path) = /^[-+]\s([0-9A-F]+)\s(.+)\s(\/proc\/\S+).*$/;
+#dbg("in autogethashes, hash =$hash=, datestr =$datestr=, path =$path=\n");
+    next unless length $hash;
+    push @{ $hashes{$hash} }, $path;
+  }
+  $hashcount = keys %hashes;
+}
+
+sub storehashes {
+  open(HASHSTORE, "> $hashstore") or mydie("Unable to open hash store at $hashstore: $!");
+  foreach (keys %hashes) {
+#dbg("in autogethashes, hash entry written to file: $_: @{ $hashes{$_} }\n");
+    print HASHSTORE "$_: @{ $hashes{$_} }\n";
+  }
+  close(HASHSTORE);
+}
+
+gethashes();
+
+progprint("Complete.\n\n".
+          "Number of processes examined: $proccount\n".
+          "Number of hashes generated: $hashcount\n\n".
+          "Hashes have been stored to $hashstore");
+          
+storehashes();
+
+# End with true value as we may someday require this script elsewhere.
+1;
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  # $calleddirect is set if 
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs gethashes @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog = "-gs gethashes" ;
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless $nopen_rhostname;
+  }
+  clearallopts();
+  mydie("bad option(s)") if (! Getopts( "hvp:" ) ) ;
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"$prog\" is used.
+
+";
+  $gsusagetext="
+  
+Usage: $prog [-h]                       (prints this usage statement)
+       $prog [-p pid]
+
+$prog retrieves SHA-1 hashes for all of the currently running processes on the
+system. On systems that support /proc, it iterates over each entry in the process
+list and calls the builtin -sha1sum command on each binary linked in that entry.
+Once all of the hashes are collected, they are stored locally in the filesystem
+and sent uphill for processing.
+ 
+  OPTIONS
+
+  -h       show this usage statement
+  -v       show version number
+  -p pid   retrieve the SHA-1 hash of the program running as this PID
+           (CURRENTLY UNSUPPORTED)
+
+";
+  usage() if ($opt_h or $opt_v) ;
+  $retrievepid = $opt_p;
+  $socket = pilotstart(quiet) unless $socket;
+} #myinit

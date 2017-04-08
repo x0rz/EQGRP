@@ -1,0 +1,58 @@
+#!/usr/bin/env perl
+$usagestr = "
+Usage:  permute <word>
+        COMMAND | permute
+	permute -h          (echos this help)
+
+    outputs <word> or <stdin> permuted randomly.
+    Newlines in stdin are preserved (each line is permuted independently).
+";
+
+@input = @ARGV;
+&usage if (@input[0] eq "-h");
+unless (@input) {
+  @input = <STDIN> unless (@input);
+  $cr = "\n";
+}
+$| = 1;
+while ( @input ) {
+$str = shift(@input) ;
+  chomp ($str) ;
+  $len = length $str;
+  %gotit = ();
+  for ($i = 0 ; $i < $len ; $i++) {
+    $c = substr $str,$i,1;
+    for ($r = &myrand(0,$len-1) ;  ; $r = &myrand(0,$len-1) ) {
+      next unless ("$gotit{$r}" eq "");
+      $gotit{$r} = "$c";
+      last;
+    }
+  }
+
+  $newstr = "";
+  for ($i = 0 ; $i < $len ; $i++) {
+    $newstr .= $gotit{$i};
+  }
+  print "$newstr$cr";
+}
+print "\n";
+
+
+sub myrand () {
+  local ($mymin,$mymax) = (@_);
+  local $tmp;
+  $tmp=int(rand($mymax - $mymin + 1));
+  $tmp+=int(rand($mymax - $mymin + 1));
+  $tmp+=int(rand($mymax - $mymin + 1));
+  $tmp+=int(rand($mymax - $mymin + 1));
+  $tmp+=int(rand($mymax - $mymin + 1));
+  $tmp %= ($mymax - $mymin + 1);
+
+  $tmp = $tmp + $mymin;
+  return $tmp;
+}
+
+sub usage() {
+  print "$usagestr";
+  exit;
+}

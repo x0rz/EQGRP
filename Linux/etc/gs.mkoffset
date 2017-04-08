@@ -1,0 +1,3 @@
+#NOGS
+-nohist date ; date -u > L:/current/etc/.dates
+-lsh -nohist [ -f /current/tmp/$NOPEN_MYPID.namefix ] && source /current/tmp/$NOPEN_MYPID.namefix ; mv /current/etc/.dates /current/tmp/.crondates.$NOPEN_RHOSTNAME ; (echo -e "\\\n\\\nOur (CORRECT we hope) local/GMT:" ; date ; date -u ; echo -e "\\\n\\\nRemote local/GMT:" ; cat /current/tmp/.crondates.$NOPEN_RHOSTNAME ; (echo "#mkoffset for $NOPEN_RHOSTNAME (in minutes)" ; mkoffset -qmf  /current/tmp/.crondates.$NOPEN_RHOSTNAME) | tee /current/down/utc_offset.$NOPEN_RHOSTNAME) | tee /current/down/mkoffset.$NOPEN_RHOSTNAME

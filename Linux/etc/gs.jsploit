@@ -1,0 +1,3 @@
+#NOGS
+-lsh cd /current/etc ; chmod +x auto* ; ./autojsploit $GSOPTIONS -nohist
+-gs /current/etc/autojsploitnext -nohist

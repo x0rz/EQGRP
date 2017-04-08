@@ -1,0 +1,319 @@
+#!/usr/bin/env perl
+## NOPEN autoport script to put op -problems in proper place
+$VER="1.2.0.9" ;
+use File::Basename ;
+myinit();
+
+if ($newop) {
+    # This now returns if no error encountered
+dbg("in $prog calling newop");
+    newop();
+} else {
+
+    my $logbase = basename($logfile);
+    my ($oldfile,$oldcontent,$oldtopcontent,$donetop) = ($logfile.".".time());
+    rename($logfile,$oldfile);
+    if (open(PROBLEMIN,"$oldfile")) {
+      while (<PROBLEMIN>) {
+        next if ($_ eq "\n");
+        if (!$donetop and
+	    ($oldtopcontent or /^BEGIN IMPORTANT CONTENT REVERSE TIME ORDER/) and
+	    (! /^END IMPORTANT CONTENT REVERSE TIME ORDER/)
+           ) {
+          s/^BEGIN IMPORTANT CONTENT REVERSE TIME ORDER/./;
+          $oldtopcontent .= $_;
+        } else {
+          $donetop++ if s/^END IMPORTANT CONTENT REVERSE TIME ORDER/./;
+          $oldcontent .= $_;
+        }
+      }
+      close(PROBLEMIN);
+      unlink($oldfile);
+    }
+
+    $oldcontent =~ s,^\.+,,;
+    $oldtopcontent =~ s,^\.+,,;
+    my $newline = gmtime()." $nopen_rhostname: $problemcontent\n";
+    if (open(PROBLEMOUT,"> $logfile")) {
+      #HOSTNAME not that useful, put back in if we ever change it from localhost.localdomain
+      #  print PROBLEMOUT gmtime()." $ENV{HOSTNAME}/$nopen_rhostname: @ARGV\n";
+      if ($logattop or $oldtopcontent) {
+        print PROBLEMOUT "BEGIN IMPORTANT CONTENT REVERSE TIME ORDER\n";
+        print PROBLEMOUT $newline
+          if $logattop;
+        print PROBLEMOUT $oldtopcontent;
+        print PROBLEMOUT "END IMPORTANT CONTENT REVERSE TIME ORDER\n\n";
+      }
+      print PROBLEMOUT $oldcontent;
+      print PROBLEMOUT $newline
+        unless $logattop;
+      close(PROBLEMOUT);
+      my $logcontents = readfile($logfile);
+      $logcontents =~ s,$newline,$COLOR_FAILURE$newline$COLOR_NORMAL,;
+      progprint(".\n\nNEW PROBLEM LOGGED.\n\n".
+	        "$logbase now contains (${COLOR_FAILURE}new line shown red$COLOR_NOTE):$COLOR_NORMAL\n".
+	        $logcontents);
+    } else {
+      mydie("FAILED TO LOG PROBLEM: $prog @ARGV");
+    }
+}
+
+
+dbg("Done with $prog");
+# End with true value as  we may require this script elsewhere.
+1;
+
+
+sub newop {
+    $gsusagetext = setusagetext();
+    my @badargs = grep ! /^[,\d]+$/ , @ARGV;
+    my @moreids = grep /^[,\d]+$/ , @ARGV;
+    #usage() if ($opt_h or $opt_v or @badargs or (!$opt_N and !@ARGV));
+
+    if ($opt_N) {
+	my $oldval = $gbl_nsrat;
+        if (0) {
+        if (-d "$opdown/cmdout/" or -f "$opdown/pid") {
+	    mydie("You cannot use -N when NOPEN has already been used:\n\n".
+                  `ls -alrtd $opdown/{cmdout,pid} 2>/dev/null`);
+	}}
+	my $unchanged = "$COLOR_FAILURE (unchanged)$COLOR_NORMAL"
+	    if ($gbl_nsrat eq $oldval);
+
+        newhostvar("gbl_nsrat","OTHER");
+	progprint($COLOR_NORMAL."\n\n\n".
+	      "Previous value:  gbl_nsrat=$oldval$unchanged\n\n".
+	      "Fix your opnotes with these vi commands now--paste ALL at one time.\n".
+              "(ESCape out of insert mode first.)\n\n".
+	      "  mx\n".
+	      "  :%s,^NS.RAT=.*\\n,,\n".
+	      "  :%s,^PROJECT=,NS.RAT=OTHER\\rPROJECT=,\n".
+	      "  \`x\n".
+	      "");
+    } elsif ($opt_O) {    
+	my $oldval = $gbl_opuser;
+        my $comment = "@badargs";
+	my @newids = split(/[,\s]+/,$gbl_opuser);
+	if ($opt_r) {
+	    @newids = () if $opt_r;
+	}
+	
+	@newids = uniqify_array(sort by_num(@newids,@moreids));
+	@newids = grep /^\d+$/,@newids;
+	newhostvar("gbl_opuser",join(",",@newids));
+	$comment .= "; new value is: $gbl_opuser";
+	newhostvar("gbl_usertag{".timestamp(short)."}","@moreids $comment");
+	my $unchanged = "$COLOR_FAILURE (unchanged)$COLOR_NORMAL"
+	    if ($gbl_opuser eq $oldval);
+	progprint($COLOR_NORMAL."\n\n\n".
+	      "Previous value:  $oldval$unchanged\n\n".
+	      "Fix your opnotes with these vi commands now (ESCape out of insert mode first):\n\n".
+	      "  mx\n".
+	      "  :%s\#OPUSER=.*\#OPUSER=$gbl_opuser\#g\n".
+	      "  \`x\n".
+	      "");
+    } elsif ($opt_P) {
+        my $newproject = uc shift(@badargs);
+	my $oldval = opproject();
+	my $unchanged = "";
+        if ($newproject eq $oldval) {
+	    $unchanged = "$COLOR_FAILURE (unchanged)$COLOR_NORMAL"
+	} else {
+	    opproject($newproject);
+	}
+	progprint($COLOR_NORMAL."\n\n\n".
+	      "Previous value:  $oldval$unchanged\n\n".
+	      "Fix your opnotes with these vi commands now (ESCape out of insert mode first):\n\n".
+	      "  mx\n".
+	      "  :%s\#PROJECT=.*\#PROJECT=$gbl_opproject\#g\n".
+	      "  \`x\n".
+	      "");
+    } elsif ($opt_S) {
+	my $oldval = $gbl_opschedule;
+	mydie("$prog -S requires just one NEWSCHEDID")
+	    if (@moreids > 1);
+	mydie("-S NEWSCHEDID must be 14 digits")
+	    unless (length $moreids[0] == 14);
+	newhostvar("gbl_opschedule",$moreids[0]);
+	my $unchanged = "$COLOR_FAILURE (unchanged)$COLOR_NORMAL"
+	    if ($gbl_opschedule eq $oldval);
+	progprint($COLOR_NORMAL."\n\n".
+	      "Previous value:  $oldval$unchanged\n\n".
+	      "Fix your opnotes with these vi commands now (ESCape out of insert mode first):\n\n".
+	      "  mx\n".
+	      "  :%s\#OPSCHEDULE=.*\#OPSCHEDULE=$gbl_opschedule\#g\n".
+	      "  \`x\n".
+	      "");
+
+    } else {
+	mydie("Invalid: Called newop() without -O or -S");
+    }
+}
+#newop
+
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  $skiprest = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs problem @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog = "-gs problem";
+    $vertext = "$prog version $VER\n" ;
+#    mydie("No user servicable parts inside.\n".
+#	  "(I.e., noclient calls $prog, not you.)\n".
+#	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+#			      -e $nopen_mylog);
+  }
+  mydie("bad option(s)") if (! Getopts( "hvT:tOrSNP" ) ) ;
+  $newop = ($opt_O or $opt_S or $opt_N or $opt_P);
+  
+  unless ($newop) {
+
+    $logattop = $opt_t;
+    my %allowedtypes = ("EXP",1,
+		        "DEV",1,
+		        "EP",1,
+		        "DSZ",1,
+		        "SELF",1,
+			"STOICSURGEON",1,
+		        "PC",1,
+		        "NOPEN",1,
+		        "PITCHIMPAIR",1,
+		       );
+    mydie("-T $opt_T cannot contain \"/\"")
+      if ($opt_T =~ m,/,);
+    $opt_T = uc $opt_T;
+    mydie("-T $opt_T is not a valid problem type")
+      unless (!$opt_T or $allowedtypes{$opt_T});
+    $logtype = length $opt_T ? "${opt_T}-" : "" ;
+  
+    $logfile = $opt_f if $opt_f;
+    $logfile = "$opdown/${logtype}problems.log" unless $logfile;
+    my $aliases = `grep "alias .*gs problem" $opetc/norc | sort | sed "s/^/   /g"`;
+    mydie("-f $logfile must be a full path to a directory that exists")
+      unless ($logfile =~ m,^/, and -d dirname($logfile));
+  my
+    $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"$prog\" is used.
+
+";
+    $gsusagetext="Usage: $prog [-T type] Problem to report all on one line
+Usage: $prog [-T type] /current/tmp/localfile
+Usage: $prog -O NEWID [,NEWID2,NEWID3]
+Usage: $prog -S NEWSCHEDID
+Usage: $prog -P NEWPROJECT
+
+PROBLEM MODE
+
+$prog makes note of problems submitted via NOPEN command line. If the first
+command line argument after the options is a non-empty local file, its
+contents are used as the problem message. If not, the problem being logged
+must all be on one NOPEN command line. If you need more room, use several
+calls to -problem.
+
+Problems are logged to $opdown/problems.log or when -T is used to
+$opdown/\$type-problems.log (the \"type\" value you provide will be
+uppercased for you).
+
+These problems are reported up the chain. Keep them SAFE, useful and
+professional. Each such -problem will automatically contain sufficient
+metadata that this op and operator can be found later, if needed. You need only
+state the problem itself.  Valid types are:  ".join("  ",sort keys %allowedtypes)."
+
+Aliases to shorten the $prog command are defined in norc as follows, in
+each case the problems are sent to the right audience. The -T SELF type results
+in an email to YOU (all operators). These emails are sent later, during post.
+
+$aliases
+OTHER MODES
+
+-N / No-NOPEN Mode:
+
+Shifts the op to strictly non-NOPEN mode. Can only be used if no NOPEN created
+files are present (e.g., ./down/cmdout/, ./down/pids, etc.)
+
+-O / New Operator Mode:
+
+In this mode (aliased to -newop) you can add to the opuser variables to add
+the new ID(s) given. The -r argument replaces the old list.
+
+-S / New Schedule ID Mode:
+
+In this mode (aliased to -newsched), you can change the opschedule variables.
+
+You will be provided with vi commands to fix the right line in your opnotes.
+
+Usage: $prog [-T type] Problem to report all on one line
+Usage: $prog -O NEWID [,NEWID2,NEWID3]
+Usage: $prog -S NEWSCHEDID
+
+";
+  }
+  # ENDIF $newop
+  usage() if ($opt_h or $opt_v or !@ARGV);
+
+  if (-s $ARGV[0]) {
+	$problemcontent = readfile($ARGV[0]);
+	shift(@ARGV);
+  }
+  $problemcontent = "@ARGV" unless $problemcontent;
+}#myinit
+
+sub setusagetext {
+    return "
+Usage: $prog -N
+Usage: $prog -O NEWID [,NEWID2,NEWID3]
+Usage: $prog -P NEWPROJECT
+Usage: $prog -S NEWSCHEDID
+
+
+-N / No-NOPEN Mode:
+
+Shifts the op to strictly non-NOPEN mode. Can only be used if no NOPEN created
+files are present (e.g., ./down/cmdout/, ./down/pids, etc.)
+
+-O / New Operator Mode:
+
+In this mode (aliased to -newop) you can add to the opuser variables to add
+the new ID(s) given. The -r argument replaces the old list. Every new operator
+added with this option is logged in hostvars.global with a timestamped entry
+like this, where the first \"initiated op\" entry is made by scrubhands at the
+outset:
+  \$gbl_usertag{\"YYYYMMDD-HHMMSS\"} = \"11111 initiated op; new value is: 11111\"
+E.g., this command will log as follows:  -newop 88888 COMMENT HERE
+  \$gbl_usertag{\"YYYYMMDD-HHMMSS\"} = \"88888 COMMENT HERE; new value is: 11111,88888\"
+
+-P / New Project Mode:
+
+In this mode (aliased to -newproject), you can change the overall op project name.
+
+-S / New Schedule ID Mode:
+
+In this mode (aliased to -newsched and -newschedule), you can change the opschedule variables.
+
+For each of these modes, the proper variables will be set in
+../down/hostvars.global and you will be provided with vi commands to add/fix
+the right line in your opnotes.
+
+Usage: $prog -N
+       $prog -O NEWID[,NEWID2,NEWID3] [optional comments]
+       $prog -P NEWPROJECT
+       $prog -S NEWSCHEDID
+
+";
+
+}

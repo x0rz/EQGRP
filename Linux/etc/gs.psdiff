@@ -1,0 +1,8 @@
+#NOGS
+-lsh rm -f /current/ps.dev /current/ps.not -nohist
+-cd /dev -nohist
+=ps > L:/current/ps.dev -nohist
+-cdp -nohist
+=ps > L:/current/ps.not -nohist
+-lsh mv -f /current/ps.dev /current/down/ps.dev.$NOPEN_RHOSTNAME ; mv -f /current/ps.not /current/down/ps.not.$NOPEN_RHOSTNAME -nohist
+-lsh diff /current/down/ps.dev.$NOPEN_RHOSTNAME /current/down/ps.not.$NOPEN_RHOSTNAME | sed "s/^>/HIDDEN?>/g" | sed "s/^</inboth?</g" | egrep -v "^[0-9]|^---" -nohist

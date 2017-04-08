@@ -1,0 +1,4 @@
+#NOGS
+# Keeping alive according to autolive.conf -nohist
+-w >> L:/current/down/keepalive.output -nohist
+-lsh /current/etc/autolive -nohist

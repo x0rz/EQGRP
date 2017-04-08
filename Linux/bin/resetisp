@@ -1,0 +1,326 @@
+#!/bin/bash
+. /etc/rc.d/init.d/functions
+VER="2.6.2.4"
+SUITEVER=5.0.0.4
+
+ISP_INFOFILE=/tmp/isp_info
+ISP_LOG=/tmp/isp_log
+#added 30 nov 05 to remove hard coded paths
+ISPath=/tmp/isp/
+Tkn=Systems
+COMPACTDISK=1
+FLOPPYDISK=2
+# means try both $COMPACTDISK and $FLOPPYDISK
+TRYBOTH=3
+USING=$TRYBOTH
+SETUP=0
+REDIAL=1
+USETHIS=2
+ACTION=$SETUP
+PROG="`basename $0`"
+
+# called as resetisp, this program assumes ${ISPath}* exist already (saves slow floppy reads)
+
+
+
+echo -e "Called as: $0 $@ \n"
+for opt in $@
+do
+  case $opt in
+    -v )
+      echo "`basename $0` version $VER"
+      exit ;;
+    -h )
+      echo -e "Usage: $PROG -[hv] -[cf] -[rs]
+
+With no arguments, setupisp will try to load ISP data from the floppy
+first and then the CD, and then dial one of the numbers at random.
+
+If no media is found, the user is prompted to insert it.
+
+Being called as \"redial\" or \"resetisp\" is the same as using -r.
+
+        -h     Display this text and exit.
+        -v     Display the version of this script.
+        -c     ISP media is a CD.
+        -f     ISP media is a Floppy (default tries floppy then CD).
+        -s     Setup a NEW ISP from media then dial (default).
+        -r     Choose a new but not previously used number using
+               the same ISP and then dial.
+
+$PROG v$VER"
+      exit ;;
+    -c|-cd )
+      echo -e "ISP CD chosen\n"
+      USING=$COMPACTDISK ;;
+    -f|-floppy )
+      echo -e "ISP floppy chosen\n"
+      USING=$FLOPPYDISK ;;
+    -r|-redial|-reset )
+      echo -e "Action chosen : redial/reset\n"
+      ACTION=$REDIAL ;;
+    -s|-setup )
+      echo -e "Action chosen : setup\n"
+      ACTION=$SETUP ;;
+    -u|-usethis )
+      echo -e "Action chosen : use prebuilt Systems.usethis\n"
+      ACTION=$USETHIS ;;
+  esac
+done
+
+if [ `id -u` == 0 ] ; then
+    rm -f  /usr/local/bin/resetisp
+    rm -f  /usr/local/bin/redial
+    rm -f  /usr/local/bin/foxisp
+    ln -sf /usr/local/bin/setupisp /usr/local/bin/resetisp
+    ln -sf /usr/local/bin/setupisp /usr/local/bin/redial
+    ln -sf /usr/local/bin/setupisp /usr/local/bin/foxisp
+fi
+
+if [ "`ifconfig ppp0 2>/dev/null | grep addr`" ] ; then
+  ifconfig ppp0
+  [ "$BOOTUP" = "color" ] && $SETCOLOR_FAILURE
+  echo "You already have a ppp0 interface"
+  echo "(Maybe you need to run \"./phone stop\"?)"
+  [ "$BOOTUP" = "color" ] && $SETCOLOR_NORMAL
+  exit 1
+fi
+cd /tmp
+
+
+if [ "$PROG" = "resetisp" -o "$PROG" = "redial" ] ; then
+    echo -e "Action chosen : redial/reset\n"
+    ACTION=$REDIAL
+fi
+
+case $ACTION in
+  $USETHIS )
+    if [ ! -e "${ISPath}${Tkn}.usethis" ] ; then
+	echo "${ISPath}${Tkn}.usethis must exist to use -u/-usethis"
+	exit
+    fi
+    echo "*"
+    echo "* Using prebuilt ${ISPath}${Tkn}.usethis:"
+    echo "*"
+    cat ${ISPath}${Tkn}.usethis
+    cp -fp ${ISPath}${Tkn}.usethis ${ISPath}${Tkn}
+  ;;
+  $REDIAL )
+    echo -e "Redialing/Reseting\n"
+    if [ -e "${ISPath}${Tkn}.orig" ] ; then
+	echo -e "\aUsing existing ${ISPath}* files -- BE SURE YOU HAVE THAT FLOPPY/TOKEN!!"
+	cp -fp ${ISPath}${Tkn}.orig ${ISPath}${Tkn}
+	sleep 1
+    elif [ -e "${ISPath}${Tkn}" ] ; then
+	echo -e "\aUsing existing ${ISPath}* files -- BE SURE YOU HAVE THAT FLOPPY/TOKEN!!"
+	sleep 1
+    else
+	echo -e "\aUnable to continue--no existing ${ISPath}* files. Try just \"./$PROG -f/c -s\"."
+	exit 
+    fi
+  ;;
+  $SETUP )
+    if [ $USING == $TRYBOTH ] ; then
+	echo -e "Setting up using either floppy or CD\n"
+	TRYTHESE="$FLOPPYDISK $COMPACTDISK"
+    else
+	echo -e "Setting up\n"
+	TRYTHESE="$USING"
+    fi
+    ALREADY="echo -e \n*\n* ISP $DISKTYPE found in drive already.\n*\n"
+    while [ 1 ] ; do
+	for USING in $TRYTHESE ; do
+	    case $USING in
+	    $FLOPPYDISK )
+		DISKPATH="/dev/fd0"
+		DISKTYPE="floppy"
+		TAR=$(tar tvf $DISKPATH 2>/dev/null | egrep "Systems|secret|resolv.conf" | wc -l) 
+		INSTALL="tar -C $ISPath -xvf $DISKPATH"
+		INSTALL2=""
+		INSTALL3=""
+		;;
+	    $COMPACTDISK )
+		eject -t cdrom
+		mount /mnt/cdrom 2>/dev/null
+		DISKPATH="/mnt/cdrom/ispfiles/"
+		DISKTYPE="CD"
+		TAR=$(ls $DISKPATH 2>/dev/null | egrep "Systems|secret|resolv.conf" | wc -l) 
+		INSTALL="cp ${DISKPATH}* $ISPath"
+		INSTALL2="chmod +w $ISPath/*"
+		INSTALL3="eject /mnt/cdrom"
+		;;
+	    esac
+	    if [ $TAR == 3 ] ; then
+		echo -e "Using ISP from a $DISKTYPE \n"
+		break
+	    fi
+	done
+	if [ $TAR == 3 ] ; then
+	    $ALREADY
+	    break
+	else
+	    ALREADY=""
+	    echo "*"
+	    echo "* Insert ISP floppy or CD and hit <ENTER>"
+	    echo "*"
+	    eject
+	    read ANS
+	fi
+    done
+    echo -e "rm -rf $ISPath\n"
+    rm -rf $ISPath
+    echo -e "mkdir $ISPath\n"
+    mkdir $ISPath
+    #echo -e "tar -C $ISPath -xvf $DISKPATH\n"
+    #tar -C $ISPath -xvf $DISKPAT
+    echo -e "*** Installing ISP data ***\n$INSTALL \n"
+    $INSTALL
+    $INSTALL2
+    $INSTALL3
+  ;;
+esac
+
+if [ ! -e "${ISPath}${Tkn}.orig" ] ; then
+    cp -fp ${ISPath}${Tkn} ${ISPath}${Tkn}.orig
+fi
+
+if [ "$ACTION" != "$USETHIS" ] ; then
+    until [ -e "${ISPath}${Tkn}" ] ; do
+	rm -rf isp/*
+	[ "$BOOTUP" = "color" ] && $SETCOLOR_FAILURE
+	echo -n "Seems to be the wrong ${DISKTYPE}! Put in ISP ${DISKTYPE} and hit return."
+	[ "$BOOTUP" = "color" ] && $SETCOLOR_NORMAL
+	read ans
+#TODO: THIS ASSUMES TAR
+	tar -C isp -xvf $DISKPATH
+    done
+    # added 1 dec 05 - make numbered file to ref ppp line
+    # check for numbered file
+    # create it if not present
+    if [ ! -e "${ISPath}${Tkn}.num" ] ; then
+	echo -e "${ISPath}${Tkn}.num does not exist. Creating it now."
+	echo -e "egrep -in ^\#ppp ${ISPath}${Tkn} > ${ISPath}${Tkn}.num \n"
+	egrep -in ^\#ppp ${ISPath}${Tkn} > ${ISPath}${Tkn}.num
+    fi
+
+    # if numbered file is only one line long
+    # recreate it
+    TKNUM=$(cat ${ISPath}${Tkn}.num | wc -l)
+    ORIGNUM=$(grep -i ppp ${ISPath}${Tkn}.orig | wc -l)
+    echo "Number of dialups remaining in pool : $TKNUM of original $ORIGNUM"
+
+    if  [ $TKNUM -lt 2 ] ; then
+	echo "${ISPath}${Tkn}.num s too short. Receating it now."
+	egrep -in ^\#ppp ${ISPath}${Tkn} > ${ISPath}${Tkn}.num
+	TKNUM=$(more ${ISPath}${Tkn}.num | wc -l | egrep \d*)
+	echo "New number of dialups in pool : $TKNUM"
+    fi
+
+    # end add
+  
+    #commented out 29/nov/2005 - replaced by next few lines
+    #RND=$(expr $RANDOM % $(cat /tmp/isp/Systems | wc -l))
+
+    #random number for number of lines that are qualified
+    NRND=$(expr $RANDOM % $TKNUM)
+    #assign RND to what line to edit from numbered temp file
+    more +$NRND ${ISPath}${Tkn}.num | head -1 > ${ISPath}${Tkn}.numtmp
+    RND=$(sed -e s/\:\#.*// ${ISPath}${Tkn}.numtmp)
+    ENTRY=$(expr $RND / 2)
+
+    #update the numbered file by removing the used line
+    mv ${ISPath}${Tkn}.num ${ISPath}${Tkn}.not
+    grep -v "^$RND:" ${ISPath}${Tkn}.not > ${ISPath}${Tkn}.num
+    rm -f ${ISPath}${Tkn}.not ${ISPath}${Tkn}.numtmp
+
+    echo "Use random entry ${ENTRY} or original $ORIGNUM"
+    echo "*"
+    echo "* Editting phone number file"
+    echo "*"
+    
+    usleep 333333 2>/dev/null
+    #commented out to allow auto editing
+    #vi +${RND} +/pp /tmp/isp/Systems
+    #new line to remove the starting #
+    sed -e ${RND},${RND}s/^\#// ${ISPath}${Tkn}.orig > ${ISPath}${Tkn}
+
+    grep -v "^#" ${ISPath}${Tkn}
+    sleep 3
+
+#else
+#   The Systems.usethis is already in place as Systems
+fi
+
+
+echo "*"
+echo "* Building /etc/wvdial.conf"
+echo "*"
+
+USERNAME="$(grep ^NAME: ${ISPath}xisprc | cut -d\  -f2)"
+PASSWORD="$(cat ${ISPath}secret)"
+NUMBER="$(grep -v ^\# ${ISPath}${Tkn} | grep -v '^$' | cut -d\  -f5)"
+CITY=$(grep -v "^$" ${ISPath}${Tkn} | grep -B 1 "^[^#]" 2>/dev/null|tr "#" "," | cut -f 2,3 -d "," | head -1)
+NUMBER2=$(echo $NUMBER | cut -f 2 -d "," | sed "s/^1-//" )
+ISP=$(grep ^DESCR ${ISPath}xisprc | awk '{print $2}'|cut -f 1 -d "/")
+
+#rm -rf /tmp/isp
+
+if [ ! "$NUMBER" -o ! "$USERNAME" -o ! "$PASSWORD" ] ; then
+    echo "FATAL ERROR: Cannot continue. ${ISPath} does not contain sufficient entries:"
+    echo "Phone = $NUMBER"
+    echo "Username = $USERNAME"
+    echo "Password = $PASSWORD"
+    exit
+fi
+
+DEV=/dev/ttyS0
+if [ -e /dev/modem ] ; then
+    DEV=/dev/modem
+else
+    echo "Using /dev/ttyS0 since /dev/modem does not exist--MAY BE WRONG!"
+fi
+
+cat << EOF > /etc/wvdial.conf
+[Dialer Defaults]
+Modem = $DEV
+Baud = 115200
+Init1 = ATZ
+Init2 = ATQ0 V1 E1 S0=0 &C1 &D2 S11=55 +FCLASS=0
+Auto Reconnect = off
+EOF
+
+echo "Phone = $NUMBER" >> /etc/wvdial.conf
+echo "Username = $USERNAME" >> /etc/wvdial.conf
+echo "Password = $PASSWORD" >> /etc/wvdial.conf
+
+echo "*"
+echo "* Dialing ISP with these settings in /etc/wvdial.conf"
+cat /etc/wvdial.conf | sed "s/Password = .*/Password = ********/"
+echo "*"
+
+cp -pf ${ISP_INFOFILE}.old2 ${ISP_INFOFILE}.old3 2>/dev/null
+cp -pf ${ISP_INFOFILE}.old1 ${ISP_INFOFILE}.old2 2>/dev/null
+cp -pf $ISP_INFOFILE ${ISP_INFOFILE}.old1 2>/dev/null
+cat << EOF > $ISP_INFOFILE
+$ISP
+$CITY
+$NUMBER2
+EOF
+date -u >> $ISP_LOG
+cat << EOF >> $ISP_LOG
+$ISP
+$CITY
+$NUMBER2
+EOF
+
+echo "*"
+echo "* Detailed ISP Information from ${ISP_INFOFILE}"
+echo "*"
+cat $ISP_INFOFILE
+
+# If it is there, run this. It will sync up the clock on the Internet
+# if need be, and if the Internet shows up in the next few minutes.
+if [ -x "/usr/local/bin/clocksync.pl" ] ; then
+  /usr/local/bin/clocksync.pl &
+fi
+exec wvdial

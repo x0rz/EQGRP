@@ -1,0 +1,25 @@
+<!--
+  An example SUCTIONCHAR XML Configuration File
+-->
+<Suctionchar>
+    <!--
+    The maximum exfiltration file size
+    -->
+    <limit>5242880</limit>
+
+    <!--
+    Collect on the SSH, TELNET, FTP, and PASSWD clients
+     
+    Passwords are often read "securely" through /dev/tty.  The
+    rest of the session is exchanged over the standard file
+    descriptors 0, 1, and 2.
+    -->
+    <task>
+        <command>^((/usr(/local)?)?/s?bin/)?(ssh|telnet|ftp|passwd)( |$)</command>
+        <limit>51200</limit>
+        <descriptor>0</descriptor>
+        <descriptor>1</descriptor>
+        <descriptor>2</descriptor>
+        <path>^/dev/tty</path>
+    </task>
+</Suctionchar>

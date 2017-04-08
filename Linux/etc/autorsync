@@ -1,0 +1,2493 @@
+#!/usr/bin/env perl
+##
+$VER="1.4.0.2";
+$| = 1 ;
+use File::Basename ;
+
+# TODO: When done, before packing, read in rsync.errors.$tunnelport* if part 1, handle....
+
+
+#TODO: When using -f, do not list that file as an old tarball later when MERGEing.
+# TODO: if exprs is /current* it is a file not an expression faile if it does not exist
+
+# GLOBALS set via newhostvar, do NOT clear these here
+# %rsynced_today     # list of remote paths we already rsynced today
+
+
+# GLOBALS
+%remotepaths = ();   # list of remote paths we are syncing
+@oldlist = ();       # list of files from old tarball
+$skipexpr = "";      # --exclude argument to rsync remotely, if any
+@skipexprs = ();     # list of expressions of remote files to skip
+%oldignoredfile = ();# List of files skipped due to old date on target
+@killstrings = ();   # used to kill our child popups
+$dounpacking = 0;    # Boolean set if we are unpacking old tarball
+$mypart = 1;         # > 1 if splitting the load and this instance NOT unpacking
+$destdir = "";       # Path to local data for this run of -gs rsync.
+$ofparts = 1;        # > 1 if splitting the load
+$rsyncnative = "";   # Set TRUE if remote rsync is used, not any uploaded
+                     # Set to full path of rsync if it is native but not in PATH at first
+                     # (currently, /usr/local/bin is the only non-PATH place we look).
+$rsyncuploaded = ""; # Set to full remote path if rsync has been uploaded to target.
+$keeprsync = 0;      # Set true if user opts to leave it there
+$remoteport = 0;     # Remote tunnel port for this instance's rsync
+%remoteports = ();   # All remote ports, all parts, key=part, value=port
+$familyerrfile =     # Nulled by part 1 used by all via
+    "$optmp/rsync.errors.$tunnelport";
+                     # $host_rsyncfamilyerrfile{$olddatafile}
+$remotersync = "rsync";
+$remotersyncoptions = "";
+@otherruns = ();     # Other windows pastables put here
+
+myinit() ;
+
+# ASSERT: $usedu contains the du executable to use if $checkfirst
+#         is true and $usedu is available.
+#         %remotepaths is populated with the desired target data
+#                      (with whitespace escaped):
+#           key  =@remotepaths option pointing to it
+#           value=remote -ls -d result for it (link if any collapsed to real target)
+my @paths = keys %remotepaths;
+my @remotersyncs = ();     # Actual rsync commands being run
+my @remotersyncpaths = (); # Pathlists for each rsync command being run
+
+checkfirst() if $checkfirst;
+
+monitorunpack() if ($mypart == 1 and
+		    ($freshenold or $dounpacking));
+
+# ASSERT: Use mymydie() and not mydie() after setuptunnel returns,
+#         it first closes that -tunnel # udp and then dies with mydie().
+if ($mypart == 1) {
+    # newhostvar() has no good way to do this we do so manually here? No dont risk it:
+#    my @varlines = readfile("ARRAY",$hostvarfile);
+#    offerabort(
+#	       join(" \n",@varlines)."\n".
+#	       "Got hostvar $hostvarfile containing above\n ".
+#	       "");
+#    @varlines = grep ! m,^\$rsyncdone..$tunnelport $olddatafile ,  , @varlines;
+#    offerabort(
+#	       join(" \n",@varlines)."\n".
+#	       "now cleaned hostvar containing above \n ".
+#	       "");
+#    unlink($hostvarfile);
+#    writefile($hostvarfile,@varlines);
+
+
+    # Sets up all ports, returns ours
+    $remoteport = setuptunnel();
+}
+
+if ($freshenold) {
+  # Build/add to @paths from the files in the tarball just unpacked,
+  # using the (perl file)  $unpackedtoc to define @oldlist via do
+  # (Which was made by the child that monitorunpack() was watching
+  # that just exited.)
+  do $unpackedtoc if (-s $unpackedtoc);
+  # Throw away the --exclude part of remote rsync if our ONLY remote targets
+  # are from $freshenold paths in the old tarfile and none are from other
+  # sources. In any case, grep the excluded ones out here.
+  $skipexpr = "" unless @paths;
+  @paths = uniqify_array(@paths,@oldlist);
+  my @newpaths = ();
+  foreach my $path (@paths) {
+    my $skipit = 0;
+    foreach my $regexp (@skipexprs) {
+      $skipit++ if $path =~ /$regexp/;
+      last if $skipit;
+    }
+    push @newpaths,$path unless $skipit;
+  }
+  @paths = @newpaths;
+}
+
+# Now that $freshenold is an option, we may get this far with no
+# @paths at all (if. e.g., we blacklist all elements in the tarball,
+# or none exist on target anymore). So we die nicely in that case.
+mymydie(".\n\n".
+	"No need to continue, no remote files/paths to get.".
+	(@skipexprs ? "\n(Perhaps all were blacklisted?)" : "")
+       )  unless @paths;
+
+# We split the load here via $freshenold now that @paths is set.
+# This does nothing to paths
+
+dbg("paths=(@paths) 
+contains ".scalar @paths . " entries
+
+
+before call to splitload");
+
+splitload($mypart,$ofparts,\@paths);
+
+dbg("count=".scalar @paths. " paths now contains((@paths))
+
+
+");
+
+my %dirlist = ();
+my %filetimes = ();
+if ($ignoreold) {
+    foreach my $path (@paths) {
+	my $dir = dirname($path);
+	$dir =~ s,/+$,,;
+	$dirlist{$dir}++;
+    }
+    foreach my $dir (keys %dirlist) {
+	doit("-ls $dir");
+	my (undef,undef,@output) = doit("-ls -n $dir");
+	progprint($COLOR_NORMAL."\n\nDetermining which target files are too old to bother rsyncing\n".
+		  "(use -B option to skip this feature and rsync them anyway)...");
+	
+	foreach my $line (@output) {
+	    next if ($line =~ m,/\.+$,);
+	    my ($e,$f) = $line =~ /-touch -t (\d+):\d+\s+(.*)/;
+	    $f =~ s,/+,/,g;
+	    $filetimes{$f} = $e;
+	    #dbg("DBG: SETTING filetimes{$f} = $e == $filetimes{$f} ");
+	}
+    }
+}
+
+
+my $pastlist = "";
+my $newestepoch = 0;
+foreach my $path (@paths) {
+    my $localepoch = (stat("$destdir$path"))[9];
+    $newestepoch = $localepoch unless ($localepoch < $newestepoch);
+}
+
+my ($skipwarn,$skipwarndone) = ();
+my ($rsyncpathlist,$getpathlist) = ();
+my $countperline = 0;
+foreach my $path (@paths) {
+  # Remove the escape here we use quotes
+  $path =~ s/\\(\s)/$1/g;
+  $path =~ s,^,/, unless $path =~ m,^/, ;
+#  $path = "\"$path\"" if $path =~ /[\(\)\[\]\s]/;
+#  dbg("Got \$remotepaths{$path}=$remotepaths{$path}=");
+  my $hashpath = $path;
+  $hashpath =~ s,/+,/,g;
+#offerabort("DBG: HERE with rsynced_today{$hashpath}=$rsynced_today{$hashpath}= and forcersync=$forcersync= and path=$path=");
+  if ($rsynced_today{$hashpath}) {
+    # Hash says we got it earlier, we confirm that before we believe using our current $destdir
+    my $test = `cd $destdir ; ls -ald .$hashpath`;
+    if (!$test) {
+	#offerabort("DBG: with destdir=$destdir= hashpath=$hashpath= got new code got test=$test=");
+	dbg("Pulling $hashpath again, we had it per \%rsynced_today  but not in $destdir anymore.");
+        delete $rsynced_today{$hashpath};
+    }
+  }
+  if ((!$forceresync) and $rsynced_today{$hashpath}) {
+    $skipwarndone .= " \"$hashpath\"";
+    next;
+  }
+
+  $path = "\"$path\"" unless ($path =~ /^\".*\"$/);
+  if ($ignoreold) {
+      # We ignore this $hashpath if our copy is at least a day newer
+#      doit("-ls $path"); #DBGLINE
+      if (-f "$destdir$hashpath" and
+	  ($filetimes{$hashpath} > 0) and ($newestepoch > 0)
+	  and ($newestepoch - 24*60*60 > $filetimes{$hashpath})) {
+	  $skipwarn.= " \"$hashpath\"";
+	  $oldignoredfile{$hashpath}++;
+	  next;
+      #} else { #DBG ONLY
+	#  offerabort("NOT Skipping $hashpath -- target copy is new enough\n\n".$COLOR_NORMAL.
+	#	     `ls -al "$destdir$hashpath"`.
+	#	     "\n\n".
+	#	     "filetimes{$hashpath}=$filetimes{$hashpath}= newestepoch=$newestepoch=\n\n".
+	#	     "ours is " .secstostr(-1 * ($newestepoch - $filetimes{$hashpath})). " older"); #DBGLINE
+      }
+  }
+#offerabort("numperline=$numperline= countperline=$countperline= and remotersyncpaths has ".scalar @remotersyncpaths." entries");
+  if (($numperline and $countperline == $numperline) or
+      ($rsyncpathlist and $oneperline) or
+      (length "$remotersync$remotersyncoptions $skipexpr$verbose --relative -avv$rsyncpathlist $path rsync://127.0.0.1:$remoteport/root"
+      > 1400)) {
+    push @remotersyncs,"$remotersync$remotersyncoptions $skipexpr$verbose --relative -avv$rsyncpathlist rsync://127.0.0.1:$remoteport/root";
+    push @remotersyncpaths,$rsyncpathlist;
+    $rsyncpathlist = "";
+    $countperline = 0;
+  }
+  $rsyncpathlist .= " $path";
+  $countperline++;
+}
+if ($rsyncpathlist) {
+    push @remotersyncs,"$remotersync$remotersyncoptions $skipexpr$verbose --relative -avv$rsyncpathlist rsync://127.0.0.1:$remoteport/root";
+    push @remotersyncpaths,$rsyncpathlist;
+}
+
+if (@remotersyncpaths) {
+    preservefile("$optmp/rsync_on_${nopen_rhostname}_part_${mypart}_of_$ofparts");
+    writefile("$optmp/rsync_on_${nopen_rhostname}_part_${mypart}_of_$ofparts",
+	join("\n",@remotersyncpaths));
+}
+
+
+if ($skipwarn) {
+    my ($remoteskipped) = doit("-ls $skipwarn");
+    $skipwarn =~ s, \"/, \"./,g;
+    offerabort
+	($COLOR_NORMAL.
+	 `cd $destdir ; ls -al $skipwarn`."\n\n".
+	 "Above is a listing of our LOCAL copies of these files from the rsync tarball.\n".
+	 "Above that is the listing of the same files on target, all of which\n".
+	 "should be older than our tarball creation date.\n\n".
+	 "Skipping above paths -- target copy is too old to bother rsyncing\n".
+	 "(use -B to avoid this feature and rsync them anyway).\n\n".
+	 "Pausing here, so you know....".
+	 "");
+    $skipwarn = "";
+    sleep 3;
+}
+if ($skipwarndone) {
+      my ($remoteskipped) = doit("-ls $skipwarndone");
+      $skipwarndone =~ s, \"/, \"./,g;
+      offerabort
+        ($COLOR_NORMAL.
+         `cd $destdir ; ls -alc $skipwarndone`."\n\n".
+	 "Current time: ".gmtime()."\n".
+         "Above is a listing of the CTIME of our LOCAL copies of these files. We already\n".
+	 "rsynced them once today, so we skipped them here. There are still ".scalar @remotersyncpaths."\n".
+	 "remote rsync commands to run.\n\n".
+	 "Use the -r(redo) option to skip this feature and re-sync data.\n".
+         "Pausing here, so you know....".
+         "");
+    $skipwarndone = "";
+    sleep 3;
+}
+$kidpid = startlocalrsync();
+
+progprint
+  ("Local rsync started [pid:$kidpid]:\n".
+   `ps -efwww | grep -v grep | grep -v perl | grep rsync`.
+   "\n   Now running the remote rsync$s.\n\n".
+   "\n   See list of files for this part (part $mypart of $ofparts) and others here:\n   ".
+   `ls -al $optmp/rsync_on_${nopen_rhostname}_part_${mypart}_of_*`.
+   "\n\n".
+   "NOTE: The lists in these files are after any skipped because they were either\n".
+   "      to old on target or they were done already today."
+  );
+
+sleep 1;
+my $err = 0;
+my ($ans,$longans,$bw,) = ();
+$count = 0;
+my $total = scalar @remotersyncs;
+#foreach my $cmd (@remotersyncs) {
+foreach my $pathlist (@remotersyncpaths) {
+    my $cmd = "$remotersync$remotersyncoptions $skipexpr$verbose --relative -avv$pathlist rsync://127.0.0.1:$remoteport/root";
+    last if -e $bailfile;
+    $bw = bwsofar();
+    # dbg("bwsofar returned $bw");
+    if ($maxdownload and $bw > $maxdownload) {
+        ($ans,$longans) = 
+            mygetinput("\n\nYou have reached the max megabytes (${bw}M >= ${maxdownload}M) you\n".
+		       "set for the op. Use \"C\" to continue and be prompted again between files,\n".
+		       "or enter \"NOMAX\" to stop getting this prompt and continue to the\n".
+		       "end. You can still abort between rsyncs with this command locally:\n\n".
+		       "      touch $bailfile\n","ABORT","CONTINUE","A","C","NOMAX");
+        $maxdownload = 0 if $longans eq "NOMAX";
+        last if $ans eq "a";
+    }
+    my $graphic = graphic(1+$count++,$total,80);
+    progprint("$COLOR_NORMAL\n".
+	      "Starting $remotersync $count of $total\n$COLOR_SUCCESS\n$graphic");
+    my ($output,$nopenlines,@output) = doit($cmd);
+    if ($output =~ /(failed|error)/) {
+        $output = join("NEWLINE",@output);
+        writefile("APPEND",$host_rsyncfamilyerrfile{$olddatafile},$output."CMD=$cmd");
+        progprint("output=$output=\n\n".
+		   "just appended to $host_rsyncfamilyerrfile{$olddatafile}\n\n".
+		   "Instance 1 of $ofparts will try that file again after it finishes\n".
+		   "its list of files.");
+        sleep 3;
+    } elsif ($output =~ /sent \d+ bytes\s+received \d+ bytes/) {
+        # We mark all in $pathlist as done already today
+        $pathlist =~ s,^\s*\"+,,;
+        $pathlist =~ s,\"+\s*$,,;
+        foreach my $singlepath (split(/\" \"/,$pathlist)) {
+	    dbg("Logging completed rsync for singlepath=$singlepath=");
+            newhostvar("rsynced_today{$singlepath}",1);
+        }
+    }
+}
+
+my $errpass = 0;
+while ($mypart == 1) {
+    # ASSERT: Ignoring $maxdownload for these...
+    my @errs = readfile("WIPE","ARRAY","$optmp/rsync.errors.$tunnelport*");
+    last unless @errs;
+    my ($all,$windows) = ("all","windows");
+    ($all,$windows) = ("this","window") if ($ofparts == 1);
+    my $num = @errs;
+    progprint($COLOR_NORMAL."\n\n".
+	      "$prog detected $num errors from ".
+	      "");
+    my (@filelist,$errlist) = ();
+    foreach my $err_record (@errs) {
+	my ($errlines,$cmd,$file) = $err_record =~ m,(.*)CMD=([^/]* (/.*) rsync://127.0.0.1.*/root),;
+#	$cmd =~ s,127.0.0.1:\d+/,127.0.0.1:$remoteport/,;
+	my @errlines = split(/NEWLINE/,$errlines);
+	my $err = join("\n     ",@errlines);
+	$errlist .= "\n${COLOR_NOTE}FILE=$COLOR_NORMAL$file\n".
+	    "$COLOR_FAILURE ERR=$COLOR_NORMAL$err\n".
+	    "$COLOR_NOTE CMD=$COLOR_NORMAL$cmd\n";
+	push(@filelist,$file);
+    }
+
+    my ($filelist) = nopenlss("-Uh",@filelist);
+    my ($all,$s,$this) = (" all","s") if $ofparts > 1;
+    ($all,$s) = ("","") if $ofparts == 1;
+    offerabort(
+	       $filelist."\n\n".
+	       $errlist."\n\n".
+	       "$COLOR_FAILURE $num RSYNC ERRORS WERE DETECTED$COLOR_NORMAL (file listing/details\n\n".
+	       "above). $prog will now handle these errors encountered from $all $windows using\n".
+	       "-tunnel $tunnelport udp, changing all reverse ports to $remoteport and running the\n".
+	       "commands here.".
+	       "");
+    my %successonfile = ();
+    foreach my $err_record (@errs) {
+	my ($errlines,$cmd,$file) = $err_record =~ m,(.*)CMD=([^/]* (/.*) rsync://127.0.0.1.*/root),;
+	next if $successonfile{$file};
+	my @errlines = split(/NEWLINE/,$errlines);
+	my $dbgoldcmd = $cmd;
+	$cmd =~ s,127.0.0.1:\d+/,127.0.0.1:$remoteport/,;
+	my ($output,$nopenlines,@output) = doit($cmd);
+	if ($output =~ /(failed|error)/) {
+	  if ($output =~ /failed: No such file or directory/) {
+	    mywarn($COLOR_FAILURE.
+		"\n\n\nThis tarball has some files in it no longer on target, e.g.:\n".
+		"   $file");
+	    sleep 3;
+	    next;
+	  }
+	    $output = join("NEWLINE",@output);
+	    writefile("APPEND",$host_rsyncfamilyerrfile{$olddatafile},$output."CMD=$cmd");
+#	    offerabort("output=$output=\n\n".
+#		       "just appended to $host_rsyncfamilyerrfile{$olddatafile}");
+	} else {
+	    $successonfile{$file}++;
+	}
+    }
+    if ($errpass++ > 0) {
+	my $default = $errpass > 1 ? "N" : "Y" ;
+	my ($ans) = 
+	    mygetinput("The reattempts above still had issues, do you wish to try again?",$default);
+	last if ($ans eq "y");
+    }
+}
+
+my $startloop = time();
+unlink("$optmp/Proceed_rsync_$tunnelport");
+
+my $othercount = $ofparts - 1;
+my $s = "s" if $othercount > 1;
+
+
+while ($mypart == 1) {
+    progprint($COLOR_NORMAL."\n\n".
+	      "Now waiting for the other $othercount instance$s to finish....")
+    if ($othercount);
+    tickleifneedbe();
+    # we count ourselves as done already
+    newhostvar("rsyncdone{$tunnelport $olddatafile $mypart}",$mypart);
+    my $done = 0;
+    for (my $i = 1; $i <= $ofparts; $i++) {
+	$done++ if ($rsyncdone{"$tunnelport $olddatafile $i"} == $i);
+    }
+    last if $done == $ofparts;
+    sleep 2;
+    if (-f "$optmp/Proceed_rsync_$tunnelport") {
+	unlink("$optmp/Proceed_rsync_$tunnelport");
+	last;
+    }
+    if ((time() - $startloop) % 15 <2) {
+	progprint
+	    ($COLOR_FAILURE."\n\n".
+	     "Still waiting on the other $othercount instance$s to finish.\n\n".
+	     "Touch this file locally if you wish to proceed anyway:\n\n".
+	     "            touch $optmp/Proceed_rsync_$tunnelport".
+	     "");	    
+    }
+}
+
+if ($ans eq "a") {
+  progprint("Aborted, max download met: ${bw}M >= ${maxdownload}M");
+}
+if (-e $bailfile) {
+  progprint("Aborted, $bailfile was touched.");
+  unlink($bailfile);
+}
+
+
+
+if ($mypart > 1) {
+    # Do not use mymydie here as we are sharing the same tunnel cannot shut that,
+    # part 1 will though.
+
+    # Do kill our local rsync tho
+    killlocalrsync();
+
+    newhostvar("rsyncdone{$tunnelport $olddatafile $mypart}",
+	       $mypart);
+    
+    mydie("This instance, part $mypart of $ofparts for freshen of\n\n".
+	  "  $olddatafile\n\n".
+	  "has completed. Part 1 is responsible for cleanup/teardown.");
+} elsif ( 0 and $ofparts > 1) {
+    #NOTE:DISABLED THIS ELSIF BLOCK DONE ELSEWHERE
+    # We monitor, when all other instances are done, we continue to build new
+    # tarball. "w" every so often to keep it up.
+    my $sleepcount=0;
+    my $othercount = $ofparts -1;
+    my $touchfile = ".rsyncproceed_all_done$olddatafile";
+    $touchfile =~ s,/,_,g;
+    $touchfile = "$optmp/$touchfile";
+    while (1) {
+	#  function to CREATE $touchfile if all others are done.
+	last if (-e $touchfile or checkalldone());
+	sleep 2;
+	progprint
+	    ("$COLOR_NORMAL\n\n".
+	     "Waiting on the other $othercount instances of $prog sharing the load on the file\n".
+	     "  $olddatafile\n".
+	     "to complete. This window will continue at that point and offer to build the\n".
+	     "new rsync tarball. A \"w\" will be done every 30 seconds to keep this window\n".
+	     "active and to monitor $nopen_rhostname activity.\n\n".
+	     "To proceed BEFORE the others all finish (if maybe your time is up), touch\n".
+	     "this file and this instance will proceed.\n\n".
+	     "    touch $touchfile"
+	     ) unless $sleepcount % 120;
+	doit("w") unless $sleepcount % 30;
+	$sleepcount+= 2;
+    }
+    my $why = "all $ofparts of $ofparts instances processing this rsync have completed.";
+    $why = "the \"all_done\" touch file was created, so we are proceeding."
+	unless checkalldone();
+    progprint
+	("$COLOR_NORMAL\n\n".
+	 "Proceeding, $why\n\n".
+	 "");
+}
+
+# ASSERT: This is instance 1 of N>= 1.
+
+killlocalrsync();
+closeourtunnel();
+# This removes our temp files and temp vars in $host_varfile.
+checkalldone(Clear);
+
+$keeprsync = rmrsync(prompt);
+
+my $tocfile = tocfile($olddatafile);
+
+if (-s $tocfile) {
+    my @toclisting = readfile("ARRAY",$tocfile);
+    my @tocfilelisting = grep /^-/ , @toclisting;
+    my (%tocfilelisting,%tocdirlisting,%tocdircount,$tarballmore) = ();
+    $tarballmore =
+	sprintf("%-65s %s\n","TARBALL DIRECTORIES","# FILES THERE").
+	sprintf("%-65s %s\n","===================","=============");
+
+    foreach my $listing (@tocfilelisting) {
+	next unless (($listing =~ m,^\-.* (\.)((\/.+)/[^/]+)$, )
+		     or ($listing =~ m,^\-.*( )((\/.+)/[^/]+)$, ));
+#	next unless ($listing =~ m,^\-.* \.{0,1}((\/.+)/[^/]+)$, );
+	$tocdirlisting{$3} .= "$listing\n";
+	$tocdircount{$3}++;
+	$tocfilelisting{$2}++;
+    }
+    foreach my $dir (keys %tocdirlisting) {
+	$tarballmore .= sprintf("%-65s %d\n",$dir,$tocdircount{$dir});
+    }
+ 
+    my $targetmore =
+	sprintf("%-65s %s\n","TARGET DIRECTORIES","# FILES THERE").
+	sprintf("%-65s %s\n","==================","=============");
+    my (%pullfiles,@pullfiles,$alertmore) = ();
+    foreach my $dir (keys %tocdirlisting) {
+	my (undef,undef,@filelisting) = doit("-ls $dir");
+	@filelisting = grep /^-/ , @filelisting;
+	$targetmore .= sprintf("%-65s %d\n",$dir,scalar @filelisting);
+	foreach my $listing (@filelisting) {
+	    my ($file) = $listing =~ m,^-.* (\/.+)$,;
+	    next if (!$file or $tocfilelisting{$file} or $oldignoredfile{$file});
+	    $alertmore .= "$listing\n";
+	    push(@pullfiles,$file);
+	    $pullfiles{$dir} .= "$file\n";
+	}
+    }
+    mygetinput
+	($COLOR_FAILURE."\n\n".
+	 "$COLOR_FAILURE  NEW!   NEW!   NEW!   NEW!   NEW!   NEW!   NEW!   NEW!   NEW!   NEW!\n".
+	 "$COLOR_NORMAL\n".
+	 "$prog is now going to compare the listing of the tarball just rsynced with\n".
+	 "the listing of the target directory(ies) and alert you to any differences\n".
+	 "in file names/counts. The TOC file from your tarball is here:\n\n".
+	 `ls -l $tocfile`."\n\n".
+	 "It contains the following:\n\n".
+	 $tarballmore.
+	 "\n".
+	 $targetmore.
+	 "\n".
+	 "$COLOR_FAILURE  NEW!   NEW!   NEW!   NEW!   NEW!   NEW!   NEW!   NEW!   NEW!   NEW!\n\n".
+	 "Press return to continue....".
+	 "");
+
+    if ($alertmore) {
+	$alertmore =
+	    $COLOR_FAILURE."\n\n".
+	    "The following files ARE on target but WERE NOT RSYNCED:\n\n".
+	    $alertmore.
+	    "The ABOVE files ARE on target but WERE NOT RSYNCED:\n\n".
+	    $COLOR_NORMAL."\n\n".
+	    "This is normal for blacklisted files (rsync option -b), but otherwise could\n".
+	    "mean your data set is not complete.";
+	$alertmore .= "  For this rsync pull, you blacklisted:\n   ".
+	    join("\n   ",@skipexprs)."\n\n".
+	    "" if (@skipexprs);
+    }
+    unless ($alertmore) {
+	progprint
+	    ($COLOR_FAILURE."\n\n".
+	     "NEW!   NEW!   NEW!   NEW! \n$COLOR_NORMAL\n".
+	     "$prog just compared the listing of the tarball just rsynced with the listing\n".
+	     "of the target directory(ies), and there were no missing files in the tarball.\n\n".
+#	 `ls -l $tocfile`."\n\n".
+#	 $tarballmore.
+#	 "\n\n".
+#	 $targetmore.
+#	 $alertmore.
+	     "");
+	sleep 3;
+    }
+    if ($alertmore) {
+	my @notblacklisted = @pullfiles;
+	for my $expr (@skipexprs) {
+	    @notblacklisted = grep ~ m,$expr, , @notblacklisted;
+	}
+	my $default = scalar @notblacklisted > 0 ? "Y" : "N";
+	foreach my $dir (keys %pullfiles) {
+	    my @files = split(/\n/,$pullfiles{$dir});
+	    my $localdir = "$destdir/$dir";
+	    my $nosend = $opt_N ? "NOSEND" : "";
+	    nopenlss("-Uz",@files);
+
+	    progprint
+		($COLOR_FAILURE."\n\n".
+		 "NEW!   NEW!   NEW!   NEW! \n$COLOR_NORMAL\n".
+		 "$prog just compared the listing of the tarball just rsynced with the listing\n".
+		 "of the target directory(ies). THERE ARE DIFFERENCES in file names/counts. The\n".
+		 "The TOC file from your tarball is:\n\n".
+		 `ls -l $tocfile`."\n\n".
+		 $tarballmore.
+		 "\n\n".
+		 $targetmore.
+		 $alertmore.
+		 "");
+	    my ($ans,$longans) = mygetinput
+		("\n\n".
+		 
+#		 "DBG: pullfiles=$pullfiles{$dir}=\n\n".
+#		 "DBG:   nopenlss(\"-GUYL$nosend$localdir\",@files);\n".
+		 "Do you want to use another -gs rsync to rsync the missing files and put\n".
+		 "them into the proper local directory prior to creating new tarball?",
+		 $default);
+	    if ($ans eq "y") {
+		$origargs =~ s,-([\S])*f.*tar.bz2,-${1}m $destdir,;
+		mydie("OK:  We'll stop this rsync, and you need to run the one shown below.\n".
+		      "When you pack the next one up later it will contain the combined data.\n\n".
+		      $COLOR_NORMAL.
+		      "-gs rsync $origargs @files\n".
+#		      "\n\n\nDBG: origargs = $origargs\n\n\n".
+		      "\n");
+		my $pause=0;
+		my ($output,$nopenlines,@output) =
+		    nopenlss("-GU${nosend}L$localdir",@files);
+		foreach my $file (@files) {
+		    my ($loc1,$loc2,$remotepath,$match,$sizediff) = gotlocalcopy($file);
+
+		    my ($loccopied,$lsslocdir) = ($loc1);
+		    if ($loc1) {
+			$lsslocdir = dirname ($loc1);
+		    }
+		    unless ($loc1 and -d $lsslocdir) {
+			$loccopied = $loc2;
+			$lsslocdir = dirname ($loc2) if $loc2;
+		    }
+		    next if ($lsslocdir eq $localdir);
+		    progprint($COLOR_NORMAL."\n\a\n".
+			      "nopenlss reports that the local copy of this file:\n".
+			      "      $file\n\n".
+			      "is in $lsslocdir\n\n".
+			      "We will copy that one into\n".
+			      "      $localdir\n\n".
+			      "for our tarball.\n\n".
+			      `cp -pv $loccopied $localdir`.
+			      "");
+		    $pause = 2;
+		}
+		sleep $pause;
+	    }
+	}
+    }
+}
+
+offerball_rsync();
+
+## END MAIN ##
+
+sub offerball_rsync {
+  # Done with all, mymydie() will close local rsync and
+  # close down -tunnel in other window
+  my %projecthash = ();
+  my $todaystamp = timestamp(short);
+  $todaystamp = $1 if ($destdir =~ /\.(\d{8}-\d{4}\d*)/);
+  
+  # See if we know the current project
+  my ($project,$targets,@projectlist) =
+    opnotesprojects(\%projecthash);
+  $project = $gbl_opproject if ($gbl_opproject and
+				lc $gbl_opproject ne "nothing" and
+				lc $gbl_opproject ne lc $project);
+  $project = uc $project;
+  $project = "NOPROJECT" unless $project;
+  $gbl_opuser = "NOUSERID" unless $gbl_opuser;
+  my $newball = "rsync_${project}_${gbl_opuser}_${tarballstring}_${nopen_rhostname}_${todaystamp}.tar.bz2";
+
+  foreach my $expr (@skipexprs)  {
+      chomp(my $hits = `cd $destdir ; find ./ -type f | egrep "$expr"`);
+      foreach my $hit (split(/\n/,$hits)) {
+	  if ($hit) {
+	      my $targetmore = "";
+	      my ($targhit) = $hit =~ m,^\.(/.*),;
+	      my ($targhit) = doit("-ls -h $targhit") if $targhit;
+	      my $targetmore = "The target version of this file is listed above, which you chose\n".
+		  "not to not rsync. " if $targhit;
+	      my ($ans) = mygetinput
+		  ("You chose to blacklist with the -b $opt_b option.\n\n".
+		   "That matches this local file (which was NOT just rsynced, so is likely\n".
+		   "pretty old):\n\n".
+		   `cd $destdir ; ls -alh $hit`."\n\n".
+		   $targetmore.
+		   "Do you want to remove our local copy from\n\n".
+		   "   $destdir/\n\n".
+		   "before creating a new tarball?","Y"
+		   );
+	      progprint($COLOR_NORMAL.".\n\n".
+			
+			"OK, omitting this file:\n\n".
+			$COLOR_FAILURE.$hit."\n\n".
+			"from today's new tarball:\n\n".
+			`cd $destdir ; rm -vf $hit`) if ($ans eq "y");
+	  }
+      }
+  }
+
+  my ($ans) = mygetinput
+    ($COLOR_NOTE.
+     "$prog is done processing:\n$COLOR_FAILURE\n\t".join("\n\t",@paths).
+     "\n$COLOR_NOTE\n".
+     "You can now create a fresh tarball containing the target data called:\n".
+     "    $newball\n\n".
+     "In:\n".
+     "    $destdir\n\n".
+     "If you are done rsyncing this particular location, you should do so\n\n".
+     "If you want to do so later, perhaps after some -lss -G file pulls, you\n".
+     "can either wait at this prompt (your window will NOT be active) or answer\n".
+     "<N>o now and use the pastables provided below to do the pack-up later.\n\n".
+     $COLOR_FAILURE.
+     "   NOTE:  If you create it now, then DO NOT Ctrl-C in this NOPEN window (EVEN\n".
+     "          IF IT HANGS!) until the tarball popup indicates it has finished\n".
+     "          completely, or you will prematurely stop the tarball being built.\n\n".
+     $COLOR_NOTE.
+     "Do you want to create it?",
+     "Y"
+    );
+
+
+  my $tmpdir = $optmp . "/" . basename($destdir);
+  preservefile($tmpdir);
+
+  unless ($ans eq "y") {
+      my $tmpdir = "$optmp/".basename($destdir);
+      mymydie
+	  ("\n\n".
+	   "Aborting the pack-up then.\a\n\n".
+	   "ls -alrtR $destdir\n".
+	   `cd $destdir ; ls -arltR`."\n$COLOR_FAILURE\n".
+	   "$prog is done. Aborting the pack-up.\a\n\n".
+	   "Data can be found locally (see listing above) but NOT in a tarball yet.\n".
+	   "Here is a block of pastables to make one:\n\n".
+	   "mkdir -pv $tmpdir\n".
+	   "cd $destdir\n".
+	   "tar cvjf $tmpdir/$newball ./\n".
+	   "cd $opdir ; mv -v $tmpdir $destdir.NEW\n".
+	   "mv -v $destdir $tmpdir \n".
+	   "mv -v $destdir.NEW $destdir\n".
+	   ""
+	   );
+  }
+
+
+  my ($ansmove) = mygetinput
+      ("".
+       "FYI, the files here:\n   $destdir\n".
+       "are now moved into $optmp and replaced with the tarball we are about to create.\n\n".
+       "Be sure you allow the tar cvjf to complete, otherwise the data will not all be\n".
+       "in $opdown when the op is packed up at the end.\n\n".
+       "Hit return to continue..."
+       );
+
+  rename($destdir,$tmpdir);
+  mkdir($destdir);
+  newhostvar("host_unpackedtardatafor{$destdir}",$tmpdir);
+  $tardir = $destdir;
+  $destdir = $tmpdir;
+
+  # If we continue, fork, parent creates tarball in background then exits, 
+  # child exits
+  createtarball_rsync($newball) if fork();
+  mymydie
+    ("\n\n".$COLOR_NORMAL.
+     "Popping up an xterm that will create this archive in the background:\n\n".
+     "    $newball\n\n".
+     "in: $destdir\n\n".
+     "When it is done, there is$COLOR_FAILURE NO LONGER ANY NEED$COLOR_NORMAL to copy-fast it.\n".
+     "Post-processing now handles these. You will be provided pastables with\n".
+     "which to copy and push this tarball, but that is normally not needed.\n\n".$COLOR_FAILURE.
+     "WARNING:  Be sure the popped up xterm packing up that tarball finishes\n".
+     "completely before allowing getopdata to pack up your op!\a\n".
+     "");
+}#offerball_rsync
+
+sub createtarball_rsync {
+  # If they wanted the tarball, fork/close here releases the 
+  # NOPEN window that called us, we popup an xterm showing tarball
+  # getting made. We exit when it is done.
+  # The output of the popup is saved in $opdown with target IP.
+  #
+  local ($tarball) = (@_);
+  my $taroutfile = "$opdown/autorsync.${nopen_rhostname}_$$";
+  mymydie("Cannot write to $taroutfile") unless
+    open(TAROUT,"> $taroutfile");
+  print TAROUT gmtime()."         AUTORSYNC BUILDING NEW TARBALL\n".
+    "========================\n";
+  close TAROUT;
+  close(OUT);
+  `sync`;
+  mymydie("Cannot append to $taroutfile") unless
+    open(TAROUT,">> $taroutfile");
+  if (fork()) {
+    close(STDOUT);
+    close(STDIN);
+    close(STDERR);
+    close($socket);
+    exec("xterm -title autorsync_${nopen_hostonly}_now_building_$tarball ".
+	 "-ut +cm +cn -sk -sb -sl 15000 -geometry 128x67+1302+26 -e tail -50f $taroutfile");
+    exit;
+  }
+  select TAROUT;
+  $| = 1;
+  sleep 2;
+  close(STDOUT);
+  close(STDIN);
+  close(STDERR);
+  close($socket);
+  my ($dstpath,$srcpath) = ();
+  if (@mergepullsfrom) {
+    foreach my $mergedir (@mergepullsfrom) {
+      unless (-d $mergedir) {
+	print $COLOR_FAILURE .
+	  "\nSKIPPING $mergedir\n".
+	  "It does not exist, was anything pulled from target there?\n";
+	next;
+      }
+      $srcpath = $mergedir;
+      $srcpath =~ s,$opdown[/]*$nopen_rhostname[/]*,/,;
+      $dstpath = dirname($srcpath);
+      chomp(my $newfilecount = `find $mergedir -type f | wc -l`);
+      chomp(my $existingcount = `find $destdir -type f | wc -l`);
+      print "$COLOR_NOTE\n".
+	"Merging data (not clobbering),$COLOR_FAILURE  $newfilecount$COLOR_NOTE files from:$COLOR_NORMAL\n".
+	"  $mergedir\n$COLOR_NOTE\n".
+	"into destination currently with$COLOR_FAILURE $existingcount$COLOR_NOTE files:$COLOR_NORMAL\n".
+	"  $destdir\n\n$COLOR_NOTE".
+	"Using these commands (verbose output shown below in red):$COLOR_NORMAL\n\n".
+	"mkdir -vp $destdir$srcpath\n".$COLOR_FAILURE.
+	`mkdir -vp $destdir$srcpath 2>&1`.$COLOR_NORMAL.
+	"cd $opdown/$nopen_rhostname/\n".
+	"cp -ipvr --reply=no .$srcpath $destdir$dstpath\n".$COLOR_FAILURE.
+	`cd $opdown/$nopen_rhostname/ 2>&1 ; cp -pvur .$srcpath $destdir$dstpath | tee $optmp/.merged.via-gs.rsync.$$ 2>&1`;
+      `sync`;
+      # Now the files that got copied over we remove from $srcpath so we
+      # avoid duped data in ./down tarball.
+      if (open(RSYNCIN,"$optmp/.merged.via-gs.rsync.$$")) {
+	print "$COLOR_NOTE\n\n".
+	  "Files successfully merged into via-gs.rsync\n".
+	  "(and then removed from $srcpath):$COLOR_NORMAL\n".
+	  "==========\n";
+	while (<RSYNCIN>) {
+	  my ($locfile) = m,\`(.*)\' ,;
+	  unless (-e "$opdown/$nopen_rhostname/$locfile") {
+	    dbg("autorsync merge SERIOUS PROBLEM: $opdown/$nopen_rhostname/$locfile should exist but does not");
+	    print "$COLOR_FAILURE\a\n\n".
+	      "autorsync merge SERIOUS PROBLEM: $opdown/$nopen_rhostname/$locfile should exist but does not$COLOR_NORMAL\n";
+	    next;
+	  }
+	  print "  $locfile\n";
+	  unlink("$opdown/$nopen_rhostname/$locfile");
+	}
+	close(RSYNCIN);
+	chomp(my $notmerged = `find $mergedir -type f`);
+	if ($notmerged) {
+	  print $COLOR_NOTE.
+	    "\n\nFiles$COLOR_FAILURE NOT MERGED$COLOR_NOTE into via-gs.rsync:\n==========$COLOR_FAILURE\n".
+	      $notmerged;
+	}
+      }
+      chomp(my $aftercount = `find $destdir -type f | wc -l`);
+      print "\n$COLOR_NOTE\n".
+	"After above merge, $destdir now has$COLOR_FAILURE $aftercount$COLOR_NOTE files.\n\n";
+      unless ($aftercount == $newfilecount + $existingcount) {
+	print "\n$COLOR_FAILURE\n".
+	  "NOTE: The after merge count ($COLOR_NOTE$aftercount$COLOR_FAILURE) is not the sum of the other two. There must\n".
+	    "      have been some overlap, make sure your end result is what you wanted.\n\n";
+      }
+    }
+    `sync`;
+    sleep 2;
+    `sync`;
+  }
+  my $tarcmd = "cd $destdir ; tar cvjf $tardir/$tarball . 2>&1";
+  print 
+    "\n\n".
+    $COLOR_FAILURE.
+    gmtime().
+    "\n\nNow tarring up the results with:\n\n".
+    $COLOR_NOTE.
+    $tarcmd."\n\n".
+    $COLOR_NORMAL.
+    " made by: $prog $origargs\n".
+    "      on: $nopen_rhostname\n\n".
+    "Verbose tar output will follow when it is done:\n\n";
+
+  if (open(OUT,">> $taroutfile")) {
+    $| = 1;
+    if (open(RSYNCIN,"$tarcmd |")) {
+      while (<RSYNCIN>) {
+	print ;
+      }
+      close(RSYNCIN);
+    }
+
+    sleep 1;
+
+    print "\n$COLOR_NORMAL\n".gmtime().
+	"Computing the MD5 checksum of the tarball just created to mark it for later REUSE...\n\n".
+	`ls -al $tardir/$tarball`."\n\n";
+
+    # We set this variable here now that the tarball rides up in $opdir
+    my ($md5sum) = `cat  $tardir/$tarball | md5sum` =~ /([a-f0-9]{32})/ ;
+    newhostvar("gbl_fg_reuse{$md5sum}",$tarball);
+
+    print "\n\n".gmtime().
+	"\n\nMD5 sum:  $md5sum   $tarball\n".
+	"\n$COLOR_FAILURE\n$tarcmd\n$COLOR_NORMAL\n".
+	"Above command is done, tarball is now in $tardir:\n\n".
+	`cd $tardir ; ls -alrth *$nopen_rhostname*bz2;echo ===; ls -alrt *$nopen_rhostname*bz2`.
+	"\n\n";
+
+
+    print "At this point, we used to copy-fast the tarball we just made.\n\n".
+	"Now, we instead allow it to stay here for automatic processing later:\n".
+	"       $tardir\n\n".
+	"If for some reason this data is needed immediately, these pastables will\n".
+	"help you get it pushed:\n\n".
+	"   cp -v $tardir/$tarball $opdir\n".
+	"   copy-fast REUSE$nozip $opdir/$tarball\n\n".
+	"";
+
+    print $COLOR_FAILURE."\n\n".
+      "(close this window with Ctrl-C anytime.)\n$COLOR_NORMAL\n";
+    # We just exit is all. The ^C they are sending is going to the tail -f
+    # on the file this has all been printing too, TAROUT==open(TAROUT,">> $taroutfile");
+
+    exit;
+
+    # BELOW NO LONGER USED:
+    print 
+      "Tarball is being copied to $opdir now...\n\n".
+      "cp -v $tardir/$tarball $opdir/\n\n".
+      "";
+    print `cp -v $tardir/$tarball $opdir`;
+    print "\n\nDONE COPYING, pushing the one in $opdir now:\n\n".`ls -hal $opdir/$tarball $tardir/$tarball`."\n\n";
+
+
+
+    if ($mergepullsfrom) {
+      print "\n$COLOR_FAILURE\n".
+	"NOTE:$COLOR_NOTE Scroll TO THE TOP above to confirm merge from\n".
+	$COLOR_NORMAL.
+	"      $mergepullsfrom\n$COLOR_NOTE".
+	"  to:$COLOR_NORMAL $destdir$dstpath\n\n".
+	$COLOR_NOTE.
+	"      is as desired.\n\n";
+    }
+    print $COLOR_NOTE."\n\n".
+	"$prog just popped up a window running copy-fast now that this tarball is done.\n".
+	"If for some reason you are NOT pushing yet, you should ^C it so it does not move\n".
+	"the file to /root/NOTPUSHED.\n\n";
+    unless (fork()) {
+      close(STDOUT);
+      close(STDIN);
+      close(STDERR);
+      close($socket);
+      dbg("EXECING: 1x -hold -title $prog_copy-fast_popup -geometry 130x24-0+0 -e copy-fast REUSE$nozip $opdir/$tarball");
+      exec("1x -title $prog_copy-fast_popup -geometry 130x74-0+0 -e copy-fast REUSE$nozip $opdir/$tarball");
+    }
+    print $COLOR_FAILURE."\n\n".
+      "(close this window with Ctrl-C anytime.)\n$COLOR_NORMAL\n";
+  }
+  close(TAROUT);
+  exit ;
+}#createtarball
+
+sub tocfile {
+  # Given complete path, return tocfile name in $optmp
+  local ($name) = (@_);
+  my $file = "$name.toc";
+  $file =~ s,/,_,g;
+  $file = "$optmp/$file";
+  return $file;
+}#tocfile
+
+sub unpackold {
+  # If ($mypart > 1) we merely return.
+  return unless ($mypart == 1);
+  # Otherwise,
+  # If $mypart > 1, then $tocfile is already populated, we read it in.
+  # Checks type of tarball by filename and optionally
+  # via unpacking and piping to "file".
+  # Backgrounded child process proceeds with unpack then exits.
+  # Parent returns.
+  local ($tball) = (@_);
+  my ($output,$notunpacking,@listing) = ("",0);
+  my $tocfile = tocfile($tball);
+  my $taropts = "xvf";
+  my $tocopts = "tvf";
+  my $compressopt = "";
+  mydie("-f tball=$tball must exist and be non-empty")
+    unless (-s $tball);
+  $dounpacking = 1;
+  my $test = `file $tball`;
+  my $taronly = $test =~ /tar archive/;
+  my $bz2 = $test =~ /bzip2 compressed/;
+  my $gz = $test =~ /gzip compressed/;
+  $compressopt = "j" if $bz2;
+  $compressopt = "z" if $gz;
+  my $filename = basename($tball);
+  my $tagfile = "rsyncunpacked.$tball";
+  $tagfile =~ s,/,_,g;
+  $tagfile = "$optmp/$tagfile";
+
+dbg("in unpackold(@_) taronly=$taronly bz2=$bz2 gz=$gz test=$test
+mypart=$mypart ofparts=$ofparts
+tagfile=$tagfile".`ls -al $tagfile`."
+tball=$tball=
+dounpacking=$dounpacking=
+notunpacking=$notunpacking=
+");
+  if ($mypart > 1) {
+    $notunpacking++;
+  } else {
+    if (-e $tagfile) {
+      ($ans) = mygetinput
+	($COLOR_FAILURE.
+	 $tball."\n\n".
+	 "$prog has unpacked this tarball before.\n\n".
+	 #"If new data was downloaded via $prog since then, unpacking the tarball\n".
+	 #"again is likely not needed--if an rsync succeeded once, you already have\n".
+	 #"data newer than what is in this tarball.\n\n".
+	 #"If you proceed, we will unpack this tarball again and re-do the rsync.\n\n".
+	 "Do you want to CONTINUE(MERGE), UNPACK the data again or ABORT?\n\n".
+	 "CONTINUE is the new correct option if you wish to switch to another pitch\n".
+	 "midop. The tarball will NOT be unpacked again in that case.  \n\n".
+	 "UNPACK will unpack the same tarball again, likely not what you want\n\n".
+	 "CONTINUE, UNPACK again or ABORT?",
+         #"Do you want to SKIP the unpack so you can merge with the files already\n".
+	 #"unpacked and perhaps partially rsynced, UNPACK this tarball again or ABORT?\n\n",
+	 "CONTINUE","SKIP","A","ABORT","UNPACK","U");
+      if ($ans eq "a") {
+	$dounpacking = 0;
+	mymydie("Aborting");
+      } elsif ($ans eq "c") {
+	$dounpacking = 0;
+      } else { # All other answers proceed identically
+	# Clear out any previous "part-N-of-$ofparts" files from old runs.
+	checkalldone(Clear);
+      }
+    }
+    my $lstball = `ls -ahl $tball`;
+    my ($tballsize) = (split(/\s+/,$lstball))[4];
+    if ($dounpacking and $compressopt and ! $skiptest) {
+      my ($ans) = offerabort
+	($lstball."\nTesting tarball (size $tballsize):\n".
+	 " $tball\n\n".
+	 "to see it is a valid tarball. This can take a LONG time if it is very\n".
+	 "large. You can <S>kip the test,","S");
+      if ($ans eq "s") {
+	progprint("Skipping test of $tball");
+	$skiptest++;
+      } else {
+	if ($bz2) {
+	  $test = `bunzip2 -dc $tball | file -`;
+	} elsif ($gz) {
+	  $test = `gzip -dc $tball | file -`;
+	}
+      }
+      #    dbg("second test=$test");
+      mydie("$tball is compressed but contents are not tar format")
+	unless $test =~ /tar archive/ or $skiptest;
+    } else {
+      mydie("-f $tball must be one of tar, tar.gz ,tgz or  tar.bz2 format")
+	unless ($taronly or $skiptest or !$dounpacking);
+    }
+  }
+  $unpackrunning = "cd $destdir  2>&1; pwd  2>&1; tar  -$compressopt$taropts $tball 2>&1";
+  $statuscmd = "ps -ef | grep -v grep | grep tar ; du -hs $destdir ; find $destdir | wc";
+  # THIS LINE WAS HERE BEFORE I THINK IT WAS NOT SUPPOSED TO BE WE FORK A BIT LATER
+#  return unless $unpackpid = fork();
+  unless ($notunpacking) {
+    $notunpacking = checkolddestdir();
+    offerabort
+      ("About to unpack this $tballsize tarball locally (backgrounded):\n".
+       $lstball."\n".
+       "This can take a while, but $prog will make sure it is done before\n".
+       "proceeding. Use this in a local window to see the progress of the\n".
+       "tar extraction:\n\n".
+       "   watch -d \"$statuscmd\"") unless $notunpacking;
+  }
+  if ($freshenold) {
+    if (-s $tocfile) {
+      progprint("$COLOR_FAILURE\n".
+		"RE-USING the previous TOC for this file:\n".
+		$tocfile);
+      my $listing = readfile($tocfile);
+      @listing = split (/\n/,$listing);
+      mydie("Listing file $tocfile is empty or malformed")
+	  unless (@listing > 1);
+    } else {
+      progprint("$COLOR_NORMAL\n\n".
+		"Forking a child to build list of remote files from local tar file:\n\n".
+		"           $tball\n\n".
+		"via \"tar -$compressopt$tocopts\".");
+    }
+  }
+  return unless $unpackpid = fork();
+  dbg("In unpackold, just forked, mypart=$mypart ofparts=$ofparts");
+  if ($freshenold) {
+      # Fork here, child pops up @listing, maybe building it first.
+      if ($mypart == 1 and !@listing) {
+	  progprint
+	      ($COLOR_FAILURE."\n\n".
+	       "NEW!$COLOR_NORMAL  $prog is now going to compare the listing of the\n".
+	       "tarball being rsynced with the listing of the target directory(ies) and\n".
+	       "alert you to any differences right before the pack up stage.".
+	       "");
+      }
+      unless(fork()) {
+	  unless (@listing) {
+	      # another child, it gets our TOC (files only) if we want it
+	      # for freshen purposes and pops it up.
+	      # We now sort the tvf output with lss so oldest files are rsynced first.
+	      dbg("Sleeping 999  maybe unpacking TOC");
+	      my $toccmd = "cd $destdir  2>&1; tar -$compressopt$tocopts $tball | grep \"^-\" 2>&1 | lss | tee $tocfile.TMP";
+	      @listing = split(/\n/,`$toccmd 2>/dev/null`);
+	      @listing = grep ! /\.(partial|oget-last)/, @listing  unless ($keepweirdfiles);
+	      # Make sure this file is complete the first it becomes its final name,
+	      # so rename only when $toccmd exits.
+	      rename("$tocfile.TMP",$tocfile);
+	  }
+	  # Remainder in here to pop up contents, do not bother unless part 1
+	  exit unless $mypart == 1;
+	  dbg("
+
+
+HERE
+
+
+  mypart=$mypart
+
+
+listing has ".scalar @listing." elements 
+
+
+about to write to >$unpackedtoc.working
+");
+	  my ($toclisting,$toclinecount,$maxwidth) = ();
+	  open(RSYNCOUT,">$unpackedtoc.working")
+	      or dbg("COULD NOT OPEN RSYNCOUT");
+	  print RSYNCOUT "\@oldlist = (\n";
+	  @listing = grep ! /\.(partial|oget-last)/, @listing  unless ($keepweirdfiles);
+	  foreach my $l (@listing) {
+	      chomp($l);
+#dbg("LISTING: $l");
+	      next if $l =~ /tar: Record size =/;
+	      #	my ($ymd,$hms,$hit) = $l =~
+	      #	  m,(\d{4}-\d\d-\d\d)\s+(\d\d:\d\d:\d\d)\s+(.*),;
+	      my ($perms,$usergroup,$size,$ymd,$hms,$hit) = $l =~
+		  m,(\S+)\s+(\S+)\s+(\d+)\s+(\d{4}-\d\d-\d\d)\s+(\d\d:\d\d:\d\d)\s+(.*),;
+	      next unless $ymd and $hms and $hit;
+	      while ($size =~ /(.*)(\d)(\d{3})(,\d{3})*,*$/) {
+		  $size = "$1$2,$3$4";
+	      }
+	      $size =~ s/,+$//;
+	      $toclinecount++;
+	      $maxwidth = maxof(length($l),$maxwidth);
+	      $toclisting .= sprintf "%s %-11s %16s %10s %8s %s\n",
+	      $perms,$usergroup,$size,$ymd,$hms,$hit;
+	      # From TOC of old tar file, we skip any blacklisted
+	      my $skipthisone = 0;
+	      foreach my $skipexpr (@skipexprs) {
+		  $skipthisone++ if $hit =~ /$skipexpr/;
+		  last if $skipthisone;
+	      }
+	      next if $skipthisone;
+	      $hit =~ s,^\.,,;
+	      print RSYNCOUT "  \"$hit\",\n";
+	  }
+	  print RSYNCOUT "           );\n\n";
+	  close(RSYNCOUT);
+	  $maxwidth += 10;
+	  $toclinecount = minof(8+$toclinecount,75);
+	  my $geom = "";
+	  my $killit = dolocalecho("# ".gmtime()."\n".
+				   "# Table of Contents (files only) from $destdir$tball:\n\n".
+				   $toclisting,
+				   "popup-geometry ${maxwidth}x$toclinecount-0+0 -bg white -fg blue",
+				   );
+	  newhostvar("killpopup{$killit}",1);
+	  my $junk = "";
+	  foreach my $key (keys %killpopup) {
+	      $junk .= "\$killpopup{$key}=$killpopup{$key}=\n";
+	  }
+	  dbg("killpopup is now (
+$junk
+)");
+	  sleep 1;
+	  rename("$unpackedtoc.working",$unpackedtoc);
+	  # Child done now, goes away.
+	  exit;
+      }
+  }
+  if ($notunpacking) {
+    `touch $unpackingdone`;
+    exit;
+  }
+  open(RSYNCOUT,">$unpackingdone.working");
+#  print RSYNCOUT `echo sleeping 888 testing long unpcak; sleep 888 ; $unpackrunning | tee $tagfile`;
+  `mkdir -p $destdir` unless -d $destdir;
+  print RSYNCOUT `$unpackrunning`;
+  unless ($keepweirdfiles) {
+      my $rmlist = `cd $destdir 2>&1 ; find . -name "*.partial" -o -name "*.oget*" | tr '\n' ' '` ;
+      # Cannot send this to user, we are forked by now....it is in dbg file tho.
+      dbg("Removing any partial/oget files in $tball:\n\n".
+	  `cd $destdir 2>&1 ; pwd 2>&1 ; /bin/rm -v $rmlist 2>&1`
+	  ) if $rmlist;
+  }
+#dbg("SLeeping 888 maybe to see if bug here");
+#`sleep 888`;
+  close(RSYNCOUT);
+  `touch $tagfile`;
+#  dbg("touched $tagfile:\n".`ls -al $tagfile`);
+  rename("$unpackingdone.working",$unpackingdone);
+  exit 0;
+}#unpackold
+
+sub mymydie {
+#  dbg("in mymydie(@_) with kidpid=$kidpid RSYNCLOCAL=".RSYNCLOCAL);
+  # Responsible for this before sending @_ to mydie():
+  unless ($justbuild) {
+      rmdir($destdir); # Remove empty if there
+    killlocalrsync();
+    unless ($mypart > 1) {
+      rmrsync();
+      closeourtunnel();
+    }
+  }
+  mydie(@_);
+}#mymydie
+
+sub rmrsync {
+  local ($prompt) = (@_);
+  # Once global $keeprsync is set, mymydie will not rm rsync.
+  # Only first of multiple parts puts/removes rsync.
+  return 1 if (($keeprsync or $mypart > 1) and !$prompt);
+  if ($rsyncuploaded) {
+    if ($prompt) {
+      my ($ans) = mygetinput
+	("Do you want to leave $rsyncuploaded up there\n".
+	 "for more use today?","N");
+      return 1 if $ans eq "y";
+    }
+    doit("-rm ../../../../../../../$rsyncuploaded");
+    newhostvar("rsyncuploaded","");
+  }
+  return 0;
+}
+
+sub killlocalrsync {
+  kill TERM,$kidpid if ($kidpid and $kidpid != $$ and ! $kidkilled++);
+}#killlocalrsync
+
+sub closeourtunnel {
+  return unless ($mypart == 1 or $ofparts < 2);
+  unless ($tunnelclosed++) {
+    my $killtunnels = "";
+    for (my $i=1; $i< 2*($ofparts + 1); $i += 2) {
+	$killtunnels .= sprintf(" %d %d",$i,$i+1);
+    }
+    progprint("Closing \"-tunnel $tunnelport udp\" with these commands in the background:\n".
+#	      "\"dotunnel c $tunnelport\" in the background...");
+	      "    PORT=$tunnelport dotunnel c $killtunnels\n".
+	      "    PORT=$tunnelport dotunnel q\n");
+    return if fork();
+    close(STDOUT);
+    close(STDIN);
+    close(STDERR);
+    close($socket);
+    `PORT=$tunnelport dotunnel c $killtunnels`;
+    `PORT=$tunnelport dotunnel q`;
+    newhostvar("tunneldone","CLEARALLMATCHING");
+    exit;
+  }
+}#closeourtunnel
+
+sub setuptunnel {
+    my $warning="";
+    if ($mypart > 1) {
+	my $starttime = time();
+	while (1) {
+	    newhostvar();
+	    last if $host_rsyncremoteport{"$olddatafile PART=$mypart"};
+	    if ((time() - $starttime) % 10 < 2) {
+		progprint("We are$still waiting on part 1 of $ofparts to set up our tunnel.".
+			  "");
+		$still = $COLOR_FAILURE." still$COLOR_NORMAL";
+	    }
+	    sleep 2;
+	    tickleifneedbe();
+	    mymydie("Aborted ($bailfile was touched)")
+		if (-e $bailfile);
+	}
+	$remoteport = $host_rsyncremoteport{"$olddatafile PART=$mypart"};
+	newhostvar("tunneldone{rsync-part-${mypart}-of-$ofparts.DONE.$olddatafile}",
+		   $remoteport);
+	return $remoteport;
+    }
+    #ASSERT: This is $mypart == 1, we set up all tunnels once we confirm -tunnel is up
+    $familyerrfile =     # Nulled by part 1 used by all via
+	"$optmp/rsync.errors.$tunnelport";
+    preservefile($familyerrfile);
+    newhostvar("host_rsyncfamilyerrfile{$olddatafile}",$familyerrfile);
+    my $startloop = time();
+    my $test = "";
+  TUNNELREDO:
+    while (keys %remoteports < $ofparts) {
+	$test = `netstat -anup | grep "udp.*:$tunnelport "`;
+	return 0 if (!$test and $mypart > 1);
+	if ((time() - $startloop) % 20 <2) {
+	    progprint
+		($warning.$COLOR_NORMAL.
+		 "\nAt this point, you need a second window on \n".
+		 "$nopen_rhostname,\n".
+		 "to tunnel the remote/local rsync commands. Paste this into the\n".
+		 "other window\n".
+		 "               -tunnel $tunnelport udp\n\n".
+		 "$prog will use that (local) udp port to create a reverse tcp\n".
+		 "tunnel for rsync data. $prog will close that tunnel when it is done\n\n".
+		 "waiting for that window...");
+	    $warning = "\n\n$COLOR_FAILURE\n\n\tYou still need to set the -tunnel window up\n\a\n";
+	}
+	unless ($test =~ /noclient/) {
+	    if ($test) {
+		mymydie("$COLOR_FAILURE\n\nNon-NOPEN process just took port $tunnelport, ABORTING");
+	    }
+	    sleep 1;
+	    next;
+	}
+	my $s = "";
+	$s = "s" if ($ofparts > 1);
+	$test =~ s,\s+/  ,g,;
+	progprint($COLOR_NORMAL.
+		  "\n\nFound NOPEN -tunnel:\n\n$test\n\nProceeding with part $mypart of $ofparts....\n\n".
+		  "First the reverse tunnel$s, which will show up in the -tunnel window.");
+	my $partnum = $ofparts;
+	@otherruns = ();
+	
+	while (keys %remoteports < $ofparts) {
+	    my $remoteport = myrand();
+	    # Set up all ports now in -tunnel window
+	    my $output = "";
+	    # We set up all remote tunnels now in $mypart == 1 only
+	    while (1) {
+		$remoteport++;
+		# $localport being different from $remoteport is only useful for 
+		# using -gs rsync against yourself (i.e., for testing).
+		# my $localport = $remoteport + 1;
+		my $localport = $remoteport;
+
+		# If already in use, increment $remoteport via next;
+		my ($test) = doit("netstat -an | egrep \"[\\.:]$remoteport .*LIST\"");
+		next if $test; 
+
+		$output = `PORT=$tunnelport dotunnel r $remoteport 127.0.0.1 $localport`;
+#    dbg("dotunnel output=$output=");
+		$output .= `stattunnel $tunnelport`;
+		if ($output =~ /remote listen on port $remoteport, will connect to 127.0.0.1:$localport/) {
+		    ($test) = doit("netstat -an | egrep \"[\\.:]$remoteport .*LIST\"");
+		    unless ($test) {
+			sleep 2;
+			($test) = doit("netstat -an | egrep \"[\\.:]$remoteport .*LIST\"");
+		    }
+		    last if $test;
+		    my ($ans) = mygetinput     
+			("     Unable to see remote port $remoteport listening. Please check that\n".
+			 "     the \"-tunnel $tunnelport udp\" command was done on this host:\n".
+			 "            $nopen_rhostname\n".
+			 "     and not somewhere else.\n\n".
+			 "Do you want to ABORT or REDO the tunnel?","REDO","A","ABORT");
+		    mymydie("User aborted") if ($ans eq "a");
+		    `closetunnel $tunnelport`;
+		    progprint($COLOR_NORMAL.
+			      "\n\nOK, try again on the right host, please.\n\n");
+		    %remoteports = ();   # All remote ports, all parts, key=part, value=port
+		    sleep 2;
+		    next TUNNELREDO;
+		}
+	    }
+	    
+	    my $cmd = "-gs rsync -L $destdir -t $remoteport -u $tunnelport $origargs";
+	    dbg("cmd=$cmd=");
+	    # Each other command has -FN, where N=$i itself.
+	    $cmd =~ s,F\s*\d+,F $partnum,;
+	    dbg("part i=$i cmd=$cmd=");
+	    unless ($partnum == 1) {
+		my $what = $partnum == $ofparts ? "You will need this other rsync command for part $partnum of $ofparts:\n\n" : 
+		    "And this one:\n\n";
+		push (@otherruns,$cmd);
+		progprint("$COLOR_NORMAL\n$what".
+			  $cmd);
+	    }
+	    
+	    newhostvar(
+		       "host_rsyncremoteport{$olddatafile PART=$partnum}",$remoteport,
+		       );
+	    
+	    $remoteports{$partnum--} = $remoteport;
+	}
+    }
+
+    my $othercount = $ofparts - 1;
+    my ($their,$s,$each,$all,$isa,$it) = ("its","","","","is a","it");
+    if ($othercount > 1) {
+	$s = "s";
+	$all = " all";
+	$their = "their";
+	$each = " each";
+	$is = "are";
+	$it = "them";
+    }
+    my $moreifofparts = "";
+    $moreifofparts = 
+	"\n\n".
+	"You also must now start the other $othercount instance$s of $prog, as well.\n\n".
+	"Here $isa pastable$s for $it:\n\n".
+	"  ".join("\n  ",@otherruns).
+	"\n\n$COLOR_NOTE\n".
+	"           \n".
+	"$COLOR_NORMAL" if ($ofparts > 1);
+
+    if ($ofparts > 1) {
+	offerabort
+	    ($COLOR_NORMAL."\n\n".
+	     "The -tunnel $tunnelport udp window is all set, with$all $ofparts reverse tunnel$s ready.\n".
+	     $moreifofparts.
+	     "");
+    } else {
+	progprint
+	    ($COLOR_NORMAL."\n\n".
+	     "The -tunnel $tunnelport udp window is all set with$all $ofparts reverse tunnel$s ready.\n".
+	     $moreifofparts.
+	     "");
+	sleep 2;
+    }
+
+    return $remoteports{1};
+}#setuptunnel
+
+sub checkfirst {
+  my $output = "";
+  if ($usedu) {
+    my ($cmd,$sep) = ();
+    foreach my $path (values %remotepaths) {
+      $cmd .= "$sep$usedu $path";
+      $sep = " ; ";
+      if (length $cmd > $nopenmaxcommandlength) {
+	doit("$cmd");
+	($cmd,$sep) = ();
+      }
+    }
+    doit("$cmd") if length $cmd;
+  } else {
+    my $totalsize = 0;
+    my @newlist = ();
+    foreach my $path (values %remotepaths) {
+#      dbg("totalsize=$totalsize calling\nprocessnopenls(\@newlist,,0,doit(\"-ls -R $path\")");
+      $totalsize += processnopenls(\@newlist,,0,doit("-ls -R $path")) ;
+    }
+    my $k = $totalsize/1024;
+    my $m = $totalsize/1024/1024;
+    my $g = $totalsize/1024/1024/1024;
+    $output = sprintf
+      ("\n\n".
+       "Recursive -ls -R on all paths add up to $totalsize bytes\n".
+       "(%6.2fK or %6.2fM or %6.2fG)\n\n",$k,$m,$g);
+  }
+  offerabort("$output\nBased on size checks above, you can");
+}#checkfirst
+
+sub myinit {
+  $willautoport=1;
+  my $autoutils = "../etc/autoutils" ;
+  unless (-e $autoutils) {
+    $autoutils = "/current/etc/autoutils" ;
+  }
+  require $autoutils;
+  $prog = "-gs rsync";
+  $vertext = "$prog version $VER\n" ;
+  mydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			    -e $nopen_mylog);
+
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session when \"$prog\" or
+\"=rsync\" is used.
+
+";
+
+  $rsync_config = "$optmp/rsync.cfg.$$";
+  my $rsync_config_tmp = "$optmp/rsync.cfg.\$\$";
+  $bailfile = "$optmp/BAILRSYNC.$$";
+  mydie("bad option(s)") if (! Getopts( "hvcCu:Vf:Sb:pl:F:T:U:M:HoNt:Bs:L:m:rO:" ) ) ;# Removed: J
+  $forceresync = $opt_r;
+  if ($mergewithdir = $opt_m) {
+      $mergewithdir =~ s,/+,/,g;
+      mydie("-m $opt_m must be a local directory containing data to MERGE with")
+	  unless (-d $opt_m);
+      mydie("-m $opt_m must be a full path starting in /current/")
+	  unless ($opt_m =~ m,^/current/,);
+      mydie(basename($opt_m).": Must begin with \"via-gs.rsync\" basename=".basename($opt_m))
+	  unless (basename($opt_m) =~ /^via-gs.rsync/);
+  }
+  $opt_s =~ s,[_\s],-,g;
+  $tarballstring = ${opt_s};
+  mydie("-s $opt_s cannot contain special characters")
+      if ($opt_s =~  /[\s\Q:+{\}\E]/ ) ;
+
+  $nozip = " NOZIP";
+
+  $longhelp = $opt_H;
+  $gsusagetext = usagetext();
+
+  @mergepullsfrom = ();
+  if (my $mergepullsfrom = $opt_M) {
+    @mergepullsfrom = uniqify_array(split(/,,/,$mergepullsfrom));
+    foreach my $merge (@mergepullsfrom) {
+      mydie("-M $merge must be a local directory beneath $opdown/$nopen_rhostname")
+	unless (		#    -d $merge and <<<<< might not exist yet
+		$merge =~ m,^$opdown/$nopen_rhostname/.+,);
+      mydie("-M $merge CANNOT be in $opdown/$nopen_rhostname/via-gs.rsync*")
+	if ($merge =~ m,^$opdown/$nopen_rhostname/via-gs.rsync,);
+      mydie("-M $merge CANNOT be in $opdown/${nopen_rhostname}_nosend/via-gs.rsync*")
+	if ($merge =~ m,^$opdown/${nopen_rhostname}_nosend/via-gs.rsync,);
+    }
+  }
+  $oneperline = $opt_o;
+  $numperline = $opt_O;
+  mydie("Cannot use -o and -O $opt_O together") if ($oneperline and $numperline);
+  $numperline = int($opt_O);
+  $numperline = 1 if $oneperline;
+  mydie("-O $opt_O is not valid") if ($opt_O and $opt_O != $numperline);
+
+
+  $uploadrsync = $opt_U;
+  mydie("-U $opt_U must exist")
+    unless (!$opt_U or -s $uploadrsync);
+  $maxdownload = $opt_T;
+  mydie("-T $maxdownload option must be a number (fractional is ok)")
+    if (length $maxdownload and !($maxdownload =~ /^\d+(\.\d*){0,1}$/));
+
+  if ($listfile = $opt_l) {
+    mydie("-l $listfile must be a local file listing remote paths")
+      unless (-f $listfile and -s $listfile);
+  }
+  $pastemode = $opt_p;
+  # DISABLING PASTEMODE TOO DANGEROUS
+  mydie("-p Paste mode is deprecated, use -l instead.")
+    if $pastemode;
+  $skiptest = $opt_S;
+  $skipexpr = "";
+  if ($opt_b) {
+    mydie("-b \"$opt_b\"\n".
+	  "cannot contain whitespace\n".
+	  "(use a \".\", which matches any one character)")
+      if $opt_b =~ /\s/;
+    mydie("-b \"$opt_b\"\n".
+	  "cannot contain any quotes, $prog gets confused\n".
+	  "(maybe use a \".\", which matches any one character)")
+      if $opt_b =~ /\"/;
+    if (-f $opt_b) {
+      if (open(RSYNCIN,$opt_b)) {
+	while (my $line = <RSYNCIN>) {
+	  chomp($line);
+	  next if (!$line or $line =~ /^\s*\#/);
+	  push(@skipexprs,$line);
+	}
+	close(RSYNCIN);
+      } else {
+	mydie("Cannot open local file -g $opt_g");
+      }
+    } else {
+      @skipexprs = split(/,,/,$opt_b);
+    }
+  }
+  foreach (@skipexprs) {
+      $skipexpr .= "--exclude=$_ ";
+  }
+  
+  dbg("Got -b $opt_b giving:\n".
+      "(@skipexprs)\n".
+      "skipexpr=$skipexpr=\n\n");
+  $olddatafile = $opt_f;
+  $freshenold = ($opt_F or $opt_f);
+  if ($opt_F) {
+      ($mypart,$ofparts) = $opt_F =~ /(\d+),(\d+)/;
+      $mypart =~ s/^0*//;
+      $ofparts =~ s/^0*//;
+      if ($ofparts > 8) {
+	  progprint(".\n\n\n".
+		    "For now, we are capping the max for -F to eight simultaneous windows\n".
+		    "(all sharing the same -tunnel $tunnelport udp window).",
+		    $COLOR_FAILURE);
+	  $ofparts = 8;
+	  sleep 5;
+      }
+      mydie("-F $opt_F not valid, must be 0 < N <= M")
+	  unless (
+		  ($opt_F =~ /^(\d+),(\d+)$/ and
+		   0<$mypart and $mypart <= $ofparts
+		   ));
+  } else {
+      ($mypart,$ofparts) = (1,1);
+  }
+
+  # Set $destdir
+  my ($nosend1,$nosend2) = ("NOSEND/","/NOSEND") if $opt_N;
+  if ($mypart != 1) {
+      mydie("Option -L /PATH/TO/LOCAL/RSYNC-DIR is required when mypart==$mypart > 1")
+	  unless ($opt_L and -d $opt_L);
+      ($rsynctimestamp) = $opt_L =~ /via-gs.rsync.(\d{8}-\d{6})/;
+      $destdir = $opt_L;
+  } else {
+      while ($mypart == 1 and !$opt_J) {
+	  # Infinite loop to pick new/unique dir
+	  $rsynctimestamp = timestamp(short);
+	  last unless (-d "$opdown$nosend2/$nopen_rhostname/via-gs.rsync.$rsynctimestamp");
+	  sleep 1;
+      }
+  }
+  $destdir_tmp = "$opdown$nosend2/\$nopen_rhostname/via-gs.rsync.$rsynctimestamp";
+  $destdir = "$opdown$nosend2/$nopen_rhostname/via-gs.rsync.$rsynctimestamp";
+  $destdirname = "$nosend1$nopen_rhostname/via-gs.rsync.$rsynctimestamp";
+  `mkdir -p $destdir`;
+
+
+  if ($justbuild = $opt_J) {
+    # Disable a few things in this mode
+    ($opt_F,
+     $opt_l,
+     $opt_f,
+     $opt_o,
+     $opt_S,
+     $opt_c,
+     $opt_C,
+     $opt_V,
+     $opt_b,
+     $opt_U,
+     $opt_T,
+    ) = ();
+    mydie("$destdir must exist to use -J")
+      unless -d $destdir;
+  }
+
+  mydie("-f option is required with -F $opt_F")
+      unless (!$freshenold or $olddatafile);
+  $ignoreold = (!$opt_B and $olddatafile);
+  $checkfirst = ($opt_c or $opt_C);
+  usage() if ($opt_h or $opt_v or
+	      (!@ARGV and
+	       !$justbuild and
+	       !$pastemode and
+	       !$listfile and
+	       !($freshenold and $olddatafile))
+	      ) ;
+  mydie("-f $olddatafile must exist")
+      unless !$olddatafile or -s $olddatafile;
+  $dounpacking++ if $olddatafile;
+  $verbose = "-v" if $opt_V;
+  $verbose .= 'v' x ($opt_V-1);
+  #dbg("verbose=$verbose= opt_V=$opt_V");
+  
+  $tunnelport = 10000;
+  $remoteport = int($opt_t) if (int($opt_t) > 0 and int($opt_t) < 65500);
+
+  # Only first if $opt_F is used need bother picking a port, others
+  # will use this one.
+
+  $socket = pilotstart(quiet);
+  while ($mypart == 1) {
+      mydie("-t $opt_t: This option must only be used for parts 2+")
+	  if ($remoteport > 0);
+      $tunnelport++;
+      my $test = "";
+      $test = `netstat -an | grep "udp.*0\.0\.0\.0:$tunnelport"`;
+      next if $test and !$opt_u;
+      if ($opt_u) {
+	  $tunnelport = int($opt_u);
+	  mydie("-u $opt_u must be between 10000 and 55555")
+	      unless ($tunnelport > 9999 and $tunnelport < 55556);
+      }
+      $test = `netstat -an | grep "udp.*0\.0\.0\.0:$tunnelport"`;
+      mydie("Cannot use $tunnelport, it is in use already:\n$test")
+	  if ($opt_u and $test);
+      next if $test;
+      newhostvar("tunnelport{$olddatafile in $ofparts parts}",$tunnelport);
+      last;
+  }
+
+
+# If $justbuild is used, do not need anything else in myinit.
+# offerball_rsync() exits when done.
+  offerball_rsync() if $justbuild;
+
+  # Some globals
+  #  $unpackingdone =     # tagfile says when tarball is done unpacking
+  #    "$optmp/.rsyncunpackdone.$$";
+  # Table of contents of tarball, used with -F
+  $unpackedtoc = tocfile($olddatafile).".rsyncunpackedtoc";
+  $unpackingdone = $unpackedtoc;
+  $unpackingdone =~ s/toc/DONE/;
+
+  # We need to verify remote rsync is there and compatible (maybe put it there too).
+  # This loop is messy. It may take several passes through it.
+  # Exits from can be:
+  #     - DIE via user abort
+  #     - DIE after upload failure (wrong size other than because
+  #       user skipped the upload once he saw it was already there)
+  #     - DIE after ODD/UNKNOWN result from "rsync -h"
+  #     - PROCEED after successful rsync version check > 2.4.5
+  my ($versionchecked,$ulbchecked,$justputone,$ulbfound) = ();
+  $remotersync = "rsync";
+  $remotersyncoptions = "";
+
+  # None of this happens unless we are unpacking.
+  # There are last commands inside that get us out.
+  while ($mypart == 1) {
+    if ($uploadrsync) {
+      if ($rsyncuploaded) {
+	my ($output,$nopenlines,@output) =
+	  doit("-ls $rsyncuploaded");
+	if ($output and !$justputone) {
+	  my ($ans) = mygetinput
+	    ("rsync seems to already be there as $rsyncuploaded\n".
+	     "Re-use that one?","Y");
+	  $rsyncuploaded = "" unless $ans eq "y";
+	  $justputone++ if $ans eq "y";
+	} else {
+	  $rsyncuploaded = "";
+	}
+      }
+      unless ($rsyncuploaded) {
+	my ($rsyncdir,$shdir,@lsoutput) = gethiddendir();
+	unless ($rsyncdir) {
+	  offerabort
+	    ("There does not appear to be a hidden directory to put\n".
+	     "rsync into. Are you sure?");
+	  $rsyncdir = "/tmp";
+	}
+	($ans,$rsyncdir) = mygetinput
+	  ("Enter target directory to put rsync into:\n",$rsyncdir);
+	($ans,$remotersync) = mygetinput
+	  ("What do you want to call rsync on target?",$remotersync);
+	my ($output,$nopenlines,@output) =
+	  doit("-put $uploadrsync $rsyncdir/$remotersync");
+	newhostvar(rsyncnative,0);
+	$versionchecked=0;
+	$justputone++ unless $output =~ /-put: aborted/;
+	my ($size) = (split(/\s+/,$output[$#output]))[4];
+	my $localsize = -s $uploadrsync;
+	unless ($size == $localsize or $output =~ /-put: aborted/) {
+	  mymydie("Cannot continue, uploaded file not correct size ($size != $localsize)");
+	}
+	newhostvar("rsyncuploaded","$rsyncdir/$remotersync");
+      }
+    }
+    if ($rsyncuploaded) {
+      $remotersync = basename($rsyncuploaded);
+      dbg("Running first addpath in $prog:       nopenaddpath(dirname($rsyncuploaded));");
+      nopenaddpath(dirname($rsyncuploaded));
+    }
+    my ($output,$nopenlines,@output) ;
+    # If far version came back wrong already, we assume no good and
+    # proceed, possibly uploading it.
+    if ($versionchecked) {
+      $output = "no such file";
+    } else {
+      ($output,$nopenlines,@output) = doit("$remotersync -h");
+      $remotersyncoptions .= " --times"
+	if $output =~ /--times.*preserve/;
+      $remotersyncoptions .= " --perms"
+	if $output =~ /--perms.*preserve/;
+      # This is the most useful option here. It sends periodic updates with an ETA.
+      # Unfortunately, you cannot see that output in NOPEN window until it is complete,
+      # but the bits flowing keep this window alive so when the rsync exits this script
+      # can continue. A tail -f on the cmdout/ output file for that window will show
+      # the one long line with multiple ETA updates, in the regular window you see the
+      # final update only.
+      $remotersyncoptions .= " --progress"
+	if $output =~ /--progress/;
+      newhostvar("remotersyncoptions{$olddatafile in $ofparts parts}",$remotersyncoptions);
+    }
+    if ($output =~ /no such file/i) {
+      if (!$ulbchecked) {
+	($output,$nopenlines,@output) = doit("-ls /usr/local/bin/rsync");
+	if ($output =~ m, /usr/local/bin/rsync,) {
+          $ulbfound++;
+ 	  offerabort
+	    ("/usr/local/bin not yet in PATH but that is where rsync is.\n".
+	     "If you continue, $prog will add it to the remote PATH.");
+	  dbg("Running ulb addpath in $prog:	  nopenaddpath(/usr/local/bin);");
+	  nopenaddpath("/usr/local/bin");
+	  $versionchecked=0;
+	  newhostvar("rsyncnative","/usr/local/bin/rsync");
+	}
+	$ulbchecked++;
+	next;
+      } else {
+	doit("-getenv");
+	my $whatrsync="";
+	dbg("solaristype=$solaristype=");
+	if ($solaristarget) {
+	  if ($inteltarget) {
+	    chomp($whatrsync = `ls -rt1 $opup/*rsync*solaris* | grep i386 | tail -1`);
+	  } else {
+	    chomp($whatrsync = `ls -rt1 $opup/*rsync*solaris* | grep sparc | tail -1`);
+	  }
+	}
+	$whatrsync = "ABORT" unless $whatrsync;
+	my $warning;
+	while (1) {
+	  ($ans,$whatrsync) = mygetinput
+	    ($warning.
+	     "Enter local path to rsync to upload (or ABORT):\n",$whatrsync);
+	  mymydie("rsync is not available natively and you chose\n".
+		  "not to upload")
+	    if $whatrsync =~ /^a/i;
+	  last if (-s $whatrsync);
+	  $warning = "$COLOR_FAILURE\n\n".
+	    "INVALID RSYNC: $whatrsync\n$COLOR_NORMAL\n";
+	  $whatrsync = "ABORT";
+	}
+	$uploadrsync = $whatrsync;
+      }
+    } elsif ($output =~ /rsync\s*version/) {
+      my ($vernum) = $output =~ /rsync\s*version\s+([\d\.]*)/;
+      if ((verval($vernum))[1] <= (verval("2.4.5"))[1]) {
+	progprint($COLOR_FAILURE.
+		  "\n\n$prog does not work with rsync v.2.4.5 or below.\n".
+		  "We may still be able to upload one.");
+	sleep 3;
+      } else {
+	# We are good to go set $rsyncnative
+        unless ($rsyncuploaded or $justputone) {
+	  ($output,$nopenlines,@output) = nopenlss("-P","rsync");
+	  my ($file) = $output[0] =~ m,\d\d:\d\d \d\d\d\d (/.*),;
+          newhostvar(rsyncnative,$file);
+	}
+	last;
+      }
+      $versionchecked++;
+      next;
+    } else {
+      mymydie("unknown error but rsync appears not to exist");
+    }
+  }
+  if ($checkfirst) {
+    unless ($opt_C) {
+      my ($output,$nopenlines,@output) = doit("du --help");
+      if ($output =~ /--human-readable/ and
+	  $output =~ /--summarize/) {
+	$usedu = "du --human-readable --summarize";
+      } elsif ($output =~ /illegal option/ and 
+	       $output =~ /-s.*file/) {
+	$usedu = "du -s";
+      }
+      unless ($usedu) {
+	offerabort
+	  ("The remote \"du\" command cannot be found. If you choose\n".
+	   "to continue, we will use a recursive -ls to determine the\n".
+	   "remote size instead. With large directory tree structures,\n".
+	   "this can take a while.");
+      }
+    }
+  }
+  #  dbg("output=$output= usedu=$usedu=");
+
+  # If no @ARGV, prompt for @remotepaths
+  if (@ARGV) {
+    @remotepaths = @ARGV;
+  }
+  if ($pastemode) {
+    # PASTE MODE is shut off elsewhere this code left in anyway
+    my $sofar = "";
+    while (1) {
+      my ($ltr,$ans) = mygetinput
+	("$sofar".
+	 "$COLOR_FAILURE\n\n".
+	 "Enter as many paths as you need, multi-line pasting is fine.\n".
+	 "Enter \"DONE\" when finished.\n".
+	 $COLOR_NORMAL.
+	 "Next path: ","DONE");
+      last if $ans eq "DONE";
+      $ans =~ s/^\s*//;
+      $ans =~ s/\s*$//;
+      #      $ans = "\"$ans\"" if $ans =~ /\s/;
+      push(@remotepaths,$ans);
+      $sofar = "PATHs so far:\n$COLOR_NOTE" unless $sofar;
+      $sofar .= "\t$ans\n";
+    }
+  }
+  if ($listfile) {
+    if (open(RSYNCIN,$listfile)) {
+      while (<RSYNCIN>) {
+	s/^\s*//;
+	s/\s*$//;
+	next if /^#/;
+	my ($junk,$junk2,$path) =
+	  /(.* ){0,1}(\.){0,1}(\/.+)/;
+	next unless $path;
+	dbg("junk=$junk junk2=$junk2 Adding path=$path=");
+	push(@remotepaths,$path);
+      }
+      close(RSYNCIN);
+    } else {
+      mymydie("Cannot open $listfile");
+    }
+  }
+
+
+  # Verify @remotepaths are valid remote paths/files
+  my %doneit = ();
+  my @morepaths = ();
+  #    dbg("top: (@remotepaths) (@morepaths)");
+  while (my @newarr = (@remotepaths,@morepaths)) {
+    #    dbg("top: (@remotepaths) (@morepaths)");
+    my $path = shift @remotepaths;
+    $path = shift @morepaths unless $path;
+    # Escape space once here for -ls
+    $path =~ s/(\s)/\\$1/g;
+    next if $doneit{$path}++;
+    ($output,$nopenlines,@output) = nopenlss("-d",$path);
+    # Escape space once again for rest
+    my ($monstr,$mday,$h,$m,$y,$hit) = $output =~ m,(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)\s+(\d+):(\d+)\s+(\d+) (/[^\r\n]*),;
+    # Escape space once here for -ls
+    $hit =~ s/(\s)/\\$1/g;
+    dbg("output=$output= nopenlines=$nopenlines=
+
+
+got hit=$hit=
+
+
+");
+    if ($output =~ /^l/ or $output =~ /lrwxrwxrwx/) {
+      if ($hit =~ m,^(/.*) -\. \.\.(/.*),) {
+	$hit = dirname(dirname($1)).$2;
+	$hit =~ s,//,/,g;
+	push(@morepaths,$hit);
+      } elsif ($hit =~ m, -\. (/.*),) {
+	$hit = $1;
+	push(@morepaths,$hit);
+      } elsif ($hit =~ m,^(/.*) -\. (.*),) {
+	$hit = dirname($1)."/$2";
+	push(@morepaths,$hit);
+      } else {
+	if (@remotepaths > 1) {
+	  my $s = "s" if @remotepaths > 2;
+	  offerabort
+	    ("The remote path $path appears to be a link but $prog cannot\n".
+	     "figure it out. You must provide the actual path, not the link.\n".
+	     "Continue to allow $prog to process your other request$s.");
+	  next;
+	} else {
+	  mymydie(".\n\nFATAL:\n\n".
+		"The remote path $path appears to be a link but $prog cannot\n".
+		"figure it out. You must provide the actual path, not the link.");
+	}
+      }
+      # $hit just found via link will be checked vis -ls on later pass of while()
+      next;
+      $remotepaths{$path} = $hit if ($hit);
+    } else {
+      $remotepaths{$path} = $path if ($hit);
+    }
+#    dbg("output=$output= nopenlines=$nopenlines=\n    \$remotepaths{$path}=$remotepaths{$path}");
+  }
+  mymydie("@remotepaths no valid remote file paths were given")
+    unless %remotepaths or $freshenold ;
+
+
+  if ($freshenold) {
+    # If we are first, we unpack. If not, we make sure first already has.
+    my $tocfile = tocfile($olddatafile);
+    if ($mypart == 1) {
+      unpackold($olddatafile,$dounpacking);
+    } else {
+      my ($sleepcount,$age,$prevage,$moretosay) = ();
+      while (1) {
+	  #DISABLED THIS WHOLE BLOCK WITH:
+	  last;
+	sleep 1;
+	do $host_varfile if -s $host_varfile;
+	mymydie("Aborted ($bailfile was touched)")
+	  if (-e $bailfile);
+	# The parts > 1 will not be able to set up their tunnel until
+	# part 1 does. We keep trying here until we can.
+	$tunnelport = $tunnelport{"$olddatafile in $ofparts parts"}
+	  if defined $tunnelport{"$olddatafile in $ofparts parts"};
+	$remoteport = setuptunnel()
+	  unless ($remoteport > 0);
+	my ($morestill,$moreport) = ();
+	if ($remoteport > 0) {
+	  $morestill = "\n\n(This instance is using return port $remoteport/tcp.)\n";
+	  $moreport = ", using port $remoteport";
+	}
+	unless ($sleepcount % 30) {
+	  doit("w");
+	  progprint
+	    ("$COLOR_NORMAL\n\n".
+	     "This instance of $prog must confirm that the first part (1 of $ofparts)\n".
+	     "has finished unpacking the tarball and that all parts have their\n".
+	     "return tunnel initialized before it can proceed.".
+	     $morestill.
+	     "\n\n".
+	     "Paste this locally to abort this instance ($mypart of $ofparts$moreport via -tunnel $tunnelport udp):\n\n".
+	     $moretosay.
+	     "         touch $bailfile");
+	  $moretosay = "$COLOR_FAILURE(It still has not, did you run part 1 of $ofparts yet?)$COLOR_NORMAL\n\n";
+	}
+        $sleepcount++;
+        dbg("see if $tocfile exists yet\n".`ls -al $tocfile 2>/dev/null`);
+	next unless -s $tocfile;
+        dbg("YES $tocfile exists yet\n".`ls -al $tocfile 2>/dev/null`);
+	next unless checkalldone("tunnelcheck");
+	dbg("CONTINUING with part $mypart of $ofparts");
+	# See what part 1 did wrt rsync
+	# Let the $host_varfile and $tocfile sync to disk
+	`sync`;
+	sleep 2;
+	if ($rsyncnative =~ m,^/,) {
+	  nopenaddpath(dirname($rsyncnative));
+	  $rsyncnative = 1;
+	}
+	unless ($rsyncuploaded or int($rsyncnative) > 0) {
+	  $moretosay .= $COLOR_FAILURE.
+	    "\n\nTHIS IS ODD. The unpacking is done,\n".
+	    "$tocfile exists,\n".
+	    "BUT neither rsyncuploaded=$rsyncuploaded= nor rsyncnative=$rsyncnative= is defined\n".
+	    "yet. REPORT THIS.\n\n"
+	      unless $moretosay =~ /THIS IS ODD/;
+	  next;
+	}
+	last ;
+      }#THIS BLOCK DISABLED
+      dbg("prior remotersyncoptions=$remotersyncoptions= mypart=$mypart= ");
+	$remotersyncoptions .= " ".$remotersyncoptions{"$olddatafile in $ofparts parts"}
+	  if ($remotersyncoptions{"$olddatafile in $ofparts parts"});
+dbg("Just set remotersyncoptions=$remotersyncoptions=");
+      if ($rsyncuploaded) {
+	$remotersync = basename($rsyncuploaded);
+dbg("Running second addpath in $prog:       nopenaddpath(dirname($rsyncuploaded));");
+	nopenaddpath(dirname($rsyncuploaded));
+      }
+      $tunnelport = int($tunnelport{"$olddatafile in $ofparts parts"})
+	unless (! int($tunnelport{"$olddatafile in $ofparts parts"})) ;
+#$tunnelport=10001;
+      mywarn("Odd, somehow instance 1 of $ofparts did not set tunnelport=$tunnelport=  > 10000...proceeding anyway")
+	unless $tunnelport > 10000;
+    }
+  } else {
+    unpackold($olddatafile,$dounpacking) if $olddatafile;
+  }
+  $rsync_config = "$optmp/rsync.cfg.$$";
+  $rsync_config_contents{$rsync_config} = "uid = root\n".
+    "use chroot = no\n".
+    "log file = /dev/null\n".
+    "\[root\]\n".
+    "path = DESTDIR\n".
+    "read only = false\n";
+} #myinit
+
+sub monitorunpack {
+  my $sleepcount=0;
+  my ($what,$output,$tocmore) = ("$COLOR_FAILURE\n\n\n","");
+  $what .= "Confirming status of unpacking $olddatafile" if $dounpacking;
+  if (!$dounpacking and $freshenold) {
+    $what .= "Reading TOC from $olddatafile\n".
+      "to find target files to rsync";
+    $tocmore = " table of contents (TOC)";
+  }
+  sleep 1; # Allow forked childs to say something before this does
+  progprint($what);
+  my $tocdone = !$freshenold;
+#dbg("outside tocdone=$tocdone=");
+  while (1) {
+    $tocdone = ((!$freshenold) or -e $unpackedtoc);
+dbg("tocdone=$tocdone=
+
+ls -al $unpackedtoc*
+".`ls -al $unpackedtoc*`);
+    last if ($tocdone and (!$dounpacking or -e $unpackingdone));
+    unless ($sleepcount % 15) {
+      my $status = `$statuscmd ; ls -al $unpackingdone*`;
+      progprint("$COLOR_FAILURE\n\n".
+		"Waiting on tarball$tocmore to finish unpacking:\n".
+		" $tball\n\n".
+		"To see status, in another window use this:\n\n".
+		"$statuscmd\n\n".
+		$status
+	       );
+    }
+    sleep 1;
+    doit("w") unless $sleepcount % 10;
+    $sleepcount++;
+  }
+  $what = "";
+  if ($dounpacking) {
+    $output = 
+      $COLOR_FAILURE.
+      `cat $unpackingdone`."\n\n".
+      "(verbose tar output is above).\n\n".
+      "Above unpack command is finished running.\n$COLOR_FAILURE\n".
+      "You can now confirm data unpacked correctly.\n\n".
+      "You can also rearrange things now locally if need be so that the\n".
+      "following local directory matches and is relative to / on target:\n\n".
+      " $destdir\n";
+
+    $what .= "$COLOR_FAILURE\nJust Read TOC from and\n"
+      if $freshenold;
+    $what .= 
+      "Confirmed status of unpacking $olddatafile via:\n\n".
+	$unpackrunning."\n\n$COLOR_NORMAL\n";
+  } else {
+    if ($freshenold) {
+      $what .= "$COLOR_FAILURE\nJust read the TOC from $olddatafile\n".
+	"to find target files to rsync (see new popup on the right screen).";
+    }
+  }
+
+dbg("we got defined \&mymydie=&mymydie=".scalar defined &mymydie);
+  progprint($output.
+	     $what.
+	     "\n$COLOR_NORMAL\n".
+	     "");
+  sleep 2;
+}#monitorunpack
+
+sub checkolddestdir {
+  return unless ($mypart == 1);
+  my (@otherdirs) = 
+      split(/\n/,
+	    `find $opdown/$nopen_rhostname $opdown/NOSEND/$nopen_rhostname -type d -name "via-gs.rsync*"`);
+#	    `cd $opdown ; find $nopen_rhostname NOSEND/$nopen_rhostname -type d -name "via-gs.rsync*"`);
+  @otherdirs = sort grep ! m,$destdir, , @otherdirs;
+  my $dircount = @otherdirs;
+  # If we have more than just our new one ($destdir grepped out above)
+  my $mergeans = "";
+  if ($dircount > 0) {
+    my (@otheranswers,%otherdirs,$moreballs,$oldballs,$todaysballs) = ();
+    my $otherdirlist = "";
+    for ($i=0;$i<@otherdirs;$i++) {
+	$otherdirs[$i] =~ s,/+,/,g;
+	push(@otheranswers,$i,$otherdirs[$i]);
+	my ($count) = `find $otherdirs[$i] -type f | wc -l` =~ /^\s*(\d+)\s*$/;
+#	$otherdirlist .= sprintf "  [$i]  %-60s  %5d\n",$otherdirs[$i],$count;
+	my $s = $count > 1 ? "s" : "";
+	my @indirs =  split(/\n/,`find $otherdirs[$i] -type d -depth`);
+	my $indir = "";
+	foreach my $thisdir (@indirs) {
+	    $thisdir =~ s,$otherdirs[$i],,;
+	    next unless $thisdir;
+	    next if $indir =~ m,$thisdir,;
+	    if ($indir) {
+		$indir .= "\n              and " if (length $indir > 20);
+	    }
+	    $indir .= " $thisdir";
+	    #if ($indir) {
+	#	$indir = "";
+	#	last;
+	#    } else {
+	#	$indir = $thisdir;
+	#    }
+	}
+	$s .= " from $indir" if $indir;
+	$otherdirlist .= "\n  [$i]  $otherdirs[$i]\n".
+	    "        Containing $count file$s\n";
+	$mergeans = $i if ($otherdirs[$i] eq $mergewithdir);
+    }
+    my (@otherballs) = 
+      split(/\n/,
+	    `cd $opdir ; ls -alrt ${nopen_rhostname}_[0-9]*-[0-9]*.tar.bz2`);
+    if (@otherballs) {
+      my ($today) = timestamp(short) =~ /^(\d{8})/;
+    dbg("today=$today otherballs=(@otherballs)");
+      foreach (@otherballs) {
+	if (/_${today}-\d{6}\.tar\.bz2/) {
+	  $todaysballs .= "   $_\n";
+	} else {
+	  $oldballs .= "   $_\n";
+	}
+      }
+      $moreballs = "These are already in $opdir:\n\n";
+      $moreballs .= "OLD TARBALLS:\n$oldballs\n" if $oldballs;
+      $moreballs .= "TODAY's TARBALLS:\n$todaysballs\n\n".
+	"(if one is still growing now, moving DESTDIR aside below will not hurt it)\n"
+	if $todaysballs;
+    }
+
+    my ($ans,$longans) = ();
+    if  ($mergewithdir and length($mergeans)) {
+	($ans,$longans) = ("m","MERGE$mergeans");
+    } else {
+	($ans,$longans) = mygetinput
+	    ("PROPOSED NEW DESTDIR=$destdir\n\n".
+	     "$prog seems to have been run previously. ${moreballs}\n\n".
+	     "The following older via-gs.rsync directories already exist for this host:\n".
+	     $otherdirlist."\n\n".
+	     "You can either:\n".
+	     "   MERGE this new rsync with the contents of one already there shown above**;\n".
+	     "         (MERGE can optionally be followed by the number or path of the desired\n".
+	     "         directory with which to MERGE)\n\n".
+	     "   START a brand new directory to start a fresh tarball with this run (this now\n".
+	     "         allows multiple concurrent rsyncs to be done); or\n\n".
+	     "   ABORT\n\n".
+	     "**NOTES:  1) If you MERGE data, and this rsync downloads the same data, it\n".
+	     "             will overwrite what is in DESTDIR now--just be sure that's what you\n".
+	     "             want.\n".
+	     "          2) You can START a new collect instead, keeping the old and new\n".
+	     "             contents separated from other rsync runs\n\n".
+	     "Which would you like to do (MERGE[ #],START,ABORT)?",
+	     "START","MERGE","A","ABORT",
+	     "");
+    }
+    my $whichans = "";
+    ($longans,$whichans) = ($1,$2) if ($longans =~ m,(MERGE)\s*([0-9/].*),);
+    mymydie("User aborted") if $ans eq "a";
+    # If MERGE, we do nothing, new data will fall into $destdir
+    if ($longans eq "MERGE") {
+	rmdir($destdir);
+	my ($ans,$longans) = ();
+	while (1) {
+	    ($ans,$longans) = ($whichans,$whichans);
+	    ($ans,$longans) = mygetinput
+		("The PROPOSED NEW DESTDIR ".basename($destdir)." has been removed.\n\n".
+		 "MERGING with one of these directories:\n\n".
+		 $otherdirlist."\n\n".
+		 "Which one should we MERGE with (or you can ABORT)?","ABORT",@otheranswers,
+		 ) unless (length $whichans);
+	    mymydie("User aborted") if ($longans eq "ABORT");
+	    $destdir = $otherdirs[$longans] if (-d  $otherdirs[$longans]);
+	    $destdir = $longans if (-d  $longans);
+	    last if (!$whichans or -d $destdir);
+	    # That MERGE Whatever failed, make them answer on next loop
+	    $whichans = "";
+	}
+	mymydie("BUG: Something bad in autorsync. Report this.")
+	    unless (-d $destdir);
+	$destdir_tmp = $destdir;
+	$destdir_tmp =~ s,$nopen_rhostname,\$nopen_rhostname,;
+	$destdirname =~ s,$opdown/,,g;
+	my $tmpdir = $optmp . "/" . basename($destdir);
+	my @list = split(/\n/,`cd $destdir ; find . -type f`);
+	if ($host_unpackedtardatafor{$destdir} and
+	    $tmpdir eq $host_unpackedtardatafor{$destdir} and
+	    @list == 1 and
+	    grep /.tar.bz2$/, @list) {
+		# $destdir has only the tarball, the unpacked stuff should be in $tmpdir,
+		# we swap the two
+		preservefile($tmpdir.$$);
+		rename($tmpdir,$tmpdir.$$)  || mymydie("Died at rename   rename($tmpdir,$tmpdir.$$)");
+		rename($destdir,$tmpdir)    || mymydie("Died at rename   rename($destdir,$tmpdir)");
+		rename($tmpdir.$$,$destdir) || mymydie("Died at rename   rename($tmpdir.$$,$destdir)");
+		@list = split(/\n/,`cd $destdir ; find . -type f`);
+	    }
+	return 1;
+#TODO HAVE to fix this the $destdir may have just the .tar.bz2 we made in it, if so the contents in $optmp/basname are realy what we want--swap them back, then proceed
+
+
+
+
+
+    } elsif ($longans eq "START") {
+	# Clear out any previous "part-N-of-$ofparts" files from old runs.
+	checkalldone(Clear);
+    }
+  }
+}#checkolddestdir
+
+sub startlocalrsync {
+  my $extra = "";
+  checkolddestdir() unless $olddatafile;
+  `mkdir -p $destdir` unless -d $destdir;
+  -d $destdir or mymydie("Cannot create local dir $destdir");
+  # $localport being different from $remoteport is only useful for 
+  # using -gs rsync against yourself (i.e., for testing).
+  # my $localport = $remoteport + 1;
+  my $localport = $remoteport;
+  $rsync_config_contents{$rsync_config} =~ s,DESTDIR,$destdir,g;  
+  writefile($rsync_config,$rsync_config_contents{$rsync_config});
+  my $localrsync = "rsync $verbose --daemon --no-detach --config=$rsync_config --port=$localport --address=127.0.0.1 $destdir";
+  my $s = "";
+  $s = "s" if @remotersyncs > 1;
+  my $bailstring="";
+  $bailstring = "\nYou can abort between rsync commands by touching this file\n".
+    "locally and then killing the rsync running on target.\n\n".
+    "      touch $bailfile\n"
+	if @remotersyncs > 1;
+  my ($ans) = mygetinput
+    (
+     "\n\nREMOTE:\n   ".
+     join("\n   ",@remotersyncs).
+     $extra.
+     "\n$COLOR_FAILURE\nREMOTE RSYNCS LISTED ABOVE$COLOR_NORMAL\n\n".
+     "About to run remote (above) and local (below) rsync command$s.\n\n".
+     "LOCAL (data will be put in in $destdir):\n".
+     "   $localrsync\n\n".
+     "with config file containing:\n      ".
+     join("\n      ",split(/\n/,$rsync_config_contents{$rsync_config})).
+     $bailstring.
+     "\n\n<C>ontinue or <A>bort.","C"
+    );
+  mymydie("Aborted by user") if $ans eq "a";
+  
+  # Fork, parent returns, child execs local rsync
+  my $pid = fork();
+  return $pid if $pid;
+  close(STDOUT);
+  close(STDERR);
+  close(STDIN);
+  chdir($destdir);
+  #  open(RSYNCLOCAL,"$localrsync |") or mymydie("Cannot start local rsync: $!");
+  exec("$localrsync") or mymydie("Cannot start local rsync: $!");
+  exit;
+}#startlocalrsync
+
+sub usagetext {
+    
+  $destdir_tmp = "$opdown\[/NOSEND\]/HOST.IP/via-gs.rsync.YYYYMMDD-HHMMSS" 
+      unless $destdir_tmp;
+    
+  my $gsusagetext = 
+    "
+Usage: $prog [options] [/PATH/TO/REMOTE/FILE-OR-DIR [/PATH/2 ..]]
+
+$prog uses rsync both remotely and locally to synchronize data between
+your target and the local system, putting all the remote data locally into
+
+     $destdir_tmp
+
+The rsync server will run locally, with a local config file unique to this
+instance of $prog in $rsync_config_tmp.
+";
+  $gsusagetext .= "
+Use the longer -H usage option for more detail.
+" unless $longhelp;
+  $gsusagetext .= "
+No remote files are created by $prog. The remote rsync binary is executed
+once for each target path given. The target path can be a file or directory,
+can contain spaces or wildcards (BUT NOT BOTH), and directories will be
+recursed and rsynced entirely. If the target path is a soft link, $prog
+attempts to resolve it to the actual file and uses that.
+
+This can obviously be a lot of data. Use the -c option to have $prog first
+check the total size of remote files to be rsynced, allowing you to abort if
+the size is too big. Remember the remote data size will be more than what
+traverses the channel, since the NOPEN -tunnels are compressed. The -c option
+uses the remote command \"du\", if available. Use the -C option to bypass using
+\"du\" and instead do a recursive listing, counting bytes that way. -C should
+be used if process accounting is an issue or on systems where the \"-h\" (human
+readable) du option is not available.
+
+If the optional -f tarfile is provided, it is first extracted into
+   $destdir_tmp
+before the rsync is performed. You are given the opportunity to confirm data is
+extracted properly. If the tarfile unpacked is not from / on target, you can use
+that opportunity/pause to rearrange data within
+   $destdir_tmp
+to match the paths on target. For example:
+
+   cd $destdir_tmp
+   ls -al
+   mkdir -p missing/path
+   mv subdir missing/path
+" if $longhelp;
+  $gsusagetext .= "
+After the rsync is complete, $prog offers to create a fresh tarball (in
+$opdir) of the data just synced. This is done in the background, and a
+popup will tell you when it is done. Once the tar file is done being built,
+another popup will appear offering to copy-fast the resulting file.
+$COLOR_FAILURE
+   NOTE: Any ^C in the same NOPEN window while the popup is building
+         the tarball, even after $prog exits, will kill the tar
+         command creating that tarball prematurely. $COLOR_NORMAL
+";
+  $gsusagetext .= "
+If -T # is used, when the bwmonitor.txt hits that number of Megabytes, you are
+offered a chance to abort after the current remote rsync is done.
+
+If rsync is not on target (or if -U locfile is used), you are prompted for
+what rsync to upload and run. If the target has a hidden directory (STOIC
+or IN), that will be the default destination.
+
+The -M option allows a series of ops to grow target data into a larger
+tarball each op with a combination of both \"-lss -G\" or simple \"-get\"
+file pulls and rsyncing previously pulled data.
+" if $longhelp;
+  my $deprecated = "
+
+
+If -p is used, you are prompted for and can provide remote PATHs via a
+multi-line paste, a blank line will terminate your pasted list.
+
+
+
+ -p           Paste mode, some or all PATHs given by pasting
+";
+  my $unused = "
+ -J              Ignore all expand/rsync options, instead just create the new
+                 tarball from $destdir_tmp,
+                 as it stands at the time, to include merging (if -M is used).
+";
+  $gsusagetext .= "
+OPTIONS
+ -h/-H/-v        Show this help / LONG help / version
+ -b exprs        Blacklist: skip files/paths matching any of the expressions.
+                 With -F, matching files will be skipped. This allows
+                 multiple instances of $prog to be used in multiple
+                 windows if desired, sharing the load between them. And for
+                 any PATHs given on the command line or via -l, use rsync
+                 --exclude=expr to skip files that match. The argument \"exprs\"
+                 can either be a local file, one regexp per line, or it can
+                 be a list, \",,\" delimited, no whitespace.
+ -B              Disable the feature where $prog will ignore files on
+                 target older than the newest file in the -f tarfile.
+ -c              First check the total bytes about to be transferred
+ -C              Check byte count with -lss -Rz instead of a remote du
+ -f tarfile      Local tar file to extract before rsyncing to it
+ -F N,M          Freshen the tar file provided with -f (i.e., list of remote
+                 files to rsync comes from contents of tar file), where this
+                 session is number N of M simultaneous $prog instances
+                 sharing the load. Use of -F MAY BE more efficient with VERY
+                 LARGE files rather than VERY MANY small ones, where wildcard
+                 and/or directory paths make more sense. Still, the
+                 convenience of using -F to automatically populate the list
+                 of files may be worth the loss in efficiency.
+ -l listfile     List of remote PATHS to rsync (blank/#comment lines
+                 ignored). Each line can be output from a -ls or a find or
+                 a -get command--only the path, starting with /, will be
+                 used. PATH MUST be only or final field on the line.
+ -m PATH         Automatically MERGE with this local PATH in either
+                    $opdown/HOST.IP/via-gs.rsync.YYYYMMDD-HHMMSS
+                 OR
+                    $opdown/NOSEND/HOST.IP/via-gs.rsync.YYYYMMDD-HHMMSS
+ -M locpath(s)   When $prog is finished, but prior to building the final
+                 (new) tarball of rsync'd data, merge the data from this(ese)
+                 \",,\" delimited path(s) in:
+                       $opdown/\$nopen_rhostname/
+                 into:
+                       $opdown/\$nopen_rhostname/via-gs.rsync
+ -N              Instead of \$nopen_rhostname/via-gs.rsync for the local copies
+                 of target files, use \$nopen_rhostname_nosend/via-gs.rsync
+ -o              With -F: one remote rsync PER FILE. The default is to combine
+                 several per line, making the remote commands up to 1400 chars.
+ -O #            With -F: Number of files to rsync per command.
+ -r              Re-rsync any files already rsynced today (default does not).
+ -s STRING       Include this string in the tarball $prog makes (spaces are
+                 changed to dashes)
+ -S              Skip test of tarfile (saves time for large tarballs)
+ -t PORT         Rsync port for this instance, used only when -F N,M is used
+ -T #            Maximum number of megabytes for op (from sub bwsofar())
+ -u PORT         Local UDP port used for -tunnel C&C      [default is 10001]
+ -U locfile      Upload/execute locfile instead of rsync (if any) on target.
+                 The -U option is probably not needed as $prog normally
+                 auto-detects which one in $opup is the correct one.
+ -V              Use verbose mode for rsync commands
+
+Usage: $prog [options] [/PATH/TO/REMOTE/FILE-OR-DIR [/PATH/2 ..]]
+
+";
+  $gsusagetext =~ s,Show this help,Show SHORT help,g if $longhelp;
+  return $gsusagetext;
+}
+
+sub checkalldone {
+  # ASSERT: we are part 1 checking on all others
+  local($what) = (@_);
+  my $tunnelcheck = $what =~ /tunnel/;
+  my $clearall = $what unless $tunnelcheck;
+  my $checkcount = $ofparts - 1;
+dbg("In checkalldone(@_) tunnelcheck=$tunnelcheck= clearall=$clearall= mypart=$mypart= ofparts=$ofparts=");
+  my $touchfile = ".rsync-part-1-of-$ofparts.DONE.$olddatafile";
+  if ($tunnelcheck) {
+    do $host_varfile if -s $host_varfile;
+    my $done = 1;
+    for (my $i = 1; $i <= $ofparts; $i++) {
+      $done = 0 unless
+	$tunneldone{"rsync-part-${i}-of-$ofparts.DONE.$olddatafile"};
+    }
+    return $done;
+  }
+  $touchfile =~ s,/,_,g;
+  $touchfile = "$optmp/$touchfile";
+  newhostvar("tunneldone","CLEARALLMATCHING")
+    if $clearall;
+
+  for (my $i = 1; $i <= $ofparts ; $i++) {
+      newhostvar("rsyncdone{$tunnelport $olddatafile $i}",0);
+      $touchfile =~ s/-part-\d+-of/-part-$i-of/;
+      unlink($touchfile) if (-e $touchfile and $clearall);
+      $checkcount-- if -e $touchfile;
+  }
+  # return true if we are done
+  return $checkcount <= 0;
+}

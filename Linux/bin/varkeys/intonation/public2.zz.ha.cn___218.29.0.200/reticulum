@@ -1,0 +1,20 @@
+INTONATION___public2.zz.ha.cn___218.29.0.200___20021024-130727() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.7 
+    #
+    set host public2.zz.ha.cn
+    set ip 218.29.0.200
+    set hostType "Solaris27"
+    set len 476
+    set cv0 850258da
+    set cv1 61a8241a
+    set cv2 98d4903d
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

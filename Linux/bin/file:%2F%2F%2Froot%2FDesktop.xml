@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<directory>
+<file name="copy-fast" icon_position="64,542" custom_icon="file:///usr/share/pixmaps/gnome-user-interface.png"/>
+<file name="copy-emerg" icon_position="64,422" custom_icon="file:///usr/share/pixmaps/gnome-cd.png"/>
+<file name="copy-slow" icon_position="64,662" custom_icon="file:///usr/share/pixmaps/xchat.png"/>
+</directory>

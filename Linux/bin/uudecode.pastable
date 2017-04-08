@@ -1,0 +1,157 @@
+#!/bin/sh
+PROG=`basename $0`
+VERSION=2.1.0.1
+COLOR_SUCCESS="\\033[1;32m"
+COLOR_FAILURE="\\033[1;31m"
+COLOR_WARNING="\\033[1;33m"
+COLOR_NORMAL="\\033[0;39m"
+COLOR_NOTE="\\033[0;34m"
+usage () {
+  echo -e "
+${COLOR_NOTE}Usage:${COLOR_NORMAL}
+
+$PROG [ -s ] localname [ remotename ]
+
+    Where localname is a local binary that needs to be uuencoded
+    locally and decoded elsewhere via perl as remotename, where
+    remotename defaults to sendmail.
+
+    NOTE: $PROG does not deal with compression at all--that is up
+    to the user whether the localname file used is compressed.
+
+    $PROG uuencodes the local file and brings up a gedit
+    window editing the resulting uuencoded data.
+
+    $PROG then echos to stdout (${COLOR_NOTE}in blue${COLOR_NORMAL}) the \"perl -e\"
+    commands to paste into the remote window.
+
+OPTIONS
+
+-s  Do not echo \"stty\" commands (use this when your pseudo-shell
+    cannot handle them).
+
+${COLOR_NOTE}$PROG Version $VERSION${COLOR_NORMAL}
+
+"
+  [ "${*}" ] && echo -e "${COLOR_FAILURE}$PROG FATAL ERROR: ${*}${COLOR_NORMAL}"
+  exit
+}
+# Defaults
+DEFREMOTENAME=sendmail
+
+while [ "${1:0:1}" = "-" ]; do
+  # process -args
+  case ${1:1:1} in
+  "v") echo "$PROG version $VERSION"
+       exit
+       ;;
+  "h") usage
+       ;;
+  "s") NOSTTY=1
+       shift
+       ;;
+  *)
+        usage "Argument not recognized: $1"
+        ;;
+  esac
+done
+
+if [ "$1" ] ; then
+  LOCALNAME=$1
+  REMOTENAME=$2
+  [ "$3" ] && usage "Too many parameters."
+  [ "$REMOTENAME" ] || REMOTENAME=$DEFREMOTENAME
+  [ -w "/current/up" ] || usage "Cannot write to /current/up"
+  if [ -e "$LOCALNAME" ] ; then
+    chmod +x $LOCALNAME
+    if [ "`file $LOCALNAME 2>&1 | grep compress`" ] ; then
+      UNCOMPRESS=""
+    fi
+    uuencode $LOCALNAME $REMOTENAME > /current/up/${REMOTENAME}.uu
+    [ `which gedit 2>/dev/null` ] && GEDIT="gedit /current/up/${REMOTENAME}.uu"
+    BYTES=`egrep -v "begin|end" /current/up/${REMOTENAME}.uu | wc -c`
+  else
+    usage "$LOCALNAME does not exist"
+  fi
+else
+  usage "Bad syntax."
+  exit 1
+fi
+if [ "$NOSTTY" ] ; then
+   sed "s/ followed by a stty echo command//g" $0 | sed "s/...stty echo//g" \
+    | sed "s/stty -echo.....//g" > /tmp/tmppaste.$$
+else
+    cp -f $0 /tmp/tmppaste.$$
+echo
+fi
+tail --lines=+`grep -n DIRECTIONS\: /tmp/tmppaste.$$ | cut -f 1 -d ":"` /tmp/tmppaste.$$ | \
+    sed "s/UNCOMPRESS/$UNCOMPRESS/g" | \
+    sed "s/VERSION/$VERSION/g" | \
+    sed "s/BYTES/$BYTES/g" | grep "^### "
+
+echo -en $COLOR_NOTE
+tail --lines=+`grep -n DIRECTIONS\: /tmp/tmppaste.$$ | cut -f 1 -d ":"` /tmp/tmppaste.$$ | \
+    sed "s/UNCOMPRESS/$UNCOMPRESS/g" | \
+    sed "s/VERSION/$VERSION/g" | \
+    sed "s/BYTES/$BYTES/g" | grep -v "^###" 
+
+echo -en $COLOR_NORMAL
+tail --lines=+`grep -n DIRECTIONS\: /tmp/tmppaste.$$ | cut -f 1 -d ":"` /tmp/tmppaste.$$ | \
+    sed "s/UNCOMPRESS/$UNCOMPRESS/g" | \
+    sed "s/VERSION/$VERSION/g" | \
+    sed "s/BYTES/$BYTES/g" | grep "^#### "
+
+[ "$NOGEDIT" ] || $GEDIT
+
+rm -f /tmp/tmppaste.$$
+exit 
+### DIRECTIONS: uudecode.pastable version VERSION
+###
+### Paste following perl code starting with the line containing:
+###          "stty -echo  && perl -e"
+### (be sure never to add lines in perl code using single quote), and
+### ending with line containing terminating single quote (the last non
+### comment line):
+### ' ; stty echo
+### inclusive. If perl does not exist, you will see that error after
+### pasting through terminating single quote.
+### 
+### Then paste to same window your uuencoded data (include begin and end).
+### Unless disabled with the -s option, the stty -echo command means you
+### will not see uuencoded data fly by.
+### 
+### If the file you are writing already existed, it is moved to some other
+### non-existent file before yours is written. You will then be given the
+### mv command to put it back when all done.
+### 
+### START HIGHLIGHTING WITH FOLLOWING LINE
+stty -echo  && perl -e 'chomp($d = `pwd`) ; $| = 1 ;
+die "\n\nCANNOT RUN FROM /\a\n\n" if ( "$d" eq "/" ) ;
+$_ = <> until ($m,$of) = /^begin\s(\d*)\s*(\S*)/;
+if (-e $of) {  $tf=$of ;  while (-e $tf) { $tf .= "$$"; } `mv $of $tf` ; }
+if (! open (OUT,"> $of")) {
+  warn "\n\nCould not open \"$of\" for write. Flushing STDIN and aborting.\a\n\n" ;
+  $w=" and threw away\a"; }
+while (<>) {  last if /^end/;  next if /a-z/ ;$bytes += length ; next if $w ;
+  next unless int ((((ord() - 32) & 077) + 2) / 3) == int(length() / 4);
+  print OUT unpack ("u",$_) ;}
+close (OUT);print "\n\nRead$w $bytes uuencoded bytes\n\n"; exit if $w ; $c = 3 ;
+if ($bytes != BYTES) { while ($c) { sleep 1 ;
+  print "\n\aERROR: Should be BYTES bytes.\n\n" ; $c-- } }
+chmod oct $m, $of ; $c = 3 ; if ($tf) { while ($c) {
+   print "\nHad to change their file $of to $tf ($of existed already).\n\a";
+  $c-- ; sleep 1 } } print "Just created $of:\n
+ls -al $of*\n" . `ls -al $of*` . "\nDO NOT FORGET\n\nrm $of\n\n";
+print "mv $tf $of\nls -al $of*\n\n" if $tf;
+' ; stty echo
+#### STOP HIGHLIGHTING, BUT INCLUDE ENTIRE LINE ABOVE WITH A SINGLE
+#### QUOTE followed by a stty echo command
+#### 
+#### Now use the gedit window provided showing your .uu file. Use
+#### the mouse to //Edit//Select All, and  then middle button to paste
+#### into window you just pasted "perl -e" program into. If all goes
+#### well you will see a listing of the newly created file just 
+#### uudecoded and the perl execution will terminate. The number of
+#### uuencoded bytes read by perl at the remote end should match this:
+#### 
+#### uuencoded bytes=BYTES

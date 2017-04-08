@@ -1,0 +1,4 @@
+#NOGS
+-lsh /current/etc/autogetnewsuc $GSOPTIONS -nohist
+-gs /port -nohist
+

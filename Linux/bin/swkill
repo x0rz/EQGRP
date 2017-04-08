@@ -1,0 +1,9 @@
+#!/usr/bin/env perl
+$pid = 1 * $ARGV[0] ; 
+die "bad pid $pid" unless ($pid > 1 and $pid < 65536) ;
+print "
+
+
+ls -arlt /tmp ; kill -USR1 $pid;sleep 1;kill -USR2 $pid;sleep 1; kill -USR1 $pid;sleep 1;kill -USR2 $pid ; ls -arlt /tmp
+
+";

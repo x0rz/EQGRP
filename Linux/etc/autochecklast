@@ -1,0 +1,241 @@
+#!/usr/bin/env perl
+## NOPEN autoport script to run last -100, but after a prompt
+## if the wtmp size is too big.
+$VER="1.0.0.19" ;
+#use File::Basename qw(basename dirname);
+my $skiprest=0;
+my $lastout="";
+myinit();
+my $lastfile = "";
+
+#############################
+# Determine which file to -ls
+#############################
+sub findwtmpfile {
+  my $wtmpfile = "";
+  if ($otherfile) {
+    $wtmpfile = $ARGV[0];
+  } elsif ($nopen_server_os =~ /darwin/i) {
+    $wtmpfile = "/var/run/wtmpx";
+  } else {
+    foreach (sort keys %dirbyplatform) {
+      $wtmpfile = $_
+        if ($nopen_server_os =~ /$dirbyplatform{$_}/i);
+    }
+  }
+  until ($wtmpfile =~ /^\/\S+$/ ) {
+    my $ltr="";
+    my $aborthow = "by user";
+    if ($autoforce) {
+      $ltr = "a";
+      my $how = "-gs auto @ARGV";
+      $aborthow = "due to $how";
+    } else {
+      ($ltr,$wtmpfile) = mygetinput("$COLOR_FAILURE\n\n".
+				    "Unable to determine which wtmp file to use for:\n\n".
+				    "         $nopen_server_os\n\n".
+				    "PLEASE REPORT THIS!\n\n".
+				    "Enter the right file to use (full path), or just hit\n".
+				    "return to abort.","Abort");
+    }
+    if ($ltr eq "a") {
+      myalert("NOLOGGING","Aborted $aborthow");
+      $skiprest = 1;
+      return 1;
+    }
+  }
+  my ($output,$nopenlines,@output) = doit("-ls $wtmpfile");
+  my ($size) = $output =~ /\s*\S+\s*\S+\s*\S+\s*\S+\s*(\d+)/;
+  my $maxsize = 60000000; # 60M
+  if (!$gostraightthere and !$gbl_nopromptsplease and ($size > $maxsize)) {
+    my $aborthow = "by user";
+    if ($autoforce) {
+      $longans = "a";
+      my $how = "-gs auto @ARGV";
+      $aborthow = "due to $how";
+    } else {
+      my ($ltr,$longans) = mygetinput("$COLOR_FAILURE\n\n".
+				  "$wtmpfile is over $maxsize bytes.\n\n".
+				  "<C>ontinue with \"last $howmany\",\n".
+				  "get <ALL> output,\n".
+				  "or <A>bort?","Continue");
+    }
+    if ($longans =~ /^a[^l]*$/i) {
+      myalert("NOLOGGING","Aborted $aborthow");
+      $skiprest = 1;
+      return 1; 
+    }
+    $howmany = "" if $longans eq "all";
+  }
+  
+  my $extraopt = " -i " if $linuxtarget;
+  ($output,$lastfile) = doitwrite("ARRAY","last$extraopt$howmany$otherfile");
+
+  $lastout="autochecklast parsed last$howmany output:$COLOR_NORMAL\n\n";
+  return 0;
+}
+
+findwtmpfile();
+
+###############################
+# Parse the file we just dumped
+###############################
+sub parselast {
+  my $boots=0;
+  my $crashes=0;
+  my ($beginline,$wtmpfile,@oldest,@newest) = ();
+
+  open(IN,$lastfile) or
+    mydie("Cannot open $lastfile: $!");
+
+  while (<IN>) {
+    my ($stampsecs,$monstr,$mday,$hr,$min,$year) = epochseconds($_);
+    @newest = ($_,$stampsecs,$monstr,$mday,$hr,$min,$year)
+      if (!$newest[1] or $stampsecs > $newest[1]);
+    @oldest = ($_,$stampsecs,$monstr,$mday,$hr,$min,$year)
+      if (!$oldest[1] or $stampsecs < $oldest[1]);
+    $boots++ if /boot/;
+    $crashes++ if /crash/;
+
+    $_ = "$COLOR_FAILURE$_$COLOR_NORMAL" if /boot/ or /crash/;
+    if (/tmp begins/) {
+      $beginline = $_;
+      $wtmpfile = /(\S+tmp\S*)/;
+      my $beginyear = (epochseconds($beginline))[5];
+      if ($debug or $beginyear < $oldest[6]) {
+        $_ = "$prog: ${COLOR_FAILURE}Average may be off, output does not contain year and:\n".
+  	$_.$COLOR_NORMAL;
+      }
+    }
+  $lastout .=  $_;
+  }#while (<IN>)
+  my $warning = "";
+  #dbg("oldest=(@oldest)");
+  #dbg("newest=(@newest)");
+  my $dayslogged = int(100*(($newest[1] - $oldest[1]) /60 /60 /24))/100 ;
+  my $avgboots = 0;
+  my $total = $crashes + $boots;
+  $warning .= "DBG: Dayslogged=$dayslogged " if $debug;
+
+  if ($dayslogged > 0) {
+    $avgboots = int(100*($total) / $dayslogged)/100;
+    $warning .= "avgboots=$avgboots\n" if $debug;
+    if ($avgboots - $avgbootmax > 0) {
+      $warning .= "\n\n$prog: ${COLOR_FAILURE}MORE THAN $avgbootmax boots or crashes per day!! ($avgboots per day)\n$COLOR_NORMAL";
+    } else {
+      $lastout .= "\n$prog: $avgboots per day over $dayslogged days";
+    }
+  }
+  if ($total >= $bootmax) {
+    $warning .= "\n\n$prog: ${COLOR_FAILURE}MORE THAN $bootmax boots or crashes!! ($total total)\n$COLOR_NORMAL";
+  } else {
+    $lastout .= "\n$total total reboots over $dayslogged days";
+  }
+  if ($warning) {
+    myalert("${COLOR_FAILURE}ALERT!!${COLOR_NORMAL}");
+    sleep 2;
+    myalert("${COLOR_FAILURE}ALERT!!${COLOR_NORMAL}");
+    myalert($lastout.$warning);
+    sleep 2;
+  } else {
+    myalert("NOLOGGING",$lastout.$warning);
+  }
+  return 0;
+}
+parselast() unless $skiprest;
+
+# End with true value as we require this script elsewhere.
+1;
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs checklast @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog = "-gs checklast";
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+  $ext = "$$";
+  $nostdout=0;
+#dbg("ARGV=(@ARGV)");
+
+  mydie("bad option(s)") if (! Getopts( "hvd" ) ) ;
+  $debug = $opt_d;
+  %dirbyplatform = ("/var/adm/wtmpx",  "SunOS",
+		    "/var/log/wtmp",   "Linux|BSD|JUNOS|MIRAPOINT",
+		    "/var/adm/wtmp",   "HP-UX|IRIX|OSF|AIX",
+		   );
+  $howmany = " -100";
+  $bootmax = 25;
+  $avgbootmax = 0.50 ;
+  my $dirhelp = "";
+  foreach (sort keys %dirbyplatform) {
+    $dirhelp .= sprintf("    %-12s %s\n",$_,$dirbyplatform{$_});
+  }
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"$prog\" is used.
+
+";
+  $gsusagetext="Usage: $prog [other-wtmp-file]
+
+$prog does an -ls to determine the size of the wtmp[x] file. If
+it is small, $prog does a last$howmany. If they are over 150M, the
+user is prompted and can decide to skip the last command.
+
+An answer of \"all\" at that prompt will issue a \"last\" command
+instead, showing the entire file contents.
+
+An answer of \"other\" will prompt for what non-default filename to
+issue the \"last -f FILE\" on.
+
+The file size used varies by platform:
+
+$dirhelp
+If the argument is a full path, the -f option to last is used to
+examine that file's contents.
+
+The output of the last command is parsed, and boots and crashes are
+shown in red. If there are more than $bootmax of these, pauses and
+an ALERT bring it to the operator's attention.
+
+OPTIONS
+
+  -h       show this usage statement
+
+";
+  usage() if ($opt_h or $opt_v);
+  progprint("\n\n\nCalled as: $0 $gsoptions\n\n",$COLOR_FAILURE) if @ARGV;
+# dbg("\n\n\nCalled as: $0 $gsoptions\n\n",$COLOR_FAILURE);
+  mydie("Only one argument please")
+    if (@ARGV > 1);
+  $otherfile = $ARGV[0];
+  mydie("File given must start with \"/\" and contain no whitespace")
+    unless (!$otherfile or $otherfile =~ /^\/\S+$/);
+  $otherfile = " -f $otherfile" if $otherfile;
+  mydie("NOTE: \"last$howmany\" will not be run. Disabled by user via \$donotrunlast{$nopen_rhostname} variable.")
+    if $donotrunlast{$nopen_rhostname} ;
+  mydie("NOTE: \"last$howmany\" will not be run. Disabled by user via \$donotrunlast variable.")
+    if $donotrunlast ;
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+}#myinit
+
+

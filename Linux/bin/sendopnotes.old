@@ -1,0 +1,43 @@
+#!/bin/bash
+VERSION="1.0.0.3"
+OPNOTESIP=192.168.254.72
+OPNOTESPORT=9999
+OPNOTESFILE=/current/down/opnotes.txt
+OPNOTESCONVERTED=/tmp/opnotes.txt
+ERROUT=/current/tmp/sendopnotes.err
+
+
+if [[ $1 = "-h" ]]; then
+  echo "Called by scrubhands."
+  echo "`basename $0` version $VERSION"
+  exit 
+fi
+if [[ $1 = "-v" ]]; then
+  echo "`basename $0` version $VERSION"
+  exit
+fi
+
+if [[ ! `which nc 2>/dev/null` ]]; then
+	echo "No nc in PATH."
+	exit
+fi
+
+BYTESSENT=0
+while [ $BYTESSENT -le 0 ] ; do
+  echo "Connecting to Windows box at $OPNOTESIP:$OPNOTESPORT to send opnotes"
+  unix2dos -n $OPNOTESFILE $OPNOTESCONVERTED
+  nc -vv $OPNOTESIP $OPNOTESPORT < $OPNOTESCONVERTED 2>$ERROUT
+  cat $ERROUT
+  BYTESSENT=`grep sent $ERROUT | sed "s/,.*rcvd.*//g" | sed "s/.* //g"`
+  [ "$BYTESSENT" ] || BYTESSENT=0
+  if [ $BYTESSENT -le 0 ] ; then
+    echo -n "Sent 0 bytes Windows box, want to try again? [N] "
+    read ans
+    ans=${ans:0:1}
+    ans=`echo $ans | tr 'A-Z' 'a-z'`
+    [ "$ans" = "y" ] || break
+  fi
+
+done
+
+rm -f $OPNOTESCONVERTED

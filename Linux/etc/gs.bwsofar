@@ -1,0 +1,3 @@
+#NOGS
+-lsh /current/etc/autobwsofar $GSOPTIONS -nohist
+-gs /port -nohist

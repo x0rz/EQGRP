@@ -1,0 +1,25 @@
+#!/bin/bash
+
+cd `echo $0 | sed -e "s/startpyside//g"`pyside
+
+# Make the device if it doesn't exist
+[ -e /dev/sttun ] || mknod /dev/sttun c 10 64
+
+# Start sttunctl if it's not already started
+PSGREP=`ps -ef | grep sttunctl | grep -v grep`
+retVal=0
+if [ "$PSGREP" == "" ]; then
+	./sttunctl $*
+	retVal=$?
+fi
+
+if [ "$retVal" == "0" ]; then
+	./pyside.py
+fi
+
+# Stop sttunctl if nobody's using it
+PYCHECK=`ps -ef | grep pyside | grep -v grep | grep -v start`
+if [ "$PYCHECK" == "" ]; then
+	killall sttunctl
+	rmmod sttunmod-`uname -r`
+fi

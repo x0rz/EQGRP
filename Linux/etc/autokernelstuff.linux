@@ -1,0 +1,103 @@
+#!/usr/bin/env perl
+## NOPEN autoport script to retreive a bunch of kernel stuff
+$VER="1.0.0.7" ;
+#use File::Basename qw(basename dirname);
+use File::Basename ;
+myinit();
+#######################################
+# Get the kernel files using nopenlss()
+#######################################
+sub dokernelget {
+  my @filestoget=();
+
+  ($unr) = doit("uname -r");
+  chomp($unr);
+  $unr =~ s/smp$//;
+
+  mydie("Error: uname -r produced invalid output")
+    unless ($unr);
+
+  foreach (@getthese) {
+    if ( /UNR/) {
+      s/UNR/$unr/g;
+      push(@filestoget," $_");
+      s/$unr/${unr}smp/g;
+    }
+    push(@filestoget," $_");
+  }
+  # Show the files to the user and get them.
+  nopenlss("-UFQzZG$forcepull2",@filestoget);
+  return 1;
+}
+
+dokernelget();
+
+# End with true value as we require this script elsewhere.
+1;
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs kernelstuff @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }  
+    require $autoutils;
+    $prog = "-gs kernelstuff";
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+
+  mydie("bad option(s)") if (! Getopts( "hv" ) ) ;
+  mydie("Not a Linux machine!") if (!$linuxtarget);
+
+  unless ($forcepull2 eq "Y") {
+      $forcepull2 = (grep /^Y$/ , @ARGV) ? "Y" : "";
+  }
+
+  @getthese =
+    (
+     "/usr/src/linux*/.config",
+     "/proc/config.gz",
+     "/boot/System.map-UNR",
+     "/boot/vmlinu*-UNR*",
+     "/boot/config-UNR*",
+     "/boot/initrd*-UNR*",
+#     "/lib//modules/UNR/kernel/net/",
+    );
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"$prog\" is used.
+
+";
+  $gsusagetext="Usage: $prog 
+
+$prog determines the remote kernel version via \`uname -r\`,
+using that (less any trailing \"smp\") where you see UNR shown here
+to download the following (so both up and smp versions are downloaded):
+
+";
+  foreach (@getthese) {
+    $gsusagetext .= "   $_\n";
+  }
+  $gsusagetext .= "
+
+";
+  usage() if ($opt_h or $opt_v) ;
+#  $destdir = "$opdown/$nopen_rhostname/kernel";
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+}#myinit

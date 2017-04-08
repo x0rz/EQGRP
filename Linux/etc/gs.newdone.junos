@@ -1,0 +1,9 @@
+#NOGS
+-lcd /current/down -nohist
+-lsh -nohist [ "$GSOPTIONS" = "new" ]  && rm -f /current/tmp/autonewdone.$NOPEN_RHOSTNAME && touch /current/tmp/autonewdone.$NOPEN_RHOSTNAME.new ; /current/etc/autocheck && /current/etc/autonewdone.junos $GSOPTIONS
+-gs /port -nohist
+# Redo-ing -mynorc and -mypath in case newdone changed our path or aliases -nohist
+-mynorc -nohist
+-mypath -nohist
+-myname2 -nohist
+-myname -nohist

@@ -1,0 +1,48 @@
+Certificate:
+    Data:
+        Version: 1 (0x0)
+        Serial Number:
+            50:24:b4:b2:20:06:05:17:12:09:31
+        Signature Algorithm: md5WithRSAEncryption
+        Issuer: C=US, O=Avaya Inc., OU=Media Server, CN=Avaya Call Server
+        Validity
+            Not Before: May 17 16:09:31 2006 GMT
+            Not After : May  9 16:09:31 2036 GMT
+        Subject: C=US, O=Avaya Inc., OU=s8700, CN=10.62.9.101
+        Subject Public Key Info:
+            Public Key Algorithm: rsaEncryption
+            RSA Public Key: (1024 bit)
+                Modulus (1024 bit):
+                    00:da:f2:f1:cc:b6:5c:6f:76:62:d1:a7:4c:d0:54:
+                    63:73:ec:0d:2c:13:01:76:a4:67:0a:a8:d4:69:14:
+                    1c:f1:bf:f4:47:62:a4:26:04:98:f3:f7:aa:9a:48:
+                    84:bb:92:67:4b:bf:84:56:a5:ee:ec:ab:90:ed:c0:
+                    70:ab:0b:91:83:db:26:79:9c:8a:1c:84:53:4b:9f:
+                    ff:c4:99:58:a1:48:d8:f4:fa:0e:c0:49:d1:4b:38:
+                    62:2a:27:dc:a0:f8:ab:e2:50:a6:38:a7:0a:b9:ef:
+                    96:23:91:90:7f:85:d7:b6:0b:4c:ab:4e:90:77:77:
+                    e8:cd:78:91:a4:e2:fa:e2:7d
+                Exponent: 65537 (0x10001)
+    Signature Algorithm: md5WithRSAEncryption
+        3b:d6:02:cc:46:39:87:b2:5b:87:23:75:a8:c2:c0:d1:2d:79:
+        63:3c:45:d7:2c:da:fb:71:f4:c2:10:b2:5e:5e:b9:6b:17:1d:
+        8f:d6:6e:d8:48:94:b8:8e:18:4c:43:1a:c8:73:c1:d1:68:3e:
+        b3:b2:b9:3d:01:ff:e1:86:36:f7:50:f4:2e:de:78:3a:02:3c:
+        0c:76:ab:0a:86:4a:b1:d5:10:6a:2b:e6:85:98:6a:0c:18:c2:
+        a1:29:39:b4:99:b9:35:46:39:4f:74:9d:d9:48:69:cb:d0:56:
+        70:80:50:f9:26:23:64:93:b2:f0:f0:47:1c:be:31:9d:e3:f0:
+        8e:07
+-----BEGIN CERTIFICATE-----
+MIICFzCCAYACC1AktLIgBgUXEgkxMA0GCSqGSIb3DQEBBAUAMFUxCzAJBgNVBAYT
+AlVTMRMwEQYDVQQKEwpBdmF5YSBJbmMuMRUwEwYDVQQLEwxNZWRpYSBTZXJ2ZXIx
+GjAYBgNVBAMTEUF2YXlhIENhbGwgU2VydmVyMB4XDTA2MDUxNzE2MDkzMVoXDTM2
+MDUwOTE2MDkzMVowSTELMAkGA1UEBhMCVVMxEzARBgNVBAoTCkF2YXlhIEluYy4x
+DjAMBgNVBAsTBXM4NzAwMRUwEwYDVQQDEwwxMzAuNjIuOS4xMDEwgZ8wDQYJKoZI
+hvcNAQEBBQADgY0AMIGJAoGBANry8cy2XG92YtGnTNBUY3PsDSwTAXakZwqo1GkU
+HPG/9EdipCYEmPP3qppIhLuSZ0u/hFal7uyrkO3AcKsLkYPbJnmcihyEU0uf/8SZ
+WKFI2PT6DsBJ0Us4Yion3KD4q+JQpjinCrnvliORkH+F17YLTKtOkHd36M14kaTi
++uJ9AgMBAAEwDQYJKoZIhvcNAQEEBQADgYEAO9YCzEY5h7JbhyN1qMLA0S15YzxF
+1yza+3H0whCyXl65axcdj9Zu2EiUuI4YTEMayHPB0Wg+s7K5PQH/4YY291D0Lt54
+OgI8DHarCoZKsdUQaivmhZhqDBjCoSk5tJm5NUY5T3Sd2Uhpy9BWcIBQ+SYjZJOy
+8PBHHL4xnePwjgc=
+-----END CERTIFICATE-----

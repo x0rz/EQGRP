@@ -1,0 +1,272 @@
+################ CURSEHYDRANT #########################
+############### PARSING  ###################################################################
+
+### vi Search/Replace commands ###
+### ProjectName - self explanatory
+### Date field - today's date, used for output files
+### Host - hostname of the box (not IP address)
+### Cryptkey - encryption key (use output from below md5sum command)
+
+md5sum /current/down/tcpdump.raw
+
+mx
+:%s/PROJECTNAME/PROJECTNAME/g
+:%s/DDMonYY/DDMonYY/g
+:%s/HOST/HOST/g
+:%s/CRYPTKEY/CRYPTKEY/g
+'x 
+
+### Save the encryption key locally:
+
+echo CRYPTKEY > /current/down/cryptkey.cursehydrant.DDMonYY
+
+####### Prepare files containing numbers to search for:
+
+# if files containing the numbers to search available:
+mkdir /current/down/argfiles
+cd /current/down/argfiles
+mz
+cp /mnt/zip*/arg* /current/down/argfiles
+	#or
+cp /mnt/zip*/PROJECTNAME/arg* /current/down/argfiles
+
+ls -altr
+
+
+### Prep the argfiles:
+### make sure the files are ASCII and contain NO EMPTY LINES!!
+### make sure the last line does not contain a null character at the end
+###	(vi the file, add a carriage return to the last line, then delete the empty
+###	line and save)
+### "file" results:
+### 	This will not work: ASCII text, with CRLF line terminators
+### 	This WILL: 	    ASCII text
+cat arg*
+file arg*
+dos2unix arg*
+file arg*
+
+# if no data media is provided: 
+# locally, create a file of numbers to grep for with each number on a separate line
+#       make sure there are NO EMPTY LINES!!!!
+# Format of each type of argument:
+# p123456789 - phone number
+# s123456789 - IMSI
+# e123456789 - IMEI
+# c123/456   - Cell/LAC (no leading 0's)
+
+cd /current/down/argfiles
+vi /current/down/argfiles/argfile1.txt
+
+
+
+########## To look at CDR directories try the following:
+
+### Use the following commands to determine the location of current
+### CDR data storage;  Once you identify the location of the data, you'll
+### use the head/tail commands to determine the date ranges being saved.
+### These date ranges will be used as args in the cursehydrant commands.
+
+### Typical file locations per host:
+
+### Just check to see if files been removed
+-lt /root
+-vget /root/.sh_history
+
+########################## liquidsteel:
+### fc: 192.168.100.10
+ls /share/a1338/ne_q3ic/nb/convert/output | wc -l
+ls /share/a1338/ne_q3ic/nb/convert/output | head -10
+ls /share/a1338/ne_q3ic/nb/convert/output | tail -10
+-ls /share/a1338/ne_q3ic/nb/convert/output/*dF*
+
+########################## sicklestar:
+### about two weeks worth are kept in this directory:
+### CDRCOL1: 10.211.4.1
+### CDRCOL2: (if not on CDRCOL1) 10.211.4.2
+ls /share/a1338/ne_q3ic/nb/convert/output | wc -l
+ls /share/a1338/ne_q3ic/nb/convert/output | head -10
+ls /share/a1338/ne_q3ic/nb/convert/output | tail -10
+-ls /share/a1338/ne_q3ic/nb/convert/output/*dF*
+
+### this is where they are backed up - this could be huge
+ls /share/a1338/ne_q3ic/nb/convert/backup | head -10
+ls /share/a1338/ne_q3ic/nb/convert/backup | tail -10
+ls /share/a1338/ne_q3ic/nb/convert/backup/TODO | head -10
+ls /share/a1338/ne_q3ic/nb/convert/backup/TODO | tail -10
+ls /share/a1338/ne_q3ic/nb/convert/backup/ahmad | head -10
+ls /share/a1338/ne_q3ic/nb/convert/backup/ahmad1 | head -10
+ls /share/a1338/ne_q3ic/nb/convert/backup/ahmad/sulaman | wc -l
+
+##########################  CURSEHYDRANT ######################################################
+###############################################################################################
+
+### Now, encrypt the ascii list...first make sure you have the encryption tool:
+which cryptTool.v1.0.Linux2.4.18-14.targetdl
+
+### If cryptTool not in PATH, change your PATH or insert full path in command
+
+### to encrypt one at a time...skip to next comment to encrypt all at once:
+cryptTool.v1.0.Linux2.4.18-14.targetdl -i argfile1.txt -o argfile1.enc -k CRYPTKEY -b
+cryptTool.v1.0.Linux2.4.18-14.targetdl -i argfile2.txt -o argfile2.enc -k CRYPTKEY -b
+
+file argfile*.enc
+
+### to encrypt all at the same time:
+for i in argfile* ; do cryptTool.v1.0.Linux2.4.18-14.targetdl -i $i -o `basename $i .txt`.enc -k CRYPTKEY -b ; done
+
+ls -l
+file argfile*.enc
+
+### Tips for running the CURSEHYDRANT 4.2.1
+
+### DO NOT _APPEND_ to the local file if using encryption - (no >>L: or >>T: )!!!!
+###     per each argfile, create .enc1, .enc1.more, .enc1.more2, etc if additional
+###             passes are needed for the date range
+### DO NOT use -o if also using >L: or >T: (mixed output corrupts the decryption)
+### By default, the new CH expects a cryptokey:
+###     to run in the clear, take out the -k KEY, add -w, replace -P with -p
+### The phone list is deleted automatically now
+
+
+### Suggested -z options:
+### this looks in subdirs, so use caution in backup dir (can be good AND bad):
+### Also circumvents "parameter list too long" problem with wildcards with 'ls'
+    -z "find /share/a1338/ne_q3ic/nb/convert/output -name '0506132*dF*' -print"
+
+### works, but only for smaller ranges (command line arglist gets long)
+    -z "ls -1rt /share/a1338/ne_q3ic/nb/convert/output/05110[3-6]*dF*"
+
+##### NOTE: MUST CORRELATE NUMBERS IN ENCRYPTED TASKING FILENAMES (i.e. argfile1.enc)
+##### TO OUTPUT FILENAMES (cdrhits*.enc1, cdrhits*.enc1.more, cdrhits*.enc1.more2, etc.)
+
+##### NOTE2: GO FROM MOST RECENT TIME TO (PROBABLY CURRENT DATE) AS FAR BACK AS TIME ALLOWS
+
+######## Upload the parser (CURSEHYDRANT) and called it lvmkd
+# put up the parser tool
+-put /current/up/cursehydrant.v4.2.1.HP-UXB.11.00.targetsl lvmkd
+
+        # or
+
+-put /mnt/zip/cursehydrant.v4.2.1.HP-UXB.11.00.targetsl lvmkd
+
+#####  Upload the encrypted phone list as nfskd, then run the parser:
+
+############ argfile 1
+
+-put /current/down/argfiles/argfile1.enc nfskd
+export ENV_ARGS='-d -k CRYPTKEY -z "find /share/a1338/ne_q3ic/nb/convert/output -name '06071[3456]*dF*' -print" -P ./nfskd'; ./lvmkd >T:/current/down/cdrhits.cursehydrant.HOST.DDMonYY.enc1
+-beep 15
+
+
+### Run again if needed for same tasking
+-put /current/down/argfiles/argfile1.enc nfskd
+export ENV_ARGS='-d -k CRYPTKEY -z "find /share/a1338/ne_q3ic/nb/convert/output -name '06071[012]*dF*' -print" -P ./nfskd'; ./lvmkd >T:/current/down/cdrhits.cursehydrant.HOST.DDMonYY.enc1.more
+-beep 15
+
+############ argfile 2 
+
+-put /current/down/argfiles/argfile2.enc nfskd
+export ENV_ARGS='-d -k CRYPTKEY -z "find /share/a1338/ne_q3ic/nb/convert/output -name '06070[89]*dF*' -print" -P ./nfskd'; ./lvmkd >T:/current/down/cdrhits.cursehydrant.HOST.DDMonYY.enc2
+-beep 15
+
+
+### Run again if needed for same tasking
+-put /current/down/argfiles/argfile2.enc nfskd
+export ENV_ARGS='-d -k CRYPTKEY -z "find /share/a1338/ne_q3ic/nb/convert/output -name '06070[67]*dF*' -print" -P ./nfskd'; ./lvmkd >T:/current/down/cdrhits.cursehydrant.HOST.DDMonYY.enc2.more
+-beep 15
+
+############ argfile 3
+
+-put /current/down/argfiles/argfile3.enc nfskd
+export ENV_ARGS='-d -k CRYPTKEY -z "find /share/a1338/ne_q3ic/nb/convert/output -name '06070[345]*dF*' -print" -P ./nfskd'; ./lvmkd >T:/current/down/cdrhits.cursehydrant.HOST.DDMonYY.enc3
+-beep 15
+
+### Run again if needed for same tasking
+-put /current/down/argfiles/argfile3.enc nfskd
+export ENV_ARGS='-d -k CRYPTKEY -z "find /share/a1338/ne_q3ic/nb/convert/output -name '06070[012]*dF*' -print" -P ./nfskd'; ./lvmkd >T:/current/down/cdrhits.cursehydrant.HOST.DDMonYY.enc3.more
+#-beep 15
+
+######
+######  to run parser in the clear (unencrypted):
+######
+
+#-put /current/down/argfiles/argfile1.txt nfskd
+#export ENV_ARGS='-w -z "find /share/a1338/ne_q3ic/nb/convert/output -name '060501*dF*'  -print" -p ./nfskd'; ./lvmkd >T:/current/down/cdrhits.test
+#-beep 15
+
+######
+######  to completely parse a range of files (no encryption & no particular number to search):
+######
+#export ENV_ARGS='-o -w -d -z "ls -1rt /share/a1338/ne_q3ic/nb/convert/output/06051[1-2]*dF*"; ./lvmkd >T:/current/down/cdr.morenumbers
+
+
+######
+######  survey mode:
+######
+
+### checks for IMEIs that have more than one IMSI associated with it:
+### to limit amount of memory used, replace "-x" with "-X numberBytes"
+export ENV_ARGS='-x -k CRYPTKEY -z "ls -1rt /share/a1338/ne_q3ic/nb/convert/output/06051[1-2]*dF*"'; ./lvmkd >T:/current/down/cdrhits.cursehydrant.HOST.DDMonYY.enc.surveyIMEI
+
+
+### generates a list of Cell IDs associated with each MSC address:
+### to limit amount of memory used, replace "-y" with "-Y numberBytes"
+export ENV_ARGS='-y -k CRYPTKEY -z "ls -1rt /share/a1338/ne_q3ic/nb/convert/output/06051[1-2]*dF*"'; ./lvmkd >T:/current/down/cdrhits.cursehydrant.HOST.DDMonYY.enc.surveyMSC
+
+
+######
+#####  when it's done running, decrypt the file (-d -c options)
+######
+
+
+cd /current/down
+ls -latr cdr*enc*
+
+# to decrypt individually:
+cryptTool.v1.0.Linux2.4.18-14.targetdl -i cdrhits.cursehydrant.HOST.DDMonYY.enc1 -o cdrhits.cursehydrant.HOST.DDMonYY.txt1 -k CRYPTKEY -d -c
+cryptTool.v1.0.Linux2.4.18-14.targetdl -i cdrhits.cursehydrant.HOST.DDMonYY.enc2 -o cdrhits.cursehydrant.HOST.DDMonYY.txt2 -k CRYPTKEY -d -c
+
+
+# or decrypt all at one time (once all are written fully)
+cd /current/down
+for i in cdrhits*enc* ; do n="`echo $i | sed \"s,enc,txt,g\"`" ; cryptTool.v1.0.Linux2.4.18-14.targetdl -i $i -o $n -k CRYPTKEY -d -c ; done
+ls -latr cdr*txt*
+
+######
+######	If you need to stop the parser before it completes:
+### Control-C the nopen window containing the parser command
+### ps -ef |grep lvmkd
+### if the parser command is still "running", then kill the process:
+### kill -9 <PID> 
+### You'll still be able to decrypt the partially completed data pull
+
+######
+######  copy DECRYPTED data to media
+######
+ls -l cdr*txt*
+mz
+cp cdr*txt* /mnt/zip*/PROJECTNAME
+ls -l /mnt/zip*/PROJECTNAME
+uz
+
+
+#####
+#####  clean up
+#####
+####### HP-UX (DO NOT BURN! DO NOT BURN! DO NOT BURN!)
+-gs wearcup
+
+####### Everything else...
+-rm lvmkd nfskd
+-lt
+-cd /tmp
+-rm .scsi
+-lt
+
+w
+ps -ef | sort
+-lt /
+
+##### Either -burn off or if the target is HPUX, use -exit and let -wearcup do the cleanup
+

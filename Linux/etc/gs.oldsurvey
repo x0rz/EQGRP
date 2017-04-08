@@ -1,0 +1,53 @@
+#NOGS
+# 2008-11-05 16:34:11 EST  gs.survey
+-gs info
+
+-get -q /etc/security/passwd /etc/passwd /etc/shadow /etc/inetd.conf /etc/master.passwd /etc/inet/inetd.conf /etc/xinetd*
+-get -q /etc/aliases /etc/mail/aliases /etc/group
+-get -q /etc/sendmail.cf /etc/mail/sendmail.cf /etc/postfix/main.cf
+-get -q /etc/fstab /etc/dfs/dfstab /etc/vfstab /etc/mnttab
+-get -q /etc/exports /etc/rmtab
+-get -q /etc/ftpusers
+-get -q /etc/hosts /etc/hosts.allow /etc/hosts.deny /etc/inet/hosts
+-get -q /etc/hosts.equiv /.rhosts /.netrc
+-get -q /etc/nsswitch.conf /etc/resolv.conf
+-get -q /etc/syslog.conf /etc/named*
+-ls /etc
+-ls /etc/mail /etc/sendmail* /etc/postfix
+-ls /usr/local/bin
+-ls /usr/local/src
+-ls -R /var/named* /etc/named*
+
+-gs ssh
+-gs tripwire
+-gs rootkit
+-gs ident
+
+=arp
+dmesg
+hostid
+ifconfig -a
+modinfo
+mount
+netstat -an
+netstat -in
+netstat -pn
+netstat -rn
+=rpcinfo
+rpm -qa --rcfile `ls -1 /usr/lib/rpm/rpmrc /usr/lib/rpm/red-hat/rpmrc /etc/rpmrc /usr/lib/rpm/redhat/rpmrc 2>/dev/null  | tr "\n" ":"`
+#oldway: rpm -qa
+=surveydothis
+=surveydothis2
+
+=croncheck noget
+grep -v "#" /etc/inetd.conf
+-ls /etc/named*
+-ls /var/named*
+-cat /etc/syslog.conf
+-ls -t /var/adm
+-tail -50 /var/adm/messages
+
+-gs moresurvey
+-gs histories -a0 -p -x
+-beep
+

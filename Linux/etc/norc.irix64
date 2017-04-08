@@ -1,0 +1,20 @@
+
+# IRIX
+
+:PATH=/bin:/usr/bin:/sbin:/usr/sbin:/usr/bsd:/usr/etc
+
+alias -pacct=# WARNING!  NO PROCESS ACCOUNTING CHECK
+
+alias =ps=ps -ef
+alias =psg=ps -ef | grep
+alias =nsg=netstat -an | grep 
+alias =arp=arp -a
+alias =ping=ping -c 1
+alias =df=df -k
+alias =locale=locale
+alias =alwaysdothis=
+alias -elevate=-lsh echo -n Please insert another token..... 1>&2 ; sleep 6 ; echo .
+alias =autorpc=-scan rpc 127.0.0.1 one
+
+alias =pse=ps -ef | egrep
+alias =psgv=ps -ef | egrep -v 

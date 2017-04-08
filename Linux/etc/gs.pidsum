@@ -1,0 +1,3 @@
+#NOGS
+-lsh /current/etc/autopidsum $GSOPTIONS -nohist
+-gs /port -nohist

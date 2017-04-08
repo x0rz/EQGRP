@@ -1,0 +1,648 @@
+#==============================================================================
+#Conscious updates...
+#
+#20030131:  Some additions from nmap-rpc (nmap-3.00)
+#==============================================================================
+#       0x0 - 0x1fffffff (         0 -   536870911) defined by rpc@sun.com
+#0x20000000 - 0x3fffffff ( 536870912 -  1073741823) defined by user
+#0x40000000 - 0x5fffffff (1073741824 -  1610612735) transient
+#0x60000000 - 0x7fffffff (1610612736 -  2147483647) reserved
+#0x80000000 - 0x9fffffff (2147483648 -  2684354559) reserved
+#0xa0000000 - 0xbfffffff (2684354560 -  3221225471) reserved
+#0xc0000000 - 0xdfffffff (3221225472 -  3758096383) reserved
+##0xe0000000 - 0xffffffff (3758096384 - 42949672295) reserved
+#==============================================================================
+         0  DeskSet cm agent_prog
+         1  rpctest client
+        42  nfslog_prog
+     50000
+    100000  rpcbind portmap sunrpc rpcbind
+    100001  rstatd rstat_v2
+    100002  rusersd rpc.rusersd
+    100003  nfsd nfs_prot
+    100004  ypserv
+    100005  mountd
+    100006  remote_dbx
+    100007  ypbind
+    100008  walld rpc.rwalld
+    100009  yppasswdd
+    100010  rpc.etherd ether etherstat
+    100011  rquotad rpc.rquotad
+    100012  sprayd rpc.sprayd
+    100013  3270_mapper
+    100014  rje_mapper
+    100015  selection_svc seln_svc
+    100016  database_svc
+    100017  rexd rpc.rexd
+    100018  alis
+    100019  sched 
+    100020  llockmgr klm_prot
+    100021  nlockmgr nlm_prot
+    100022  x25.inr
+    100023  statmon
+    100024  status stat_prog sm_prog
+    100025  openwin seln_lib
+    100026  bootparamd
+    100027  mazewars # Mazewars game
+    100028  ypupdated
+    100029  keyserv keyserver key_prot
+    100030  securelogin
+    100031  nfs_fwdlnit
+    100032  nfs_fwdtrns
+    100033  sunlink_mapper
+    100034  net_monitor
+    100035  database# Lightweight database
+    100036  pwdauth_prog
+    100037  tfsd
+    100038  nsed
+    100039  nsemntd
+    100040  
+    100041  pnpd_prog (Digital Unix)
+    100042  ipalloc_prog
+    100043  ioadmd rpc.ioadmd showfhd showfh filehandle_prog
+    100044  mvsmount # MVSmount daemon (for mvslogin mvslogout)
+    100055  ioadmd rpc.ioadmd
+    100059  showattrd # DFSMS/MVS NFS server
+    100062  NETlicense
+    100065  sunisamd
+    100066  debug_svc dbsrv
+    100068  rpc.cmsd cmsd
+    100069  rpc.ypxfrd ypxfrd
+    100071  bugtraqd
+    100078  kerbd
+    100080  rpc.operd opermsg # Sun Online-Backup
+    100083  rpc.ttdbserverd ttdbserverd tooltalk
+    100087  admind
+    100088  operator
+    100099  autofsd automountd
+    100101  na.event        # SunNet Manager
+    100102  na.logger       # SunNet Manager
+    100104  na.sync
+    100105  na.diskinfo diskinfo  # SunNet Manager
+    100106  na.iostat iostat
+    100107  na.hostperf
+    100109  na.activity     # SunNet Manager
+    100110  db_mgr
+    100111  na.lpstat lpstat      # SunNet Manager
+    100112  na.hostmem
+    100113  na.sample
+    100114  na.x25
+    100115  na.ping
+    100116  na.rpcnfs
+    100117  na.hostif
+    100118  na.etherif
+    100119  na.ippath ippath      # SunNet Manager
+    100120  na.iproutes iproutes
+    100121  na.layers
+    100122  na.snmp snmp-cmc snmp-synoptics snmp-unisys snmp-utk
+    100123  na.traffic traffic
+    100124  na.dni DNInode DNIneT
+    100131  na.layers2 layers2     # SunNet Manager
+    100133  statd (Solaris 7+)
+    100134  kwarnd (krb5)
+    100135  na.etherif2 etherif2    # SunNet Manager
+    100136  na.hostmem2 hostmem2    # SunNet Manager
+    100137  na.iostat2 iostat2    # SunNet Manager
+    100138  na.snmpv2 snmpv2      # SNM Version 2.2.2
+    100139  cc_sender sender      # Cooperative Consoles
+    100140  ? (Solaris 2.X)
+    100141  
+    100142  
+    100144  
+    100145  scadmd
+    100146  amiserv (Solaris 8+)
+    100147  amiaux  (Solaris 8+)
+    100150  ocfserv ocf_prot (Solaris 8+)
+    100151  sccheckd
+    100153  sunvts
+    100155  smserverd
+    100217  rpc.plumd pcnfs (Solaris 2.X)
+    100218  ? (Solaris 2.X)
+    100221  kcms_server 
+    100227  nfs_acl
+    100229  metad
+    100230  metamhd
+    100231  nfsauth_prot
+    100232  sadmind
+    100233  ufsd ufs_prot
+    100234  gssd gssapi
+    100235  cachefsd
+    100236  MsmServer
+    100242  metamedd
+    100243  ContentManager
+    100244  ? (Solaris 2.X)
+    100248  pmfd (Solaris 2.X)
+    100249  snmpXdmid Solstice (Solaris 2.6+)
+    100254  
+    100281  metacld
+    100300  nisd
+    100301  nis_cache
+    100302  nis_callback    
+    100303  nispasswd    
+    100304  fnsypprot
+    100410  ? (Solaris 2.X)
+    101010 (Dec ?)
+    105004  rpc.pts (Digital UNIX)
+    105005  pdntfs (Digital UNIX)
+    108244
+    120100  ? (Solaris 2.X)
+    120126  nf_snmd
+    120127  nf_snmd
+    150001  pcnfsd rpc.pcnfsd
+    150006  snoop fw_prog
+    160001  ciprog
+    160002  cs00 csprog
+    200000  PyramidLock
+    200001  Pyramid5 (IBM AIX 4.X)
+    200002  CADDS_Image # CV CADDS images.
+    200005  pdbDA
+    200006  nfs-related (IBM AIX 4.X)
+    200012  ? (IBM AIX 4.X)
+    200014  ?
+    200015  ?
+    200020  SWG swg # DMFE/DAWS (Defense Automated Warning System)
+    200023  exportmap (Digital UNIX)
+    200034  Gqsrv gqsrv
+    200035  Ppt ppt
+    200036  Pmt pmt
+    200037  Msgt msgt
+    200038  Walerts walerts
+    200039  Mgt mgt
+    200040  Pft pft
+    200041  Msgq msgq
+    200042  Smpsrv smpsrv
+    200043  Dexsrv dexsrv
+    200044  Statussrv statussrv
+    200046  SessionServer sessionserver
+    200047  SessionDaemon sessiondaemon
+    200048  nfs statd sim_s m_inter statnotify_prog
+    200049  Filesrv filesrv
+    200050  Magfetch magfetch
+    200051  Optfetch optfetch
+    200052  Securitysrv securitysrv
+    200201  ecodisc (Compaq Tru64 UNIX)
+    200202  ecolic (Compaq Tru64 UNIX)
+    200203  eamon
+    200205  ecoad
+    200207  ? (Compaq Tru64 UNIX)
+    211637  rpc.dbserv dbserv rpc.dbserv_dir
+    217854  rpc.taped taped rpc.taped_dir
+    300001  ADTFileLock # ADT file locking service.
+    300004  
+    300006  fmclient # FrameMaker Client
+    300007  
+    300009  fmserver stdfm FrameServer # FrameMaker Server
+    300019  amd amq
+    300029  rpc.ldmd ldm # Unidata LDM
+    300030  UpdtAuditsS
+    300091  Dbpass dbpass
+    300105  nqnfs_prog
+    300214  
+    300215  fm_fls # FrameMaker licnese server
+    300261  ? (Solaris 2.X)
+    300301  acuserve
+    300312  ? (Darwin/BSD)
+    300326  dr_daemon (Solaris 7+)
+    300362  ? /opt/VRTSfw/bin/HAd (VERITAS FirstWatch) or clariion-agent.prog (CLARiiON Disk Array) (Solaris 2.X)
+    300375  rmd
+    300376  agcd
+    300384  calserver_sol8
+    300385  keyserver_sol8
+    300433  bssd bss (Digital UNIX)
+    300434  drdd drd (Digital UNIX)
+    300473  apdaemon (Solaris 2.X) (Only seen Solaris 8)
+    300474  
+    300483  cnxmond (Digital UNIX)
+    300484  cnxagentd (Digital UNIX)
+    300503  ? (Windows)
+    300504  ? (Windows)
+    300516  ? (KSI Linux release 1.2 (Tornado), Black Cat Linux, Red Hat Linux release 7.1 (Seawolf))
+    300527  cluinfod (Digital UNIX)
+    300598  dmispd
+    300619  ? (Solaris 2.X)
+    300632  prpasswd
+    300662  
+    300667  ? (IBM AIX 4.X)
+    300694  ? (IBM AIX 4.X)
+    300717  ? (Compaq Tru64 UNIX V5.1)
+    300729  lprpasswd prpasswdd
+    344444  sfs # SFS - Self-Certifying File System
+    351455  
+    351457  openldap db_server
+    352250  
+    370003  ? (HP-UX)
+    379989
+    390100  presto prestoctl_svc
+    390101  rapla rap
+    390102  raprd rapserv
+    390103  nsrd
+    390104  nsrmmd
+    390105  nsrindexd
+    390107  nsrmmdbd
+    390109  nsrstat
+    390110  nsrjb
+    390112  
+    390113  nsrexecd
+    390115  lgtolmd
+    390400  nsrnotd # NetWorker notary service
+    390600  
+    390601  
+    390602  ntclientd ntclientd
+    390603  aresclsrv aresclsrv  (Remedy AR System)
+    390604  arservtcd arservtcd  (Remedy AR System)
+    390610  flashservd flashservd
+    390619  arflashbd arflashbd  (Remedy AR System)
+    390620  arfastsrv arfastsrv  (Remedy AR System)
+    390621  arfastsrv arfastsrv  (Remedy AR System)
+    390622  arfastsrv arfastsrv  (Remedy AR System)
+    390623  arfastsrv arfastsrv  (Remedy AR System)
+    390624  arfastsrv arfastsrv  (Remedy AR System)
+    390625  arfastsrv arfastsrv  (Remedy AR System)
+    390626  arfastsrv arfastsrv  (Remedy AR System)
+    390627  arfastsrv arfastsrv  (Remedy AR System)
+    390628  arfastsrv arfastsrv  (Remedy AR System)
+    390629  arfastsrv arfastsrv  (Remedy AR System)
+    390630  arfastsrv arfastsrv  (Remedy AR System)
+    390631  arfastsrv arfastsrv  (Remedy AR System)
+    390632  arfastsrv arfastsrv  (Remedy AR System)
+    390633  arfastsrv arfastsrv  (Remedy AR System)
+    390634  arfastsrv arfastsrv  (Remedy AR System)
+    390635  arlistsrv arlistsrv  (Remedy AR System)
+    390636  arlistsrv arlistsrv  (Remedy AR System)
+    390637  arlistsrv arlistsrv  (Remedy AR System)
+    390638  arlistsrv arlistsrv  (Remedy AR System)
+    390639  arlistsrv arlistsrv  (Remedy AR System)
+    390640  arlistsrv arlistsrv  (Remedy AR System)
+    390641  arlistsrv arlistsrv  (Remedy AR System)
+    390642  arlistsrv arlistsrv  (Remedy AR System)
+    390643  arlistsrv arlistsrv  (Remedy AR System)
+    390644  arlistsrv arlistsrv  (Remedy AR System)
+    390645  arlistsrv arlistsrv  (Remedy AR System)
+    390646  arlistsrv arlistsrv  (Remedy AR System)
+    390647  arlistsrv arlistsrv  (Remedy AR System)
+    390648  arlistsrv arlistsrv  (Remedy AR System)
+    390649  arlistsrv arlistsrv  (Remedy AR System)
+    391000  sgi_snoopd snoopd snoop (SGI IRIX)
+    391001  sgi_toolkitbus (SGI IRIX)
+    391002  sgi_fam (SGI IRIX)
+    391003  sgi_notepad notepad (SGI IRIX)
+    391004  sgi_mountd mount showmount (SGI IRIX)
+    391005  sgi_smtd smtd (SGI IRIX)
+    391006  sgi_pcsd (SGI IRIX)
+    391007  sgi_nfs (SGI IRIX)
+    391008  sgi_rfind rfind (SGI IRIX)
+    391009  sgi_pod pod (SGI IRIX)
+    391010  sgi_iphone (SGI IRIX)
+    391011  sgi_videod (SGI IRIX)
+    391012  testcd (SGI IRIX)
+    391013  sgi.ha_hbeat ha_hbeat (SGI IRIX)
+    391014  sgi.ha_nc ha_nc (SGI IRIX)
+    391015  sgi.ha_appmon ha_appmon (SGI IRIX)
+    391016  sgi_xfsmd (SGI IRIX)
+    391017  sgi_mediad mediad (SGI IRIX)
+    391018  sgi.ha_orcl ha_orcl (SGI IRIX)
+    391019  sgi.ha_ifmx ha_ifmx   (SGI IRIX)
+    391020  sgi.ha_sybs ha_sybs (SGI IRIX)
+    391021  sgi.ha_ifa ha_ifa (SGI IRIX)
+    391022  sgi_reserved (SGI IRIX)
+    391023  sgi_reserved (SGI IRIX)
+    391024  sgi_reserved (SGI IRIX)
+    391025  sgi_reserved (SGI IRIX)
+    391026  sgi_reserved (SGI IRIX)
+    391027  sgi_reserved (SGI IRIX)
+    391028  sgi_reserved (SGI IRIX)
+    391029  sgi_espd espd (SGI IRIX)
+    391030  sgi_reserved (SGI IRIX)
+    391031  sgi_reserved (SGI IRIX)
+    391032  sgi_reserved (SGI IRIX)
+    391033  sgi_reserved (SGI IRIX)
+    391034  sgi_reserved (SGI IRIX)
+    391035  sgi_reserved (SGI IRIX)
+    391036  sgi_reserved (SGI IRIX)
+    391037  sgi_reserved (SGI IRIX)
+    391038  sgi_reserved (SGI IRIX)
+    391039  sgi_reserved (SGI IRIX)
+    391040  sgi_reserved (SGI IRIX)
+    391041  sgi_reserved (SGI IRIX)
+    391042  sgi_reserved (SGI IRIX)
+    391043  sgi_reserved (SGI IRIX)
+    391044  sgi_reserved (SGI IRIX)
+    391045  sgi_reserved (SGI IRIX)
+    391046  sgi_reserved (SGI IRIX)
+    391047  sgi_reserved (SGI IRIX)
+    391048  sgi_reserved (SGI IRIX)
+    391049  sgi_reserved (SGI IRIX)
+    391050  sgi_reserved (SGI IRIX)
+    391051  sgi_reserved (SGI IRIX)
+    391052  sgi_reserved (SGI IRIX)
+    391053  sgi_reserved (SGI IRIX)
+    391054  sgi_reserved (SGI IRIX)
+    391055  sgi_reserved (SGI IRIX)
+    391056  sgi_reserved (SGI IRIX)
+    391057  sgi_reserved (SGI IRIX)
+    391058  sgi_reserved (SGI IRIX)
+    391059  sgi_reserved (SGI IRIX)
+    391060  sgi_reserved (SGI IRIX)
+    391061  sgi_reserved (SGI IRIX)
+    391062  sgi_reserved (SGI IRIX)
+    391063  sgi_reserved (SGI IRIX)
+    391200  afsd
+    391201  dhc
+    391202  cmsd
+    391203  xxx2trif
+    391204  trif2xxx
+    391205  dx
+    391206  licd
+    391434  ingsqld # SCO JDBC
+    391435  intsqld
+    395130  ? (SGI IRIX)
+    395131  ? (SGI IRIX)
+    395154  ? (SGI IRIX)
+    395175  asedirector (Digital UNIX)
+    395176  aseagent (Digital UNIX)
+    395177  asehsm (Digital UNIX)
+    395179  aselogger (Digital UNIX)
+    395644  ? (SCO UnixWare 7.1.1)
+    395645  ? (SCO UnixWare 7.1.1)
+    395646  ? (SCO UnixWare 7.1.1)
+    395647  ? (SCO UnixWare 7.1.1)
+    395648  ? (SCO UnixWare 7.1.1)
+    395649  ? (SCO UnixWare 7.1.1)
+    395650  ? (SCO UnixWare 7.1.1)
+    395659  ? (SCO UnixWare 7.1.1)
+    395946  
+    395947  
+    396010  ? (Digital UNIX)
+    450000  EnsignAgent # Ensign Agent
+    500200
+    555556  libkrb/ktest
+    900101  rpc.dracd drac-1.10 /opt/VRTSfw/bin/startup.d/S78dracd (Solaris 2.X, NetBSD)
+   1000002  AdoIfServer # RHIC AdoIf Server (Accelerator Device Object)
+   1049159  ? (Solaris 2.X)
+   2000004  notifServer # RHIC notifServer
+  20000000  retherif na.retherif
+  20000001  genagnt na.genagnt
+  20000114  acedb rpc.acedbd
+  20000115  aboutdb rpc.acedbd
+  20000116  aatdb rpc.acedbd
+  20000777  seagent # Memco/Platinum/CA SeOS security product
+  21000023  dbsrvr # TACO
+  28000205  egts # Eurogam Tape Server (10205/udp)
+  28000220  ers # Eurogam Register Server (10220/udp)
+  28000230  sas # Spectrum Access Server (10230/udp)
+  35791394
+  89637093  
+ 200100000  netinfo ni_prot (Darwin/BSD)
+ 200100001  netinfobind nibind_prot (Darwin/BSD)
+ 200100002  renderd # NeXT renderd
+#==============================================================================
+#RPCs below are "user defined" RPCs... (not controlled by Sun)
+#==============================================================================
+ 536870912  dmi callback/mi_indicate (0x20000000)
+ 536870913  SLSd_daemon (0x20000001) (HP-UX)
+ 536870914  
+ 536870915  uidd
+ 536870916  vtsk sunvts (Solaris 2.X)
+ 536870917  bondd
+ 536870918  staticd
+ 536870919  curved
+ 536870920  msglogd
+ 536870921  aliasd (BSDI)
+ 536870922  ticketd
+ 536870923  glossd
+ 536870924  futured
+ 536870928  priced
+ 536870929  ladderd
+ 536870937  optiond # FIRM option server
+ 536870944  ndbportmgr  IBM Network Database (DB2)
+ 536870945  ndbserver1  IBM Network Database (DB2)
+ 536870946  ndbserver2  IBM Network Database (DB2)
+ 536870947  ndbserver3  IBM Network Database (DB2)
+ 536870948  ndbserver4  IBM Network Database (DB2)
+ 536870949  ndbserver5  IBM Network Database (DB2)
+ 536870950  ndbserver6  IBM Network Database (DB2)
+ 536870951  ndbserver7  IBM Network Database (DB2)
+ 536870952  ndbserver8  IBM Network Database (DB2)
+ 536870953  ? (BSDI, Solaris 2.X)
+ 536870954  ndbserver10  IBM Network Database (DB2)
+ 536871065  
+ 536871185  
+ 536871680  
+ 536871681  
+ 536872489  ? 
+ 537006167  
+ 541414217  fcagent # SGI FibreVault Status/Configuration daemon
+ 542328147  sesdaemon
+ 545580417  bwnfsd
+ 555555554  inetray.start
+ 555555555  inetray
+ 555555556  inetray
+ 555555557  inetray
+ 555555558  inetray
+ 555555559  inetray
+ 555555560  inetray
+ 570425344  VxWorks WTX svc_base (0x22000000)
+ 591751041  ? (Solaris 2.X)
+ 600100009  yppasswd_private
+ 600100029  crypt
+ 600100069  fypxfrd
+ 611319808  rdb_v3 (0x24700000)
+ 630474513  bminrd # MacroModel - BatchMin Network Server
+ 660035415  ?
+ 732889089  ?
+ 788529152  vfa lib dbquery (0x2f000000)
+ 788529153  vfa client db_relay backend (0x2f000001)
+ 788585389  hclnfsd_prog (0x2f00dbad)
+ 800000000  
+ 805306352  ttd (HP-UX)
+ 805306368  dmispd (0x30000000)
+ 805306485  ? (Solaris 2.X)
+ 805307008  ? (Solaris 2.X)
+ 805898569  rdict # "Internetworking with TCP/IP Vol 3"
+ 806422610  piktc_svc # PIKT: Problem Informant/Killer Tool
+ 824395111  
+ 824395112  
+ 830506882  
+ 841097762
+ 841097763
+ 841097764
+ 841097765
+ 858993459 (sco ?)
+ 912680550  cns # Controls Name Server
+#==============================================================================
+#RPCs below are "transient" RPCs...
+#==============================================================================
+1073741824  fmproduct yp transient (0x40000000)
+1073741825
+1073741826  
+1073741827  
+1073741828  
+1073741829  
+1073741830  
+1073741831  
+1073741832  
+1073741833  
+1073741834  
+1073741835  
+1073741836  
+1073741837  
+1073741838  
+1073741839  
+1073741840  
+1073741841  
+1073741842  
+1073741843  
+1073741844  
+1073741845  
+1073741846  
+1073741847  
+1073741848  
+1073742054  ? (Solaris 2.X)
+1073751062
+1073757503  
+1073765486  
+1073838726  
+1073839625  
+1073839626  
+1073842324  ? (Solaris 2.X)
+1073842325  ? (Solaris 2.X)
+1073844424  
+1073844425  
+1073844426  
+1073844724  
+1073844726  
+1073844727  
+1073848024  
+1073848026  
+1073848027  
+1073959924  
+1073959925  
+1073959926  
+1080231175  
+1080741424  
+1080762124  
+1081396437  
+1081396439  
+1081396440  
+1092830567  
+1097417525  
+1097417526  
+1097417527  
+1097417528  
+1097417529  
+1098732979  
+1098732980  
+1098732981  
+1098732982  
+1098732983  
+1105962093  
+1111042030  (SCO UnixWare 7.1.1)
+1111042050  (SCO UnixWare 7.1.1)
+1111042051  (SCO UnixWare 7.1.1)
+1127362577  
+1127362578  
+1127362579  
+1127362580  
+1127362581  
+1130341318  
+1130341319  
+1130341320  
+1130341321  
+1130341322  
+1145324612  VxWorks VxRDB gdb (0x44444444)
+1147985923  
+1147985924  
+1147985926  
+1147985927  
+1166767277  
+1166767278  
+1166767280  
+1166767281  
+1183723092  
+1195681564  
+1195681565  
+1195681567  
+1195681568  
+1215498050  
+1232370977  
+1254905127  
+1254905128  
+1254905129  
+1254905130  
+1254905131  
+1263629295  
+1281974684  
+1281974685  
+1281974686  
+1281974687  
+1281974688  
+1282026721  
+1282026722  
+1282026723  
+1282026724  
+1282026725  
+1283056389  
+1289637086  ttsession (Solaris 7)
+1289637087  ttsession one-up...
+1289637088  ttsession one-up...
+1289637089  ttsession one-up...etc., etc., etc...
+1306668513  
+1307332278  
+1307332280  
+1307332281  
+1315966408  
+1315966409  
+1315966411  
+1315966412  
+1323438735  
+1323438736  
+1323438737  
+1323438738  
+1323438739  
+1340174584  
+1340174585  
+1340174587  
+1340174588  
+1342177279  ttsession (Solaris 6, IBM AIX 4.2)
+1342177280  ttsession one-up...
+1342177281  ttsession one-up...
+1342177282  ttsession one-up...
+1342177283  Docviewer server (0x50000003) ttsession one-up...
+1342177284  ttsession one-up...etc., etc., etc...
+1362260283  
+1362260287  
+1395598777  
+1419385977  
+1425346832  
+1425346833  
+1425346834  
+1425346835  
+1425346836  
+1431655761  tgtsvr wtxregd VxWorks WTX (0x55555551)
+1431655765  wdb_agent VxWorks WDB (0x55555555)
+1451206156  
+1451206157  
+1451206159  
+1451206160  
+1473100411  
+1481342508  
+1481342509  
+1481342511  
+1481342512  
+1484575291  
+1484575293  
+1484575294  
+1518401168  
+1518401169  
+1518401170  
+1518401171  
+1518401172  
+1566599470  
+1566599471  
+1566599472  
+1566599473  
+1566599474  
+1566801942  
+1566801944  
+2130739217  fcopy_server
+4294967295  rdb_v3 callback (-1)

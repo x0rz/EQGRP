@@ -1,0 +1,101 @@
+#!/usr/bin/env perl
+##
+# This should have almost no logic in it. It is just a usage for the dospecial
+# capability put in autorunonce.
+
+$VER="1.0.0.1";
+$| = 1 ;
+
+myinit() ;
+
+## END MAIN ##
+
+sub myinit {
+  $willautoport=0;
+  my $autoutils = "../etc/autoutils" ;
+  unless (-e $autoutils) {
+    $autoutils = "/current/etc/autoutils" ;
+   }
+  require $autoutils;
+  $prog = "dospecial";
+  $vertext = "$prog version $VER\n" ;
+  mydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			    -e $nopen_mylog);
+
+  $usagetext="
+Usage: $prog -h                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session with \"$prog\".
+
+";
+
+  $gsusagetext = "
+Usage: -gs dospecial -h (usage only)
+
+dospecial() is a function call within autorunonce. It is a means to allow
+unattended automated NOPEN ops. autodospecial serves ONLY to provide this usage.
+
+There are three ways to drive dospecial() behavior:
+
+CONFIG FILE ONLY:         $opdown/special.NOPEN_IP.cfg
+
+CONFIG FILE:              $opdown/special.NOPENstringTASK.cfg
+COMBINED WITH ENV VAR:    -lsetenv NOPENstringTASK=content
+
+PERL AUTOMATION FILES:    $opetc/gs.content
+                          $opetc/autocontent
+                          $opetc/gs.content.args (optional)
+COMBINED WITH ENV VAR:    -lsetenv NOPENstringTASK=content
+
+NOTE: See sample configuration for syntax inside the CONFIG FILEs:
+   -lsh cat  /current/etc/special.NOPENsampleTASK.127.0.0.1.cfg
+
+CONFIG FILE ONLY: The commands in this CONFIG file will be done in EVERY
+window on that particular IP. 
+
+CONFIG FILE with ENV VAR: This mode allows for different windows on the same
+target to behave differently. This mode is enabled when that CONFIG FILE
+exists AND the local environment variable NOPENstringTASK is defined. Either
+export the desired environment variable at the command line or issue an
+-lsetenv command once on the target to set that variable (turning on that
+particular configuration for dospecial()), then run -gs auto after -lsetenv to
+shift into this particular special mode. This would allow, for instance, one
+NOPEN window on a target to run a \"-tunnel 9999 udp\"  as soon as that session
+is established. Then another window on the same target could use with some
+other script or dospecial() call with a different environment variable which
+can use the -tunnel window provided by the other dospecial() window.
+
+PERL AUTOMATION FILES with ENV VAR: If this environment variable is set AND
+the two files exist (note that the value of \"content\" comes from the VALUE
+of the environment variable), then mydo() is used to call that script. Put
+any required arguments in the gs.content.args file. Note that the gs.content
+and autocontent files can either be target specific or any mydo() compatible
+script already in ./etc, e.g. autodfcheck, autopscheck, etc. (not autolss).
+
+NOTE: If the \"string\" used in the environment variable name NOPENstringTASK
+      or that variable's defined value contains an IP address (\".\" is not
+      valid for environment variable names, so use either \"_\" or \",\"
+      for each dot), then only hosts with that IP address in their
+      NOPEN_RHOSTNAME variable will run the dospecial() content depicted
+      in that CONFIG FILE.
+
+Usage: -gs dospecial -h (usage only)
+
+";
+  # Handle single help/version args here, otherwise 
+  # give global ARGV to noepndospecial() to handle with Getopts.
+  $opt_v = $ARGV[0] eq "-v";
+  usage() if ($ARGV[0] eq "--help" or
+	      $ARGV[0] eq "-help" or
+	      $ARGV[0] eq "-h" or
+	      $ARGV[0] eq "-H" or
+	      $ARGV[0] eq "--version" or
+	      $ARGV[0] eq "-v");
+  undef $opt_v;
+  #  $socket = pilotstart(quiet); Set $willautoport=1 in myinit if this is used
+} #myinit
+

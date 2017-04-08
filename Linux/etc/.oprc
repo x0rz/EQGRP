@@ -1,0 +1,95 @@
+
+# .oprc:  Set FTP variables based on PATHNUM and ALT.
+# Mon Nov 25 17:33:24 GMT 2013
+#VER=1.5.0.1
+
+
+# DEFAULTS
+HOST=10.0.139.12
+USERNAME=anonymous
+PASSWD=anonymous
+
+# PER HOST/USERNAME
+HOST[1]=$HOST
+HOST[2]=$HOST
+HOST[3]=$HOST
+HOST[4]=$HOST
+HOST[5]=$HOST
+
+USERNAME[1]='imps'
+USERNAME[2]='ds'
+USERNAME[3]='slow'
+USERNAME[4]='fast'
+USERNAME[5]='emerg'
+
+PASSWD[1]='EECPEHJ2le#Zxd'
+PASSWD[2]='MdZrqNi#k5iARE'
+PASSWD[3]='zvtwVI#wOza3Ad'
+PASSWD[4]='xnLZY#jL9yDotq'
+PASSWD[5]='CBDEVC6Phh#JsW'
+
+# ALTERNATES, SET ALT= TO USE THESE
+ALTHOST[1]=10.0.145.42
+ALTHOST[2]=10.0.145.33
+ALTHOST[3]=10.0.145.36
+ALTHOST[4]=10.0.145.35
+ALTHOST[5]=10.0.145.41
+
+ALTUSERNAME[1]='imps'
+ALTUSERNAME[2]='ds'
+ALTUSERNAME[3]='slow'
+ALTUSERNAME[4]='fast'
+ALTUSERNAME[5]='emerg'
+
+ALTPASSWD[1]='5@ltw@tercrocodile'
+ALTPASSWD[2]='H@mmerhe@d5h@rk'
+ALTPASSWD[3]='51lver51def15h!'
+ALTPASSWD[4]='Loggerhe@dturtle1'
+ALTPASSWD[5]='Humpb@ckwh@le1'
+
+[ "$PATHNUM" ] || PATHNUM=0
+P=`echo "$PATHNUM" | tr -dc '0-9'`
+
+
+
+#FRESH* All trhee FRESH flows, FRESHSTEP, FRESHSTEP_TRACKER, and FRESHSCAN 
+	#Fresh: Northern5e@hor5e
+
+
+if [ "$PATHNUM" == "$P"  -a "${HOST[P]}" ] ; then
+    HOST=${HOST[P]}
+    USERNAME=${USERNAME[P]}
+    PASSWD=${PASSWD[P]}
+fi
+if [ "$ALT" ] ; then
+    if [ "$PATHNUM" == "$P"  -a "${ALTHOST[P]}" ] ; then
+        HOST=${ALTHOST[P]}
+        USERNAME=${ALTUSERNAME[P]}
+        PASSWD=${ALTPASSWD[P]}
+    fi
+fi
+if [ $PATHNUM -eq 0 -a "$WHICHPATH" = "ds" ] ; then
+    USERNAME=ds
+    PASSWD='8-6dsIt#'
+    DESTDIR=.
+fi
+
+
+if `echo "$0" | grep -q oprc$` ; then
+	# Added this to help in debugging, run as "bash .oprc" to see this
+	# output with various combinations of ALT and PATHNUM.
+	SHOW="xxxxxx"${PASSWD:6}
+	cat <<EOF
+
+With these settings:
+	PATHNUM=$PATHNUM
+	P=$P
+	ALT=$ALT
+
+We just set these (first SIX chars in passwd xxx'd out):
+	HOST=$HOST
+	USERNAME=$USERNAME
+	PASSWD=$SHOW
+
+EOF
+fi

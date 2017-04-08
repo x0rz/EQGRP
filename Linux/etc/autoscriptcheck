@@ -1,0 +1,125 @@
+#!/usr/bin/env perl
+$VER="1.0.3.5" ;
+myinit();
+
+# Check to see if we are scripted.
+chomp($scripted = `scriptcheck 2>/dev/null`);
+unless ($scripted) {
+  chomp($scripted = `pschain $nopen_mypid 2>/dev/null | grep -v grep | grep "script -af.*script" | tail -1`);
+  $scripted =~ s/.*\s(\S+)$\s*/$1/;
+  unless ($scripted =~ /$opdown/) {
+    $scripted = "$opdown/$scripted" if ($scripted =~ /script\.[0-9]+/ and $scripted !~ m,$opdown,);
+  }
+}
+
+# Save the name of our script file to $optmp for later use.
+my $scriptname = "$optmp/noclientscript.$nopen_mypid";
+unless (-e $scriptname) {
+  open(SCRIPTNAME, "> $scriptname") or mydie("Unable to open $scriptname: $!\n");
+  select SCRIPTNAME;
+  print $scripted;
+  close(SCRIPTNAME);
+  select STDOUT;
+} 
+
+dbg("scripted=$scripted inlab=$inlab SCRIPTOVERRIDE=$ENV{SCRIPTOVERRIDE}");
+if ($scripted) {
+dbg("utilsproblem=$utilsproblem= sha1sums=$sha1sums= COLOR_NOTE=$COLOR_NOTE=");
+  progprint("$utilsproblem${sha1sums}${COLOR_NOTE}\n\nWE ARE SCRIPTED.  GOOD: $COLOR_SUCCESS$scripted$COLOR_NORMAL\a");
+  sleep 1;
+} elsif ($inlab) {
+  progprint("$utilsproblem${sha1sums}In the lab, NOT SCRIPTED, but OK.");
+} else {
+  mybail("$utilsproblem${sha1sums}${COLOR_FAILURE}NOT GOOD!!!\n\n\nTHIS IS AN UNSCRIPTED WINDOW!!!!",$COLOR_FAILURE);
+  progprint("$utilsproblem${sha1sums}${COLOR_FAILURE}NOT GOOD!!!\n\n\nTHIS IS AN UNSCRIPTED WINDOW!!!!",$COLOR_FAILURE);
+dbg("$utilsproblem${sha1sums}${COLOR_FAILURE}NOT GOOD!!!\n\n\nTHIS IS AN UNSCRIPTED WINDOW!!!!",$COLOR_FAILURE);
+  beep(10) unless (length $ENV{SCRIPTOVERRIDE} || $calledviarequire);
+}
+
+# End with true value as we require this script elsewhere.
+1;
+## END MAIN
+
+sub mybail {
+  dbg("in myprint(@_) quiet=$quiet");
+  dbg("Here0");
+  #print STDERR "TEST STDERR in myprint(@_)";
+  #print STDOUT "TEST STDOUT in myprint(@_)";
+  myofferabort("@_");
+  dbg("Here1");
+  return if $quiet;
+  my $color = $COLOR_NOTE;
+  if ($_[$#_] eq "1" or $_[$#_] =~ /^\033\[/) {
+    $color = pop(@_);
+    $color = $COLOR_FAILURE if $color eq "1" ;
+  }
+  if ($_[$#_] eq "2") {
+    dbg("Here2");
+    pop(@_);
+    print STDERR "\n$color\n\n$date: @_\n\n$COLOR_NORMAL\n";
+  } else {
+    dbg("Here3");
+    print STDOUT "\n$color\n\n$date: @_\n\n$COLOR_NORMAL\n";
+  }
+}#mybail
+
+sub beep {
+  local ($count) = (@_);
+  $count = 5 unless $count > 0 ;
+  print STDERR "$COLOR_FAILURE\n";
+  while ($count--) {
+    my $what = $count % 2 ? "\a            \r" : "NOT GOOD!!!\a\r";
+    print STDERR $what;
+    sleep 1;
+  }
+  print STDERR "$COLOR_NORMAL\n";
+}#beep
+
+sub myofferabort {
+  my ($prompt,@more) = (@_);
+  if ($more[0] eq "N") {
+    $prompt.=     " (you can also <A>bort)";
+    push(@more,"A");
+  } else {
+    $prompt.=     "\n\nIf you <C>ontinue, your window will remain UNSCRIPTED. (thats not good)\n\n".
+      "The default will be to -exit this target, so you can script the window.";
+    push(@more,"EXIT","C");
+  }
+#dbg("Calling  mygetinput($prompt,@more);");
+  my ($answer,$answerlong) = mygetinput($prompt,@more);
+#  if ($abort =~ /^a/i and lc $abort ne "always") {
+  if ($answer eq "e") {
+    progprint("$COLOR_FAILURE\n\nAborted by user--EXITING THIS WINDOW in 3 seconds\n\n");
+    sleep 4;
+    doit("-exit") unless length $ENV{SCRIPTOVERRIDE};
+    mydie("OK, nevermind. You have SCRIPTOVERRIDE=$ENV{SCRIPTOVERRIDE} set.\n\n\n".
+	  "Hope you know what you are doing. Your window is STILL not scripted.\n");
+  }
+  return ($answer,$answerlong);
+}
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs scriptcheck @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }  
+    require $autoutils;
+    $prog = "-gs scriptcheck";
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+}#myinit

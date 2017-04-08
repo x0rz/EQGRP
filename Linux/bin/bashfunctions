@@ -1,0 +1,187 @@
+#!/bin/bash -m
+
+# bashfunctions is run via source (or ".").
+# It defines a bunch of variables and functions for the calling script.
+# It also does a few things only when sourced by scrubhands.
+
+
+BASHFUNCTIONSVER=1.0.0.1
+
+PROG=`basename ${0}`
+TOOLS=bin
+DOWN=down
+TEXTS=etc
+DOC=doc
+UP=up
+MAILDIR=mailpull
+COMMANDSDIR=targetcommands
+if [ "$PROG" = "scrubhands" ] && [ "`echo \"$*\" | grep -- -G`" ] ; then
+    TESTGETOPDATA=yes
+    TOP=/tmp
+fi
+
+
+# Set TOP if not set, to either /current link if there or /tmp
+if [ ! "$TOP" ] ; then
+    TOP=/current
+    [ -L /current ] || TOP=/tmp
+fi
+
+OS=`uname -s`
+if [ "$OS" = "Linux" ]; then
+  MINUSN=-n
+else
+  MINUSN=""
+fi
+
+
+OSVERSION=`uname -r`
+[ "$TOP" ] || TOP=/home/black/tmp
+[ "$PUBLICETHER" ] || PUBLICETHER=eth0
+[ "$PRIVATEETHER" ] || PRIVATEETHER=eth1
+[ "$DATE" ] || DATE=.
+
+histclean() {
+  HISTCLEAN=""
+  TMPHIST=/tmp/.h.$$
+  DOFILES="$* `ls /.*history /*/.*history /*/*/.*history 2>/dev/null`"
+
+  for F in $DOFILES ; do
+    [ -f "$F" ] || continue
+    egrep -q "shutdown|reboot|halt|init 0" $F || continue
+    egrep -v "shutdown|reboot|halt|init 0" $F > $TMPHIST
+    touch -r $F $TMPHIST
+    cat $TMPHIST > $F
+    touch -r $TMPHIST $F
+    HISTCLEAN="$HISTCLEAN $F"
+  done
+  [ "$HISTCLEAN" ] && notered "Cleaned #shutdown|reboot|halt|init 0# lines from $HISTCLEAN"
+  rm -f $TMPHIST
+  unset TMPHIST HISTCLEAN DOFILES
+}
+
+
+fixpath() {
+    # Take any number of PATHs or PATH variables as input,
+    # Return/echo one in that order with no duplicates (via echo, so use
+    # backticks or other redirection to take the return value and use it).
+    # Spaces in any individual PATH entry will be lost, do not do that.
+    # However, along the way, we:
+	# Remove all trailing slashes
+        # Make all slashes single
+	# Skip . and ./ and any that start with ../
+
+    export NEWPATH=
+    unset DONEFIRST
+    echo -n PATH=
+ #    echo $* | sed "s,//*,/,g" | \   # Make all slashes single
+ #    sed "s/PATH=//g" | \            # Get rid of PATH= if there
+ #    tr ":" " " | \                  # Change all : to a space
+ #    tr " " "\n" | \                 # Put one path per line 
+ #    while read P                    # Define P once per path
+    echo $* | sed "s,//*,/,g" | sed "s/PATH=//g" | tr ":" " " | tr " " "\n" | while read P ; do
+	# Remove all trailing slashes
+	P=`echo $P | sed "s,/*$,,g"`
+	echo :$NEWPATH: | grep -q ":$P:" && continue
+	# Skip . and ./ and any that start with ../
+	[ "$P" = "." -o "$P" = "./" ] && continue
+	[ "$P" = ".." -o "${P:0:3}" = "../" ] && continue
+	NEWPATH=$NEWPATH:$P
+	[ "$DONEFIRST" ] && echo -n :
+	echo -n $P
+	DONEFIRST=done
+    done
+    echo
+}
+
+ColorsOff() {
+    unset COLOR_SUCCESS
+    unset COLOR_FAILURE
+    unset COLOR_WARNING
+    unset COLOR_NORMAL
+    unset COLOR_NOTE
+    unset SETCOLOR_SUCCESS
+    unset SETCOLOR_FAILURE
+    unset SETCOLOR_WARNING
+    unset SETCOLOR_NORMAL
+    unset SETCOLOR_NOTE
+}
+
+PreserveFile() {
+  # Save off $1 if it exists as $1.duplicate.TIMESTAMP.
+  # If $2 given, save at most that many dupes.
+  [ "$1" ] || return
+  [ -e $1 ] || return
+  MYDATE=`date -u +%Y%m%d%H%M%S`
+  # Make sure we only have digits in KEEP
+  MYKEEP=`echo $2 | sed "s/[^0-9]//g"`
+  if [ "$MYKEEP" ] ; then
+    MYCOUNT=1
+    ls -1t $1.DUPLICATE* |
+    while read name ; do
+        [ $((MYCOUNT++)) -ge $MYKEEP ] || continue
+        rm -f $name
+    done
+  fi
+  mv $1 $1.DUPLICATE.$MYDATE
+  unset MYDATE MYKEEP MYCOUNT
+}
+
+note() {
+    unset N
+    if [ "$1" = "-n" ] ; then
+      N=$1
+      shift
+    fi
+    echo -e $N "$COLOR_NOTE${*}$COLOR_NORMAL"
+}
+notered() {
+    unset N EXIT
+    [ "$1" = "exit" ] && EXIT=1 && shift
+    if [ "$1" = "-n" ] ; then
+      N=$1
+      shift
+    fi
+    echo -e $N "$COLOR_FAILURE${*}$COLOR_NORMAL"
+    [ "$EXIT" ] && exit
+}
+
+
+usage() {
+    unset EXIT
+    [ "$1" = "exit" ] && EXIT=1 && shift
+    if [ "$1" = "-h" -a "$usagetext" ] ; then
+	shift
+	echo -e "$usagetext"
+    fi
+    # We want -v output to be just two digits, so scrubver is #.#
+    # and suitever can have whole #.#.#.# in it.
+    if [ "$1" = "-v" -o "$1" = "-h" ] ; then
+	if [ ! "$VER" -a "$SCRUBVER" ] ; then
+	    echo "$PROG version $SCRUBVER"
+	elif [ "$VER" ] ; then
+	    echo "$PROG version $VER"
+	else
+	    echo "$PROG -- unknown version number"
+	fi
+	shift
+    fi
+    ERRSTR="${*}"
+    if [ "$ERRSTR" ] ; then
+	notered "\a${ERRSTR}"
+    fi
+    [ "$EXIT" ] && exit
+} # end usage
+
+
+COLOR_SUCCESS="\\033[1;32m"
+COLOR_FAILURE="\\033[1;31m"
+COLOR_WARNING="\\033[1;33m"
+COLOR_NORMAL="\\033[0;39m"
+COLOR_NOTE="\\033[0;34m"
+SETCOLOR_SUCCESS="echo -en $COLOR_SUCCESS"
+SETCOLOR_FAILURE="echo -en $COLOR_FAILURE"
+SETCOLOR_WARNING="echo -en $COLOR_WARNING"
+SETCOLOR_NORMAL="echo -en $COLOR_NORMAL"
+SETCOLOR_NOTE="echo -en $COLOR_NOTE"
+

@@ -1,0 +1,4 @@
+#NOGS
+-lsh /current/etc/autonoproxy $GSOPTIONS -nohist
+-gs /port -nohist
+

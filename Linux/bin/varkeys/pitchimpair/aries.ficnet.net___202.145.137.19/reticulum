@@ -1,0 +1,20 @@
+PITCHIMPAIR_TW___mx.iplus.net.tw___202.145.137.19___20010905-143819() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.7 Options:I,O 
+    #
+    set host mx.iplus.net.tw
+    set ip 202.145.137.19
+    set hostType "Solaris27"
+    set len 476
+    set cv0 53a86a76
+    set cv1 41cfee95
+    set cv2 93759eab
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

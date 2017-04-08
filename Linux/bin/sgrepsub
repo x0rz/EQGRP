@@ -1,0 +1,51 @@
+#!/usr/bin/env perl
+#
+$version = "1.0";
+
+use Getopt::Std;
+
+$opt_f = "/var/adm/messages";
+$opt_s = "./s";
+
+getopts('i:r:c:s:f:h');
+
+sub usage{
+  print "usage: sgrepsub -i /tmp/messages -r /tmp/rand -c 31 
+  -i <infile: lines to be replaced by sgrep>
+  -r <replacement file: substitution lines>
+  -c <column to start replacing: use vi <ctl g> to find the column number>
+  -h <help>
+  -f <filename string: default = /var/log/messages>
+  -s <sgrep alias: default = ./s>
+ex) sgrepsub -i /tmp/messages -r /tmp/rand -c 31 -f /var/log/messages
+";
+exit;
+}
+
+if($opt_h || !$opt_r || !$opt_i || !$opt_c){
+   usage();
+}
+
+$opt_c--;
+
+open(FILE,$opt_r) or die "$!";
+while(<FILE>){
+  chop;
+  $replace[$line++] = $_;
+}
+$line--;
+close(FILE);
+
+$i = 0;
+open(FILE,$opt_i) or die "$!";
+while(<FILE>){
+  chop;
+  if($i++ >= $line){
+    $i = 0;
+  }
+  print $opt_s;
+  print " \"$_\" ";
+  substr($_,$opt_c) = $replace[$i];
+  print "\"$_\" ";
+  print "$opt_f\n";
+}

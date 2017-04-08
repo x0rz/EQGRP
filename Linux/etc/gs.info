@@ -1,0 +1,10 @@
+#NOGS
+w -nohist
+-pacct -nohist
+-pause -nohist
+-logs -nohist
+uname -a; date; date -u -nohist
+=dfcheck -nohist
+=ps -nohist
+-ls /etc/passwd /etc/shadow -nohist
+wc -l /etc/passwd /etc/shadow -nohist

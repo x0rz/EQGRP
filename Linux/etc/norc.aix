@@ -1,0 +1,24 @@
+
+# Solaris
+
+:PATH=/bin:/usr/bin:/sbin:/usr/sbin:/usr/ucb
+
+alias -pacct=-ls -t /var/adm/*acct* /var/*acc* /var/log/account/*acct*
+
+alias =ps=ps -ef
+alias =psg=ps -ef | grep
+alias =nsg=netstat -an | grep 
+alias =arp=arp -an
+alias =ping=ping
+alias =crashps=echo p | crash
+alias =df=df -k
+alias =di=df -i
+alias =procinfo=psrinfo -v
+alias =rpcinfo=rpcinfo ; rpcinfo -p
+alias =locale=locale
+alias =alwaysdothis=
+alias -elevate=-lsh echo -n Please insert another token..... 1>&2 ; sleep 6 ; echo .
+alias =autorpc=-scan rpc 127.0.0.1 one
+alias =surveydothis=-gs surveydothis.aix
+alias =pse=ps -ef | egrep
+alias =psgv=ps -ef | egrep -v 

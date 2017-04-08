@@ -1,0 +1,6 @@
+#NOGS 
+# NOTE: This needs to change to just a -oget -e 10000 once 3.0.1 is fully out
+-lsh echo -e "#NOGS\\n-oget -e $GSOPTIONS" > /current/etc/gs.gets.next ; mkdir -p /current/down/$NOPEN_RHOSTNAME/etc
+-lsh echo $GSOPTIONS | sed "s#.* /etc/\\(.*\\)#-lsh mv /current/down/\\1 /current/down/$NOPEN_RHOSTNAME/etc/\\1#" > /current/.tmpwd ; cat /current/.tmpwd >> /current/etc/gs.gets.next ; rm -f /current/.tmpwd
+#-lsh cat /current/etc/gs.gets.next
+-gs gets.next

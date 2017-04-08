@@ -1,0 +1,21 @@
+
+# Darwin 2012-01-05 11:13:46 EST 
+
+:PATH=/bin:/usr/bin:/sbin:/usr/sbin
+
+alias -pacct=-ls -t /var/log/*acct* /var/*acc* /var/log/account/*acct*
+
+alias =ps=ps -ef
+alias =psg=ps -ef | grep
+alias =nsg=netstat -an | grep 
+alias =arp=arp -an
+alias =ping=ping -c 1
+alias =df=df -k
+alias =di=df -li
+alias =rpcinfo=rpcinfo -p
+alias =locale=locale
+alias =autorpc=-scan rpc 127.0.0.1 one
+alias =route=route -n
+alias =ipl=-gs iptables-list
+alias =pse=ps -ef | egrep
+alias =psgv=ps -ef | egrep -v 

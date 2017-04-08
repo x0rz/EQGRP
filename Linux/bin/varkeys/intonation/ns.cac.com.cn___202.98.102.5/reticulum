@@ -1,0 +1,20 @@
+INTONATION___ns.cac.com.cn___202.98.102.5___20030325-142643() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.6 
+    #
+    set host ns.cac.com.cn
+    set ip 202.98.102.5
+    set hostType "Solaris26"
+    set len 476
+    set cv0 f8dbcd31
+    set cv1 8c1eb124
+    set cv2 2c1657d2
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

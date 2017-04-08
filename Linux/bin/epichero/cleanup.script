@@ -1,0 +1,107 @@
+# This script should be loaded on the target machine and
+# run in order to reset the timestamps of the files and directories
+# used to gain access and clean up the log files.
+# Get the file names for the timestamps from the log file.
+
+if [ `id -u` -eq 0 ]
+then
+    # The following requires root priviledges
+
+    # Look at the webupgrade script in /opt/ws to see if it has
+    # been modified.  Also see if the backup copy exists in /tftpboot
+
+    CNT=`grep "/opt/ws/functions" /opt/ws/webupgrade | wc -c`
+
+    if [ $CNT -ne 20 ]
+    then
+        # The webupgrade script has been modified by eh
+
+        ls /tftpboot/.[0-9]* >/dev/null 2>&1
+
+        if [ $? -eq 0 ]
+        then
+            TMPFILES=`ls /tftpboot/.[0-9]*`
+
+            # The backup copy exists
+            if [ $? -eq 0 ]
+            then
+                for i in $TMPFILES
+                do
+                    echo "Check $i"
+                    # See if this is the webupgrade script
+                    # If so, remove the /opt/ws/webupgrade file
+                    # and move the backup file in its place
+                    # to preserve the inode number.
+                    grep webupgrade $i >/dev/null 2>&1
+                    if [ $? -eq 0 ]
+                    then
+                        echo "Restore webupgrade from $i"
+                        rm -f /opt/ws/webupgrade
+                        mv $i /opt/ws/webupgrade
+                        break
+                    fi
+                done
+            fi
+        fi
+    fi
+
+    IPADDR=`grep "runCmd" /var/log/httpd/error_log | grep "echo" | cut -d '[' -f 4 | cut -d']' -f 1 | cut -d' ' -f2 | head -1`
+
+    if [ "$IPADDR" != "" ]
+    then
+        # Clean up /var/log/httpd log files
+
+        cd /var/log/httpd
+        LOGS=`ls access_log* error_log* ssl_requests.log*`
+        for i in $LOGS
+        do
+            grep $IPADDR $i >/dev/null 2>&1
+            if [ $? -eq 0 ]
+            then
+                echo "Remove $IPADDR from $i"
+                grep -v $IPADDR $i > /tmp/.new_log.$$
+                cp /tmp/.new_log.$$ $i
+                rm -f /tmp/.new_log.$$
+            fi
+        done
+    fi
+
+    # Clean up /var/log/secure files
+
+    cd /var/log
+
+    for STR in \
+        "/opt/ws/webupgrade . /opt/ws/functions | . /tmp/." \
+        "sudo:     init : TTY=unknown ; PWD=/opt/ecs/web/auth-cgi-bin ; USER=root ; COMMAND=/opt/ws/webupgrade" \
+        "sudo:     init : TTY=unknown ; PWD=/opt/ecs/web/auth-cgi-bin ; USER=root ; COMMAND=/etc/tripwire/cmds"
+    do
+        grep "$STR" secure* >/dev/null 2>&1
+        if [ $? -eq 0 ]
+        then
+            LOGS=`ls secure*`
+            for i in $LOGS
+            do
+                grep "$STR" $i >/dev/null 2>&1
+                if [ $? -eq 0 ]
+                then
+                    echo "Clean $STR from $i"
+                    grep -v "$STR" $i >/tmp/new_log.$$
+                    cp /tmp/new_log.$$ $i
+                    rm -f /tmp/new_log.$$
+                fi
+            done
+        fi
+    done
+
+    # Clean up /var/iglut/upg_status.dat file
+
+    cd /var/iglut
+    grep "status=66" upg_status.dat >/dev/null 2>&1
+    if [ $? -eq 0 ]
+    then
+        grep -v "status=66" upg_status.dat >/tmp/new_log.$$
+        grep -v "Upgrade failed. Unable to transfer the license file to the target unit being upgraded." /tmp/new_log.$$ > /tmp/new_log2.$$
+        cp /tmp/new_log2.$$ upg_status.dat
+        rm -f /tmp/new_log.$$ /tmp/new_log2.$$
+    fi
+fi

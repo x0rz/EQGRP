@@ -1,0 +1,148 @@
+#!/usr/bin/env perl
+
+$usagetext = "ddsplit (v 1.1) usage:
+
+	ddsplit [-el] [-b <blocks>] <inputfile> <size> [<prefix>]
+
+ddsplit prints to stdout the correct number of dd commands to split the
+file <inputfile> of size <size> bytes into multiple dd.nnnn files (whose 
+technical term is \"chunks\"). These commands can then be used by pasting
+them where you like. You'll actually be given a couple more than you will
+probably need.
+	
+where:	
+
+   -e	supress stderr (adds 2>/dev/null to dd commands printed) 
+
+   -l	tack an \"ls -al\" on the end of each dd command
+
+   -b	<blocks> per chunk. usually 1000 blocks is 0.5M. default=3000
+
+   <prefix>, if given, is stuck between the \"dd\" and the \".nnnn\",
+	to differentiate between dd files resulting from different 
+	input files. E.g.: dd0.0000 vs. dd1.0000.
+
+";
+
+require "getopts.pl";
+&Getopts( "ehb:l" );
+
+&usage() if ($opt_h);
+$execute = $opt_x;
+
+if ($opt_e) {
+  $noerr = " 2>/dev/null";
+} else {
+  $noerr = "";
+}
+
+@allddcmds = ();
+
+$cmd="dd";
+if ($opt_l) {
+  $ls = "; ls -al";
+} else {
+  $ls="";
+}
+if (! $opt_b) {
+  $count=3000;
+} else {
+  $count=$opt_b;
+}
+$if = $ARGV[0] if $ARGV[0];
+$prefix = $ARGV[2] if $ARGV[2];
+$of = "dd";
+$fullsize = $ARGV[1];
+$chunksize = 512000 * ($count/1000);
+$loopsize = $fullsize / $chunksize;
+$of .= $prefix;
+$ofsuf="0000";
+$skip="0000";
+print "
+=== To see only the commands echoed here, use one of
+=== ${0} @ARGV | egrep -v \"^\$|^===\"
+=== ${0} @ARGV | egrep -v \"^===\"
+
+=== Before dd'ing, you want a cksum of the original:
+
+cksum $if
+
+";
+for ($skip = "0000" ; $skip * ($chunksize / $count) < $loopsize*$chunksize ; $skip += $count) {
+  &docmd ("$cmd count=$count skip=$skip if=$if of=$of.$ofsuf$noerr $ls");
+  $ofsuf++;
+}
+print "
+=== IMPORTANT: Be sure the last chunk is smaller than the others, or you
+=== may need more dd commands (this happens if block size is not 1K).
+
+ls -al $of.*
+
+=== Here's a couple extra dd commands in case that didn't
+=== finish off the file (no harm in running these if they're
+=== not needed though):
+
+";
+for ($i=0 ; $i < 2 ; $i++ ) {
+  &docmd ("$cmd count=$count skip=$skip if=$if of=$of.$ofsuf$noerr $ls");
+  $ofsuf++;
+  $skip += $count;
+}
+print "
+=== Then once the dd'ing is done, if the original file
+=== can be deleted, you may:
+
+rm $if
+
+" unless ($if =~ /^\//);
+
+
+
+print "
+=== Command to rebuild $if:
+
+cat $of.* > $if.new
+
+=== Other stuff you might want:
+
+cksum $if
+
+cksum $if.new
+
+=== NOPEN stuff
+
+"; 
+
+@saveallddcmds = @allddcmds;
+
+print "-mget -b -l ";
+while (@allddcmds) {
+  ($t) = (pop(@allddcmds) =~ /of=([.\w]*)/ );
+  print "$t ";
+}
+print "\n\n=== OR\n\n";
+
+@allddcmds = @saveallddcmds;
+print "-mget -b -l ";
+while (@allddcmds) {
+  ($t) = (shift(@allddcmds) =~ /of=([.\w]*)/ );
+  print "$t ";
+}
+print "\n\n";
+
+sub docmd () {
+  local($command,@junk) = @_;
+  local($tmp);
+  if (! $execute) {
+    print "$command\n";
+  } else {
+    $tmp = `$command`;
+  }
+  push(@allddcmds,$command);
+  return $tmp;
+}
+
+sub usage () {
+  print $usagetext;
+  exit;
+}

@@ -1,0 +1,5 @@
+INTONATION___Ns2.rosprint.ru___194.84.23.125___20060322-144346() {
+    ## INCISION Version:4.10.2.15 OS:sparc-sun-solaris2.8 
+    export TARG_AYT="9a3c4c8e ab3d55da f5a598e3"
+    [ "$UTC_OFFSET" ] || export UTC_OFFSET=-1099
+}

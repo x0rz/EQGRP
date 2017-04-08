@@ -1,0 +1,1491 @@
+#!/usr/bin/env perl
+#
+# Parser for .got and/or .act files and watcher files
+# 20020125: Now also does detail files
+$version="2.0.1.1";
+use File::Basename;
+myinit() ;
+
+@dirs = split(/,/,$dirs) ;
+
+if ($recurse) {
+  foreach $d (@dirs) {
+    push (@newdirs,split (/\n/,`find $d -type d | egrep -v "\/\.snapshot\/|^\.{1,2}$"`) );
+  }
+  @dirs = @newdirs ;
+}
+
+progress("Reading files in @dirs") ;
+
+$filebytes = 0 ;
+foreach $d (@dirs) {
+  opendir(DIR,$d) or mywarn("readdir $d: $!") and next ;
+  my @tmpfiles = () ;
+  if ($keepdotfiles) {
+    push (@tmpfiles, grep { ! /^\.{2}\z/ } sort readdir DIR) ;
+  } else {
+    push (@tmpfiles, grep { ! /^\./ } sort readdir DIR) ;
+  }
+FILE:  foreach $t (@tmpfiles) {
+    if (-f "$d/$t") {
+      foreach $ignorestr (@ignorestr) {
+	next FILE if ($ignorestr and $t =~ /$ignorestr/i) ;
+      }
+      push (@files, "$d/$t");
+    }
+    $filebytes += -s "$d/$t" ;
+  }
+  closedir(DIR) ;
+}
+
+$somefilescompressed = "@files" =~ /\.bz2|\.Z|\.gz/ ;
+
+$filemegs = $filebytes / (1000 * 2 ** 10) ;
+$filemegs = (int (100 * $filemegs)) / 100 ;
+mydie("No files selected") unless (@files) ;
+
+progress("Will be searching through ${filemegs}M of data") ;
+
+# what kind of $ARGV[0] we got? [ userid | IP | phone ]
+# put stuff in the right array (this done only once)
+ARG: foreach (@ARGV) {
+  if (/^Users=/) {
+    s/^Users=// ;
+    foreach (split (/,/,$_)) {
+      push @userid,$_ ;
+    }
+    next ;
+  } elsif (/^Clients=/) {
+    s/^Clients=// ;
+    foreach (split (/,/,$_)) {
+      push @client,$_ ;
+    }
+    next ;
+  } elsif (/^\d{0,3}\.\d{0,3}[.0-9]*$/) {
+    s/\./\\\./g ;
+    push(@ip,$_) ;
+    next ARG ;
+  } elsif (!$quiet and /^\S{1,3}$/) { # 1-3 chars is too small so prompt
+    my $ans = getinput("
+\"$_\" seems pretty small for a phone/userid/client--it could
+match a lot of stuff you do not want. Do you want to
+[S]kip this one, [A]bort entirely, or [U]se it anyway?","S","A","U") ;
+    mydie("\n\nOK. Aborting\n") if ($ans =~ /^a/i ) ;
+    if ($ans =~ /^s/i) {
+      if (!$skipping) {
+        $skipping = "but skipping $_ " ;
+      } else {
+        $skipping .= "and $_ " ;
+      }      
+      next ARG ;
+    }
+  } # otherwise use the damn thing--they will be sorry if it's short
+  if (/^\d+$/) {
+    push(@phone,$_) ;
+  } elsif (/^[A-Z][A-Z0-9.]+/) { 
+    $ans = &getinput("\n\nIs $_ a [R]AS-Client or a [U]ser-Name?","R","U") ;
+    if ($ans =~ /^r/i) {
+      push(@client,$_) ;
+    } else {
+      push(@userid,$_) ;
+    }
+  } elsif (/^\w+$/) {
+    push(@userid,$_) ;
+  } else { # something weird like with funky chars (non \w) gets booted...
+    progress("Skipping unrecognized list element $_") ;
+    if (!$skipping) {
+      $skipping = "but skipping $_ " ;
+    } else {
+      $skipping .= "and $_ " ;
+    }      
+  }
+}
+
+# PROCESS FILES into $output particular to targets in the arrays
+# just defined (@ip @phone @client @userid)
+#
+
+# NOTE: calling initourfields("watcher") uses watcher format 
+#       (6 pipe delimited fields),
+#       while the call below assumes the act format 
+#       (.act & .got file, 20+ fields, comma delimited)
+initourfields("act") ;
+
+if ($verbose) {
+  mywarn("DBG: Processing files in @dirs
+DBG: \@files=(@files)
+DBG: \@dirs=(@dirs)
+DBG: \@ARGV=@ARGV $skipping so looking for:") ;
+  mywarn("DBG: RAS-Client == @client") if @phone;
+  mywarn("DBG: Calling-Station-Id == @phone") if @phone;
+  mywarn("DBG: Framed-IP-Address == @ip") if @ip;
+  mywarn("DBG: User-Name == @userid") if @userid;
+}
+
+#mydie("Must provide a list of IPs, userids or phones") unless (@targets);
+
+$output = "" ;
+# only using year
+#($sec,$min,$hr,$mday,$mon,$year,$wday,$yday,$isdst) = gmtime ;
+($t,$t,$t,$t,$t,$year) = gmtime ;
+$year += 1900 unless $year > 1900 ;
+FILE: foreach $f (@files) {
+  $guess = 1 ;
+  $filetime="" ;
+  # get MMDD from filename (taking off YYYY if need be)
+  if ( /$year\d{4,8}/ ) {
+    ($filetime) = (basename ($f) =~ /$year(\d{4,8})/) ;
+  } else {
+    ($filetime) = (basename ($f) =~ /(\d{4,8})/) ;
+  }
+  if ($since) {
+    if ($filetime lt $since) {
+      progress("Skipping $f since time=$filetime is lt $since") ;
+      next ;
+    }
+  }
+  if (&zipfile($f)) {
+    if ($uncompress) {
+      $f = &unzipper($f) ;
+    } else {
+      print STDERR (basename $f)." appears to be compressed.\n" ;
+      $compressed++ ;
+    }
+  }
+  progress("Searching in $f") ;
+  if ($f =~ /(\.act|\.got)$/ ) {
+    setfiletype("act") ;
+  } elsif ($f =~ /detail/) {
+    setfiletype("detail") ;
+  } else {
+    setfiletype("watcher") ;
+  }
+  # need this before reading file since $RS record separator different for detail format
+  # also means detail files must have detail in the name somplace for first record to read right
+  initourfields($filetype) ;
+  open (IN,"< $f") or mywarn("open $f: $!") and next ;
+  $recordnum = 0 ;
+  $badlines = 0 ;
+  $toplineofmany = 0 ;
+  $guess = 0 ; # Not guessing by filename now actually in file
+  $gotfiletype = 0 ;
+  while ( !$gotfiletype and !eof(IN)) {
+    $_ = <IN> ;
+    chomp ;
+    $recordnum++ ;
+    $len = length ;
+    if ($len > 5000) { # damn funky line starts with .5M or so of nulls
+      s/^.*?\"/\"/ ; # the ? makes the match not greedy--first \" found
+      $len = length ;
+    }
+    next if (/^\"Date\"/) ; # header line might match a user
+    if ( /^(UPDATE|INSERT)/ ) {
+      setfiletype("sql") ;
+    } elsif (/(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)\s+(\d+):(\d+):(\d+)\s+(\d+)\s+\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\s+(.*)/) {
+      # Key on 2nd field after IP being an 8 digit hex number for the new file type
+      if ( $8 =~ /\S+\s+[0-9a-fA-F]{8}/ ) {
+	setfiletype("newone");
+      } else {
+	setfiletype("tacacs") ;
+      }
+    } elsif (/(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)\s+(\d+):(\d+):(\d+)\s+(\d+)/ ) {
+# or 
+#	      ($filetype eq "detail" and /^\t/)) {
+      # must be detail type - not resetting $filetype for other lines
+      setfiletype("detail") ;
+      $toplineofmany = 1 ;
+    } elsif ( /^\"/ ) {
+      setfiletype("act") ;
+      s/\"//g ; # get rid of \" in .act and .got files
+    } elsif ( m+^\d\d/\d\d/\d\d\d\d+ ) {
+      setfiletype("watcher") ;
+    } else {
+      $toplineofmany = 0 ;
+      progress("Line of unknown filetype (\$filetype currently \"$filetype\"):\n$_");
+# unknown file type - do not report this since detail format not in this
+# if/elsif anywhere except for first line of each record.
+    }
+  }#  while ( !$gotfiletype )
+  seek(IN,0,0) ; # Rewind to start of file now that we know what type it is
+  $recordnum = 0;
+  $notdonewithfile = 1 ;
+  while ( $notdonewithfile ) {
+  $notdonewithfile = 0 if (eof IN) ;
+    s/\"//g if ($filetype eq "detail") ; # get rid of \" in detail files too
+    initourfields($filetype) ;
+    @recfields = () ;
+    if ($filetype eq "tacacs") {
+      ($wday,$monstr,$day,$hr,$min,$sec,$year,$rest) = parsedatestr($_) ;
+#/(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)\s+(\d+):(\d+):(\d+)\s+(\d+)\s+(.*)/ ;
+
+      ($day) = substr($day + 100,1) ;
+      $mon = $mons{$monstr} ;
+      $recfields[$fieldnum{"Date"}] = "$mon/$day/$year" ;
+      $recfields[$fieldnum{"Time"}] = "$hr:$min:$sec" ;
+      my @detaillines = ("$mon/$day/$year","$hr:$min:$sec",split (/\s+/,$rest)) ;
+      for ($i = 2 ; $i <= $#detaillines ; $i++) {
+	if ((my $fieldname,my $value) = $detaillines[$i] =~ /\s*(\S+)=(.*)/) {
+	  if ($fieldname eq "addr") {
+	    $recfields[$fieldnum{"Framed-IP-Address"}] = $value ;
+	  } elsif ($fieldname eq "task_id") {
+	    $recfields[$fieldnum{"Acct-Session-Id"}] = $value ;
+	  } else {
+	    # this field only one in tacacs name=value pairs we really care about
+	    # set others just for the hell of it
+	    $recfields[$i] = $value unless 
+	      ($i == $fieldnum{"Acct-Session-Id"} or
+	       $i == $fieldnum{"Framed-IP-Address"});
+	  }
+	} else {
+	# these two should be same?
+#	  $recfields[$fieldnum{$fieldtitle{$detailfieldcount}}] = $detaillines[$i] ;
+#	  $recfields[$detailfieldcount] = $detaillines[$i] ;
+	  $recfields[$i] = $detaillines[$i] unless ($i == $fieldnum{"Framed-IP-Address"});
+	}
+      }
+    } elsif ($filetype eq "newone") {
+      # odd...tab delimited except final field, the IP we want so make it so
+      s/[ ]+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/\t$1/g ;
+      s/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})[ ]+/$1\t/g ;
+      ($wday,$monstr,$day,$hr,$min,$sec,$year,$rest) = parsedatestr($_);
+#/(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)\s+(\d+):(\d+):(\d+)\s+(\d+)\s+(.*)/ ;
+      ($day) = substr($day + 100,1) ;
+      $mon = $mons{$monstr} ;
+#dbg("$_");
+#      $recfields[$fieldnum{"Date"}] = "$mon/$day/$year" ;
+#      $recfields[$fieldnum{"Time"}] = "$hr:$min:$sec" ;
+#      push(@recfields,split (/\s+/,$rest)) ;
+#dbg("Old way");
+#dotmp(@recfields);
+@recfields = ();
+      $recfields[$fieldnum{"Date"}] = "$mon/$day/$year" ;
+      $recfields[$fieldnum{"Time"}] = "$hr:$min:$sec" ;
+      push(@recfields,split (/\t/,$rest)) ;
+#dbg("New way");
+#dotmp(@recfields);
+
+#<>;
+      # following kludge counts on IP being in final field in all records
+      if (!isip($recfields[$fieldnum{"Framed-IP-Address"}])) {
+#	dbg("B:13=".$recfields[$fieldnum{"Framed-IP-Address"}]);
+	my $ipfixed = 0 ;
+	if ($recfields[$fieldnum{"Acct-Terminate-Cause"}] =~
+	    /(\S+)\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/) {
+	  $recfields[$fieldnum{"Framed-IP-Address"}] = $2;
+	  $recfields[$fieldnum{"Acct-Terminate-Cause"}] = $1;
+	  $ipfixed++;
+#	  dbg("M:13=".$recfields[$fieldnum{"Framed-IP-Address"}]);
+	}
+	unless ($ipfixed) {
+	  foreach ("Framed-IP-Address","Acct-Session-Time","Acct-Terminate-Cause") {
+	    if (isip($recfields[$fieldnum{$_}])) {
+	      $recfields[$fieldnum{"Framed-IP-Address"}] = $recfields[$fieldnum{$_}];
+	      $recfields[$fieldnum{$_}] ="";
+	      $ipfixed++;
+	      last ;
+	    }
+	  }
+	}
+	$recfields[$fieldnum{"Framed-IP-Address"}] =~ s/\s//g;
+	$recfields[$fieldnum{"Framed-IP-Address"}] = "Unknown" unless $ipfixed;
+#	dbg("A:13=".$recfields[$fieldnum{"Framed-IP-Address"}]);
+      } else {
+#	dbg("0:13=".$recfields[$fieldnum{"Framed-IP-Address"}]);
+      }
+    } elsif ($filetype eq "sql") {
+      # NOTES: INSERT == start
+      #        UPDATE == update (ignored tho--nothing good here)
+      #        UPDATE.*AcctTerminateCause == stop
+      if ( /^INSERT/ ) {
+	# Defines new record so == start
+	my ($stuff) = /[^\(]+\((.*)\)/ ;
+	$stuff =~ s/\'\'/NULL/g ;
+	$stuff =~ s/\'/ /g ;
+	$stuff =~ s/\s+/ /g ;
+#	@recfields = split(/[, ]+/, $stuff) ;
+	@recfields = split(/\s*,\s*/, $stuff) ;
+	# Some of those are wrong--fix them here
+	$recfields[$fieldnum{"Record-Type"}] = "start";
+	($year,$mon,$day,$hr,$min,$sec) = parsedatenum($recfields[$fieldnum{"Date"}]) ;
+	$recfields[$fieldnum{"Date"}] = "$mon/$day/$year" ;
+	$recfields[$fieldnum{"Time"}] = "$hr:$min:$sec" ;
+	$saveips{$recfields[$fieldnum{"Acct-Session-Id"}]} =
+	  $recfields[$fieldnum{"Framed-IP-Address"}] unless 
+	    $saveips{$recfields[$fieldnum{"Acct-Session-Id"}]} ;
+	$savephones{$recfields[$fieldnum{"Acct-Session-Id"}]} =
+	  $recfields[$fieldnum{"Calling-Station-Id"}] unless 
+	    $savephones{$recfields[$fieldnum{"Acct-Session-Id"}]} ;
+      } else { # update
+	$recfields[$fieldnum{"Record-Type"}] = "update";
+	# get rid of everything but name=value pairs
+	s/UPDATE radacct SET // ;
+	s/\'//g ; # assumes no spaces inside single quotes
+	s/ = /=/g;
+	s/( WHERE | AND |, )/ /g ;
+	s/;$// ;
+	foreach $entry (split) {
+	  my ($name,$val) = split(/=/,$entry) ;
+	  if ($otherfieldnum{"$name"}) {
+	    # These few are only ones we care about
+	    $recfields[$otherfieldnum{"$name"}] = $val ;
+	  }
+	  # well, ok, this one too to get date and time
+	  if ($name eq "AcctStopTime") {
+	    ($year,$mon,$day,$hr,$min,$sec) = parsedatenum($val) ;
+	    $recfields[$fieldnum{"Date"}] = "$mon/$day/$year" ;
+	    $recfields[$fieldnum{"Time"}] = "$hr:$min:$sec" ;
+	  }
+	}
+	# UPDATEs do not have IP or phone so get from save-hashes (i.e. start records)
+	$recfields[$fieldnum{"Framed-IP-Address"}] = $saveips{$recfields[$fieldnum{"Acct-Session-Id"}]};
+	$recfields[$fieldnum{"Calling-Station-Id"}] = $savephones{$recfields[$fieldnum{"Acct-Session-Id"}]};
+	if (length $recfields[$fieldnum{"Acct-Terminate-Cause"}]) {
+	  $recfields[$fieldnum{"Record-Type"}] = "stop" ;
+	} else {
+	  # We ignore non-stop update records for sql input--nothing worthwhile there
+	  goto NEXTLINE ; #next ;
+	}
+      }
+    } elsif ($filetype eq "detail") {
+      # Multi-line input so split it up
+      my @detaillines = split (/\n/) ;
+      foreach (@detaillines) {
+	$dateline = $_ if (/(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)\s+(\d+):(\d+):(\d+)\s+(\d+)/) ;
+	(my $fieldname,my $value) = /\s*(\S+) = (.*)/ ;
+	if ($fieldnum{$fieldname} > 1) {
+	  $recfields[$fieldnum{$fieldname}] = $value ;
+	}
+      }
+      ($wday,$monstr,$day,$hr,$min,$sec,$year) = parsedatestr($dateline) ;
+      ($day) = substr($day + 100,1) ;
+      $mon = $mons{$monstr} ;
+      $recfields[$fieldnum{"Date"}] = "$mon/$day/$year" ;
+      $recfields[$fieldnum{"Time"}] = "$hr:$min:$sec" ;
+    } else {
+      @recfields = split(/\||,/) ;
+    }
+    if ($#recfields < 6) {
+      $badlines++ ;
+      if (!$quiet and 
+	  ($badlines > 100) and 
+	  (($recordnum - $badlines) / $recordnum < 0.20)) {
+	$ans = &getinput("
+This is weird...way too many lines have too few fields in
+\n\t$f\n
+Are you sure that is a Radius log?\n
+($badlines/$recordnum lines, or " .
+(100-(int((10000*(($recordnum - $badlines) / $recordnum)))/100)) .
+"%, so far are bad). Are you in a
+directory with mostly non-Radius logs? Maybe don't do that.
+(If you choose to continue, this run will switch to quiet
+mode, as if you ran it with -q.)
+
+Do you want to continue (<Y>es, <N>o-abort entirely, <S>kip this file)? ","N","Y","S") ;
+        next FILE if ($ans =~ /^s/i ) ;
+        mydie("\n\nOK. Aborting\n") unless ($ans =~ /^y/i ) ;
+	# jeez they're gonna continue...let em
+	$quiet = 1 ;
+      }
+    } # end if $numfields too small or not
+    initourfields($filetype) ;
+    if ( "watcher" eq $filetype ) {
+      if ($len == 46 and $showbeats) { #heartbeat
+        $recfields[3] = "heartbeat" ;
+        $recfields[2] = "heartbeat" ;
+        $newoutput = "" ;
+	foreach $n (@ourfieldnums) {
+	  $newoutput .= $recfields[$n].$mydelim if (length($n)) ;
+	}
+        $newoutput .= "\n" ;
+	if ($grepit) {
+	  print $newoutput ;
+	}
+	$output .= $newoutput ;
+
+        goto NEXTLINE ; #next ;
+      }
+      if (!$recfields[2]) {
+        $recfields[2] = $recfields[3] ;
+      }
+    }
+    foreach $fieldnum (@dofieldnums) {
+      foreach $target (@targets) {
+	next unless ($recfields[$thisfield{$target}] =~ /$target/ or
+                     ($filetype eq "tacacs" and ! $recfields[$fieldnum{"Framed-IP-Address"}] )) ;#/\||,/
+	my $newoutput = "" ;
+	foreach $n (@ourfieldnums) {
+          if (length($n)) { # Don't want "" treated as a zero
+	    $newoutput .= $recfields[$n].$mydelim ;
+          } else {
+	    $newoutput .= $mydelim ;
+          }
+	}
+	$newoutput .= "\n" ;
+        next if ($recfields[$fieldnum{"Framed-IP-Address"}] ne "Unknown" and
+                 $exactonly and
+                 !($newoutput =~ /$mydelim$target$mydelim/)) ;
+	if ($grepit) {
+	  printf("%08d:%s", $recordnum,$newoutput) ;
+	}
+	$output .= $newoutput ;
+      }
+    }
+NEXTLINE:    chomp($_ = <IN>) ;
+    $recordnum++ ;
+    $len = length ;
+    if ($len > 5000) { # damn funky line starts with .5M or so of nulls
+      s/^.*?\"/\"/ ; # the ? makes the match not greedy--first \" found
+      $len = length ;
+    }
+  }#while ( $notdonewithfile )
+  close(IN) ;
+}
+$output .= "\n" ;
+if ($compressed and !$uncompress) {
+  mywarn("
+
+Try again either with the -u argument (slow), or after uncompressing
+all of the files (barely faster, but helpful if you plan on running
+$prog on this input several times).
+") ;
+}
+
+&unzipper("cleanup") ;
+exit unless $process ;
+
+# PROCESS $output into last format
+$t = length($output) ;
+@lines = split (/\n/,$output) ;
+$l = $#lines + 1 ;
+progress("Output specific to targets provided is $l lines, $t bytes") ;
+
+if ($offset) {
+  mywarn("* REMOTE TIMES shown are offset by $offset minutes from that found in file *",$COLOR_FAILURE);
+}
+progress("Now doing complete start-stop records");
+foreach $target (@targets) {
+  foreach $line (@lines) {
+#    next unless (($line =~ /$target/) or ($showbeats and $line =~ /heartbeat/ ));
+    processline() ;
+  } # end foreach $line (@lines)
+} # end foreach $target (@targets)
+progress("Now doing partials");
+foreach $target (@targets) {
+  progress("Now doing partial ends only");
+  foreach (keys %end) {
+    $line = substr($end{$_},4) ;
+    processline(1) ;
+  }
+  progress("Now doing partial begs only");
+  foreach (keys %beg) {
+    $line = substr($beg{$_},4) ;
+    processline(1) ;
+  }
+}
+if ($offset) {
+  mywarn("* REMOTE TIMES shown are offset by $offset minutes from that found in file *",$COLOR_FAILURE);
+}
+
+# END MAIN PROGRAM
+
+sub processline {
+  my ($lastrun) = @_ ;
+  my $heartbeat = 0 ;
+  return unless ("$line") ;
+  ($date,$time,$client,$client2,$type,$type2,$userid,$ip,$phone,$info,$nasip,$sessionid,$wdate,$wtime) = () ;
+  ($date,$time,$client,$client2,$type,$type2,$userid,$ip,$phone,$info,$nasip,$sessionid,$wdate,$wtime) =
+    split (/$mydelim/,$line) ;
+  $client = $client2 unless ($client) ;
+  $client = $nasip unless ($client) ;
+  if ( $line =~ /heartbeat${mydelim}${mydelim}${mydelim}${mydelim}${mydelim}/) {
+    $heartbeat++ ;
+  }
+  ($h,$m) = split (/:/,$time) ;
+  ($monnum,$mday,$year) = split (/\//,$date) ;
+  $year += 2000 if ($year < 80) ;
+  if ($offset) {
+    my $beforetime = Time::Local::timegm(0,$m,$h,$mday,$monnum-1,$year) ;
+    ($tmp,$m,$h,$mday,$monnum,$year) = gmtime($beforetime + ($offset*60) );
+    $monnum++ ; $year += 1900 ;
+    my $tmp = 10000 + $h*100 + $m ;
+    ($h,$m) = $tmp =~ /\d(\d\d)(\d\d)/ ;
+    ($mday) = substr($mday + 100,1) ;
+  }
+  $mon = $mons[$monnum] ;
+  $day = getday($monnum,$mday,$year) ;
+  $year =~ s/^\d\d// ;
+  $update = ("$type$type2" =~ /update/i or "$type$type2" =~ /alive/i )  ;
+#  $update = ("$type$type2" =~ /update/i );
+#  $start = (("$type$type2" =~ /start/i) or ($update and $ip and $lastrun)) ;
+  $start = ("$type$type2" =~ /start/i) ;
+  $stop = ("$type$type2" =~ /stop/i) ;
+#progress("DBG: processline::\n\$type\$type2+\t+\$start+\t+\$stop+\t+\$update+\t+\$sessionid+\t+\$ip+\t\t+\$lastrun+==\n$type$type2+\t+$start+\t+$stop+\t+$update+\t\t+$sessionid+\t+$ip+\t+$lastrun+") ;
+  return unless ($start or $stop or $update) ;
+  return if ("$userid$ip$phone" eq "NULLNULLNULL") ;
+  if ("watcher" eq $filetype and ($wdate or $wtime) ) {
+    ($wmonnum,$wmday,$wyear) = split (/\//,$wdate) ;
+    $wday = getday($wmonnum,$wmday,$wyear) ;
+    $wmon = $mons[$wmonnum] ;
+    $wyear =~ s/^\d\d// ;
+    ($wh,$wm) = split (/:/,$wtime) ;
+    if ($start) {
+      $watchertimestart{$userid.$client.$ip.$phone} = "$wh$wm" ;
+      $watcherdate{$userid.$client.$ip.$phone} = "$wday $wmon $wmday $wyear" ;
+    }#@<< @<< @> @>  @<<<@<<<<
+    $watcherdate{$userid.$client.$ip.$phone} = "$wday $wmon $wmday $wyear"
+      unless ($watcherdate{$userid.$client.$ip.$phone});
+    @watchertime = ($watcherdate{$userid.$client.$ip.$phone},
+		    $watchertimestart{$userid.$client.$ip.$phone},"-$wh$wm") ;
+  } else {
+    @watchertime = () ;
+  }
+  if ($start) { # $start only if we have $ip as well?
+    if ($beg{$userid.$client.$ip.$phone.$sessionid}) {
+#      if (($lastrun and $ip) or
+      if (($lastrun ) or
+	  ($beg{$userid.$client.$ip.$phone.$sessionid} and
+	   $beg{$userid.$client.$ip.$phone.$sessionid} ne "$h$m$line")) {
+	writeline() ;
+      }
+    }
+    $beg{$userid.$client.$ip.$phone.$sessionid} = "$h$m$line" ;
+    $begdate{$userid.$client.$ip.$phone.$sessionid} = "$day $mon $mday $year" ;
+  } elsif ($stop) {
+    $end{$userid.$client.$ip.$phone.$sessionid} = "$h$m$line" ;
+    unless ($begdate{$userid.$client.$ip.$phone.$sessionid}) {
+
+      if ($begdate{$userid.$client."Unknown".$phone.$sessionid}) {
+	# note this one had no IP but same $sessionid
+	$begdate{$userid.$client.$ip.$phone.$sessionid} = $begdate{$userid.$client."Unknown".$phone.$sessionid} ;
+	$begdate{$userid.$client.$ip.$phone.$sessionid} =~ s/${userid}${mydelim}${mydelim}/${userid}${mydelim}${ip}${mydelim}/ ;
+	$beg{$userid.$client.$ip.$phone.$sessionid} = $beg{$userid.$client."Unknown".$phone.$sessionid} ;
+	$beg{$userid.$client.$ip.$phone.$sessionid} =~ s/${userid}${mydelim}${mydelim}/${userid}${mydelim}${ip}${mydelim}/ ;
+
+	#$begdate{$userid.$client."Unknown".$phone.$sessionid} = "" ;
+	undef $beg{$userid.$client."Unknown".$phone.$sessionid} ;
+	undef $begdate{$userid.$client."Unknown".$phone.$sessionid} ;
+      } else { # need this next so partial stop-only entries have a date
+	$begdate{$userid.$client.$ip.$phone.$sessionid} = "$day $mon $mday $year" ;
+      }
+    }
+    writeline() if ($heartbeat or $lastrun or $beg{$userid.$client.$ip.$phone.$sessionid}) ;
+  } elsif ($update) {
+    if (isip($ip)) {
+      unless ($beg{$userid.$client.$ip.$phone.$sessionid}) {
+	if (#$beg{$userid.$client.$phone.$sessionid} or
+	    $beg{$userid.$client."Unknown".$phone.$sessionid}
+	   ) { # session started here with no IP
+	  $beg{$userid.$client.$ip.$phone.$sessionid} = $beg{$userid.$client."Unknown".$phone.$sessionid} ;
+	  $beg{$userid.$client.$ip.$phone.$sessionid} =~ s/${userid}${mydelim}${mydelim}/${userid}${mydelim}${ip}${mydelim}/ ;
+          $begdate{$userid.$client.$ip.$phone.$sessionid} = $begdate{$userid.$client."Unknown".$phone.$sessionid} ;
+          $begdate{$userid.$client.$ip.$phone.$sessionid} =~ s/${userid}${mydelim}${mydelim}/${userid}${mydelim}${ip}${mydelim}/ ;
+          undef $beg{$userid.$client."Unknown".$phone.$sessionid} ;
+	  undef $begdate{$userid.$client."Unknown".$phone.$sessionid} ;
+	} else { # update with no prior start means partial end only
+	  $beg{$userid.$client.$ip.$phone.$sessionid} = "$h$m$line" ;
+	  $begdate{$userid.$client.$ip.$phone.$sessionid} = "$day $mon $mday $year" ;
+	}
+      }
+    }
+    writeline() if ($heartbeat or $lastrun) ;
+  } # end if start or stop
+} #end sub processline
+
+sub writeline {
+  $beg = substr($beg{$userid.$client.$ip.$phone.$sessionid},0,4) ;
+  $end = $end{$userid.$client.$ip.$phone.$sessionid} ;
+  $begdate = $begdate{$userid.$client.$ip.$phone.$sessionid} ;
+  $beg = "NULL" unless $beg ;
+  $end = "NULL" unless $end ;
+  $end = substr($end,0,4);
+  if ("$watchertime[1]" or "$watchertime[2]") {
+    $watchertime[2] = "-NULL" unless $watchertime[2] ;
+    $watchertime[1] = "NULL" unless $watchertime[1] ;
+  }
+  # Clear these for this target even if %written already
+  undef $beg{$userid.$client.$ip.$phone.$sessionid} ;
+  undef $end{$userid.$client.$ip.$phone.$sessionid} ;
+  undef $begdate{$userid.$client.$ip.$phone.$sessionid} ;
+  undef $watcherdate{$userid.$client.$ip.$phone.$sessionid} ;
+  undef $beg{$userid.$client."Unknown".$phone.$sessionid} ;
+  undef $end{$userid.$client."Unknown".$phone.$sessionid} ;
+  undef $begdate{$userid.$client."Unknown".$phone.$sessionid} ;
+  undef $watcherdate{$userid.$client."Unknown".$phone.$sessionid} ;
+  if (!$written{"$userid, $client, $ip, $phone, $day, $mon, $mday, $beg, $end"}) {
+    # The hashed array %written allows only unique lines to be output. If
+    # searching on both an ip and a username this means that user on that IP shows
+    # up only once. %written ignores the watcher/whistler times, which is fine.
+    $written{"$userid, $client, $ip, $phone, $day, $mon, $mday, $beg, $end"}++ ;
+    return unless ($ip) ;
+#no    $ip = $sessionid if ($sessionid and !$ip) ;
+    if ($completeonly) {
+      write STDOUT unless ( "$beg-$end" =~ /NULL/ );
+    } elsif ($activeonly) {
+      write STDOUT if ( "$beg-$end" =~ /\d{4}-NULL$/ );
+    } else {
+      write STDOUT ;
+    }
+  }
+  @watchertime = () ;
+} #end sub writeline
+
+sub usage {
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  print $usagetext unless $opt_v ;
+  if ($opt_H) {
+    print $usagetextlong ;
+  } elsif ($opt_h) {
+    print "Use -H to show a longer version of help.\n\n";
+  }
+  print $versiontext ;
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  exit;
+} #end sub usage
+
+sub getday {
+  # figure day of week
+  my ($monnum,$mday,$year) = @_ ;
+  my $wdaynum ;
+  return "" unless ($monnum > 0 and $monnum < 12) ;
+  return "" unless ($mday > 0 and $mday < 32) ;
+  $rawtime = Time::Local::timegm(0,01,01,($mday),($monnum-1),$year);
+  ($t,$t,$t,$t,$t,$t,$wdaynum,$t,$t) = gmtime($rawtime);
+  return $days[$wdaynum] ;
+}
+
+sub unzipper() {
+  #REQUIRES: $srcfile is fully qualified pathname of zipfile
+  #unzips $srcfile into newly created temp dir
+  #if $srcfile eq "cleanup" then 
+  #   rm -rf $tmpdirroot
+  # returns name of newly uncompressed file (original stays compressed)
+  local($srcfile) = @_;
+  local($command,@tmp,$tmp,$file,$ext0,$ext1,$newfile);
+
+  #use globals $tmpdircount to oneup each time called
+  #define it if this is first use. $tmpdirroot also global
+  #other globals defined first and only time here:
+  #	$tmpdirroot
+  if ( $srcfile eq "cleanup") {
+    if ($tmpdircount) {
+      progress("cleaning up temp dirs in background");
+      exec "rm -rf $tmpdirroot" unless (fork) ;
+    }
+    return $?;
+  }
+  if (! defined $tmpdircount) {
+    # global ($home);
+    $tmpdircount = 0;
+#    if ($ENV{HOME} && -d $ENV{HOME}) {
+#      $tmpdirroot = $ENV{HOME}."/tmp";
+#    } else {
+    mkdir ($tmpdirroot,oct 700) || mydie("uncompress selected but cannot mkdir $tmproot") ;
+#    system("chmod u+rwx $destdir");
+    progress("Just made $tmpdirroot") ;
+    $tmpdircount++;
+  }
+  $destdir = $tmpdirroot unless $destdir ;
+  progress("Unzipping $srcfile -> $destdir");
+  $tmp = basename($srcfile);
+  ($file,$ext1) = $tmp =~ /(.*)\.([^.]*)$/;
+  ($newfile) = dirname($srcfile) ;
+  ($newfile) =~ s/\//_/g ;
+  $newfile .= $file ;
+  if ($ext1 eq "gz") {
+    $command = "gzip -dc ";
+  } elsif ($ext1 eq "Z") {
+    $command = "uncompress -c ";
+  } elsif ($ext1 eq "bz2") {
+    $command = "bzip2 -dc ";
+  }
+  system ("$command $srcfile > $destdir/$newfile");  
+  return "$destdir/$newfile";
+} #end sub unzipper
+
+sub zipfile () {
+  local($file,@junk) = @_;
+  return ($file =~ /\.gz$|\.bz2$|\.Z$/) ;
+} #end sub zipfile
+
+sub getinput() {
+  local($prompt,$default,@allowed) = @_;
+  local($ans,$tmp) = ("","");
+  
+  $tmp = $default;
+  if (chop($tmp) eq "") {
+    #damn ^M's in script files
+    $default = $tmp;
+  }
+  SUB: while (1) {
+    print STDERR $prompt;
+    if ($default) {
+      print STDERR " [$default] ";
+    } else {
+      print STDERR " ";
+    }
+    chomp($ans = <STDIN>);
+    $ans = $default if ( $ans eq "" );
+    if ($#allowed >= 0) {
+      foreach ($default,@allowed) {
+	last SUB if $ans =~ /^$_/i ;
+      }
+    } else {
+      last SUB ;
+    }
+  }
+  return $ans;
+} #end sub getinput
+
+sub catch_zap {
+  my $signame = shift;
+  progress("cleaning up temp dir after SIG $signame") if $tmpdircount;
+  &unzipper("cleanup") ;
+  exit;
+}
+
+sub mydie {
+  local (@stuff) = (@_) ;
+  mywarn("\n${COLOR_FAILURE}\a@stuff$COLOR_NORMAL") ;
+  catch_zap("mydie") ;
+} # end sub mydie
+
+sub initourfields {
+  # NOTE: calling initourfields("watcher") uses watcher format 
+  #       (6 pipe delimited fields),
+  #       while the call below assumes the default format 
+  #       (.act & .got file, 20+ fields, comma delimited)
+  my ($which) = @_ ;
+  return if ($which eq $lastwhich) ;
+  $lastwhich = $which ;
+  # either format above uses these fields, so we never change
+  # the beginning of @ourfields:
+  @ourfields =(
+	       "Date",
+	       "Time",
+	       "RAS-Client",
+	       "NAS-Identifier",
+	       "Record-Type",
+	       "Acct-Status-Type",
+	       #"Full-Name",
+	       "User-Name",
+	       "Framed-IP-Address",
+	       #"Called-Station-Id",
+	       "Calling-Station-Id",
+	       "Connect-Info",
+	       "NAS-IP-Address",
+	       "Acct-Session-Id", # "task_id=\d+" 
+#these added later if needed    push (@ourfields,"RefDate","RefTime") ;
+	      ) ;
+
+  if ($which eq "act" or $which eq "") {
+    # format for .got and .act files
+    $RS = "\n";
+    @fields = (
+	       "Date",
+	       "Time",
+	       "RAS-Client",
+	       "Record-Type",
+	       "Full-Name",
+	       "Auth-Type",
+	       "User-Name",
+	       "NAS-Port",
+	       "NAS-Port-Type",
+	       "Service-Type",
+	       "Framed-Protocol",
+	       "Framed-IP-Address",
+	       "Called-Station-Id",
+	       "Calling-Station-Id",
+	       "Connect-Info",
+	       "Acct-Status-Type",
+	       "Acct-Delay-Time",
+	       "Acct-Input-Octets",
+	       "Acct-Output-Octets",
+	       "Acct-Session-Id",
+	       "Acct-Authentic",
+	       "Acct-Session-Time",
+	       "Acct-Input-Packets",
+	       "Acct-Output-Packets",
+	       "Acct-Termination-Cause",
+	       "Acct-Multi-Session-Id",
+	       "Acct-Link-Count",
+	       "Tunnel-Type",
+	       "Acct-Tunnel-Client-Endpoint",
+	       "Tunnel-Server-Endpoint",
+	       "Acct-Tunnel-Connection",
+	       "Tunnel-Private-Group-ID",
+	       "Tunnel-Assignment-ID",
+	       "Acc-Err-Message",
+	       "Annex-Product-Name",
+	       "Annex-SW-Version",
+	       "Annex-System-Disc-Reason",
+	       "Annex-Modem-Disc-Reason",
+	       "Annex-Disconnect-Reason",
+	       "Annex-Transmit-Speed",
+	       "Annex-Receive-Speed",
+	       "Annex-Logical-Channel-Number",
+	       "Annex-Wan-Number",
+	       "Annex-Port",
+	       "Annex-Compression-Protocol",
+	       "Annex-Transmitted-Packets",
+	       "Annex-Retransmitted-Packets",
+	       "Annex-Signal-to-Noise-Ratio",
+	       "Annex-Retrain-Requests-Sent",
+	       "Annex-Retrain-Requests-Rcvd",
+	       "Annex-Rate-Reneg-Req-Sent",
+	       "Annex-Rate-Reneg-Req-Rcvd",
+	       "Annex-Begin-Receive-Line-Level",
+	       "Annex-End-Receive-Line-Level",
+	       "Annex-Begin-Modulation",
+	       "Annex-Error-Correction-Prot",
+	       "Annex-End-Modulation",
+	       "Ascend-Modem-Port-Number",
+	       "Ascend-Modem-Slot-Number",
+	       "Ascend-Modem-Shelf-Number",
+	       "Ascend-Xmit-Rate",
+	       "Nautica-Acct-SessionId",
+	       "Nautica-Acct-Direction",
+	       "Nautica-Acct-CauseProtocol",
+	       "Nautica-Acct-CauseSource",
+	       "Telebit-Accounting-Info",
+	       "Last-Number-Dialed-Out",
+	       "Last-Number-Dialed-In-DNIS",
+	       "Last-Callers-Number-ANI",
+	       "Channel",
+	       "Event-Id",
+	       "Event-Date-Time",
+	       "Call-Start-Date-Time",
+	       "Call-End-Date-Time",
+	       "Default-DTE-Data-Rate",
+	       "Initial-Rx-Link-Data-Rate",
+	       "Final-Rx-Link-Data-Rate",
+	       "Initial-Tx-Link-Data-Rate",
+	       "Final-Tx-Link-Data-Rate",
+	       "Sync-Async-Mode",
+	       "Originate-Answer-Mode",
+	       "Modulation-Type",
+	       "Equalization-Type",
+	       "Fallback-Enabled",
+	       "Characters-Sent",
+	       "Characters-Received",
+	       "Blocks-Sent",
+	       "Blocks-Received",
+	       "Blocks-Resent",
+	       "Retrains-Requested",
+	       "Retrains-Granted",
+	       "Line-Reversals",
+	       "Number-Of-Characters-Lost",
+	       "Number-of-Blers",
+	       "Number-of-Link-Timeouts",
+	       "Number-of-Fallbacks",
+	       "Number-of-Upshifts",
+	       "Number-of-Link-NAKs",
+	       "Back-Channel-Data-Rate",
+	       "Simplified-MNP-Levels",
+	       "Simplified-V42bis-Usage",
+	       "PW_VPN_ID"
+	      );
+  } elsif ( $which eq "sql") {
+    @fields = (
+	       "Unknown",	#0
+	       "Acct-Session-Id",
+	       "User-Name",
+	       "Unknown",	#empty
+	       "RAS-Client",
+	       "NAS-Port-Type", # or should this be 	       "NAS-Port",
+	       "Sync-Async-Mode",
+	       "Date",
+	       "Unknown",	#0
+	       "Unknown",	#0
+	       "Unknown",	# this has value "RADIUS"
+	       "Connect-Info",
+	       "Unknown",	#0
+	       "Unknown",	#0
+	       "Unknown",	#empty
+	       "Calling-Station-Id", # phone number of caller
+	       "Unknown",	#empty
+	       "Framed-Protocol", # ? "Framed-User"
+	       "Tunnel-Type",	# PPP
+	       "Framed-IP-Address", # IP assigned this user
+	       "Unknown",	#0
+	       "Unknown",	#0
+	       "Time",		# Put arbitrarily last--extracted from Date field above
+	       "Record-Type",   # Put arbitrarily last--extracted from content
+	       "Acct-Terminate-Cause", # Put arbitrarily last--extracted from content
+	      ) ;
+  } elsif ($which eq "detail" ) {
+    $RS = "\n\n";
+    @fields = (
+	       "Date",
+	       "Time",
+	       "RAS-Client",
+	       "NAS-IP-Address",
+	       "NAS-Identifier",
+	       "Record-Type",
+	       "Full-Name",
+	       "Auth-Type",
+	       "User-Name",
+	       "NAS-Port",
+	       "NAS-Port-Type",
+	       "Service-Type",
+	       "Framed-Protocol",
+	       "Framed-IP-Address",
+	       "Called-Station-Id",
+	       "Calling-Station-Id",
+	       "Connect-Info",
+	       "Acct-Status-Type",
+	       "Acct-Delay-Time",
+	       "Acct-Input-Octets",
+	       "Acct-Output-Octets",
+	       "Acct-Session-Id",
+	       "Acct-Authentic",
+	       "Acct-Session-Time",
+	       "Acct-Input-Packets",
+	       "Acct-Output-Packets",
+	       "Acct-Termination-Cause",
+	       "Acct-Multi-Session-Id",
+	       "Acct-Link-Count",
+	       "Tunnel-Type",
+	       "Acct-Tunnel-Client-Endpoint",
+	       "Tunnel-Server-Endpoint",
+	       "Acct-Tunnel-Connection",
+	       "Tunnel-Private-Group-ID",
+	       "Tunnel-Assignment-ID",
+	       "Acc-Err-Message",
+	       "Annex-Product-Name",
+	       "Annex-SW-Version",
+	       "Annex-System-Disc-Reason",
+	       "Annex-Modem-Disc-Reason",
+	       "Annex-Disconnect-Reason",
+	       "Annex-Transmit-Speed",
+	       "Annex-Receive-Speed",
+	       "Annex-Logical-Channel-Number",
+	       "Annex-Wan-Number",
+	       "Annex-Port",
+	       "Annex-Compression-Protocol",
+	       "Annex-Transmitted-Packets",
+	       "Annex-Retransmitted-Packets",
+	       "Annex-Signal-to-Noise-Ratio",
+	       "Annex-Retrain-Requests-Sent",
+	       "Annex-Retrain-Requests-Rcvd",
+	       "Annex-Rate-Reneg-Req-Sent",
+	       "Annex-Rate-Reneg-Req-Rcvd",
+	       "Annex-Begin-Receive-Line-Level",
+	       "Annex-End-Receive-Line-Level",
+	       "Annex-Begin-Modulation",
+	       "Annex-Error-Correction-Prot",
+	       "Annex-End-Modulation",
+	       "Ascend-Modem-Port-Number",
+	       "Ascend-Modem-Slot-Number",
+	       "Ascend-Modem-Shelf-Number",
+	       "Ascend-Xmit-Rate",
+	       "Nautica-Acct-SessionId",
+	       "Nautica-Acct-Direction",
+	       "Nautica-Acct-CauseProtocol",
+	       "Nautica-Acct-CauseSource",
+	       "Telebit-Accounting-Info",
+	       "Last-Number-Dialed-Out",
+	       "Last-Number-Dialed-In-DNIS",
+	       "Last-Callers-Number-ANI",
+	       "Channel",
+	       "Event-Id",
+	       "Event-Date-Time",
+	       "Call-Start-Date-Time",
+	       "Call-End-Date-Time",
+	       "Default-DTE-Data-Rate",
+	       "Initial-Rx-Link-Data-Rate",
+	       "Final-Rx-Link-Data-Rate",
+	       "Initial-Tx-Link-Data-Rate",
+	       "Final-Tx-Link-Data-Rate",
+	       "Sync-Async-Mode",
+	       "Originate-Answer-Mode",
+	       "Modulation-Type",
+	       "Equalization-Type",
+	       "Fallback-Enabled",
+	       "Characters-Sent",
+	       "Characters-Received",
+	       "Blocks-Sent",
+	       "Blocks-Received",
+	       "Blocks-Resent",
+	       "Retrains-Requested",
+	       "Retrains-Granted",
+	       "Line-Reversals",
+	       "Number-Of-Characters-Lost",
+	       "Number-of-Blers",
+	       "Number-of-Link-Timeouts",
+	       "Number-of-Fallbacks",
+	       "Number-of-Upshifts",
+	       "Number-of-Link-NAKs",
+	       "Back-Channel-Data-Rate",
+	       "Simplified-MNP-Levels",
+	       "Simplified-V42bis-Usage",
+	       "PW_VPN_ID"
+	      );
+  } elsif ($which eq "tacacs") {
+    $RS = "\n"; 
+    @fields = (
+	       "Date",
+	       "Time",
+	       # following order in tacacs logs after date/time - some guesses here
+	       "RAS-Client",
+	       "User-Name",
+	       "NAS-Port-Type",
+	       "Calling-Station-Id",
+	       "Record-Type",
+	       "Acct-Session-Id", # "task_id=\d+" 
+	       "Timezone", # new field not in other types
+	       "Service-Type",
+	       "Framed-Protocol",
+	       "Framed-IP-Address",
+	       "Unknown",              # new field not in other types disc-cause=
+	       "Unknown",              # new field not in other types disc-cause-ext=
+	       "Unknown",              # new field not in other types pre-bytes-in=
+	       "Unknown",              # new field not in other types pre-bytes-out=
+	       "Unknown",              # new field not in other types pre-paks-in=
+	       "Unknown",              # new field not in other types pre-paks-out=
+	       "Characters-Received",  # new field not in other types bytes_in=
+	       "Characters-Sent",      # new field not in other types bytes_out=
+	       "Acct-Input-Packets",   # new field not in other types paks_in=
+	       "Acct-Output-Packets",  # new field not in other types paks_out=
+	       "Unknown",              # new field not in other types pre-session-time=
+	       "Elapsed-Time",         # new field not in other types elapsed_time=
+	       "Annex-Receive-Speed",  # new field not in other types nas-rx-speed=
+	       "Annex-Transmit-Speed", # new field not in other types nas-tx-speed=
+	      );
+  } elsif ($which eq "newone") {
+    $RS = "\n";
+    @fields = (
+	       "Date",
+	       "Time",
+	       # following order in tacacs logs after date/time - some guesses here
+	       "RAS-Client",
+	       "User-Name",
+	       "Acct-Session-Id",
+	       "NAS-Port-Type",
+	       "NAS-Port",
+	       "Record-Type",# a.k.a. Acct-Status-Type
+	       "Service-Type",
+	       "Framed-Protocol", # Really? not sure but some lines have some do not
+	       "Calling-Station-Id",
+	       "Acct-Session-Time",# Really? not sure but some lines have some do not
+	       "Acct-Terminate-Cause", # Entry for IP below is adjusted elsewhere
+	                               # according to Record-Type since start records
+	                               # do not have this and above field before the IP below.
+	       "Framed-IP-Address",
+	      );
+  } elsif ($which eq "watcher") {
+    $RS = "\n";
+    push (@ourfields,"RefDate","RefTime") ;
+    # format for watcher output (many fewer fields)
+    @fields = (
+	       "Date",
+	       "Time",
+	       "RAS-Client",
+	       "NAS-IP-Address",
+	       "User-Name",
+	       "Framed-IP-Address",
+	       "Calling-Station-Id",
+	       "Called-Station-Id",
+	       "Record-Type",
+	       "RefDate",
+	       "RefTime"
+	      ) ;
+  } #end if which filetype
+
+  # these are what we are [re]defining
+  progress("[re]defining to $which format ($f line $recordnum length $len)");
+  %fieldnum = () ;
+  %fieldtitle = () ;
+  %ourfieldnum = () ;
+  @ourfieldnums = () ;
+  %ourfieldtitle = () ;
+  @dofieldnums = () ;
+  @targets = () ;
+  my %targets = () ; # to make sure @targets has unique elements
+  %thisfield = () ;
+  %saveips = () ;
+  %savephones = () ;
+  
+  for ($i = 0 ; $i <= $#fields ; $i++) {
+    #    progress("\$fields[$i]=$fields[$i]");
+    $fieldnum{$fields[$i]} = $i ;
+    $fieldtitle{$i} = $fields[$i] ;
+  }
+#  for ($i = 0 ; $i <= $#ourfields ; $i++) {
+#    $ourfieldnum{$ourfields[$i]} = $fieldnum{$ourfields[$i]} ;
+#    $ourfieldtitle{$i} = $ourfields[$i] ;
+#    $ourfieldnums[$i] = $ourfieldnum{$ourfields[$i]} ;
+#    progress("\$ourfields[$i]=$ourfields[$i]");
+#    progress("\$ourfieldnum{$ourfields[$i]}=$ourfieldnum{$ourfields[$i]}");
+#  }
+  foreach $of (@ourfields) {
+    $ourfieldnum{$of} = $fieldnum{$of} ;
+    $ourfieldtitle{$fieldnum{$of}} = $of ;
+    push(@ourfieldnums,$ourfieldnum{$of}) ;
+    progress("\@ourfields[\$i]=$of");
+    progress("\$ourfieldnum{$of}=$ourfieldnum{$of}");
+  }
+    
+  # based on %fieldnum @phone @userid @client @ip
+  if (@phone) {
+    push(@dofieldnums,$fieldnum{"Calling-Station-Id"}) ;
+    foreach (@phone) {
+      push (@targets,$_) unless $targets{$_} ;
+      $targets{$_}++ ;
+      $thisfield{$_} = $fieldnum{"Calling-Station-Id"} ;
+    }
+  }
+  if (@userid) {
+    push(@dofieldnums,$fieldnum{"User-Name"}) ;
+    foreach (@userid) {
+      push (@targets,$_) unless $targets{$_} ;
+      $targets{$_}++ ;
+      $thisfield{$_} = $fieldnum{"User-Name"} ;
+    }
+  }
+  if (@client) {
+    push(@dofieldnums,$fieldnum{"RAS-Client"}) ;
+    foreach (@client) {
+      push (@targets,$_) unless $targets{$_} ;
+      $targets{$_}++ ;
+      $thisfield{$_} = $fieldnum{"RAS-Client"} ;
+    }
+  }
+  unless (@targets or $#ip >= 0) {
+    if ($exactonly) {
+      mydie("Cannot use -x without any list of targets") ;
+    }
+    unless ($quiet or 
+	    (($filemegs < 5) and
+	     !($somefilescompressed and $uncompress)
+	    )
+	   ) {
+      if ($somefilescompressed and $uncompress) {
+	$more = " (compressed ones shown above)" ;
+	foreach (split (/\n/,`ls -al @files`) ) {
+	  mywarn("$_") if /\.gz$|\.bz2$|\.Z$/ ;
+	}
+      }
+      $ans = &getinput ("\n\a
+Searching ${filemegs}M of data$more
+can take a long time and give WAY long output!
+(E.g., about 13M of data took 40s to process,
+but produced about 50 pages of output.)
+
+You could specify some targets or use -a|c|s
+to shorten the output.
+
+Or do you want to continue?","Y","N") ;
+      unless ($ans =~ /y/i) {
+	mydie("\n\nOK then. Aborting.\n");
+      }
+    }
+    push(@ip,".") ;
+  }
+  if (@ip) {
+    push(@dofieldnums,$fieldnum{"Framed-IP-Address"}) ;
+    foreach (@ip) {
+      push (@targets,$_) unless $targets{$_} ;
+      $targets{$_}++ ;
+      $thisfield{$_} = $fieldnum{"Framed-IP-Address"} ;
+    }
+  }
+  # These few are only ones we care about in UPDATE records of sql type
+  $otherfieldnum{"AcctTerminateCause"} = $fieldnum{"Acct-Terminate-Cause"} ;
+  $otherfieldnum{"AcctSessionId"} = $fieldnum{"Acct-Session-Id"} ;
+  $otherfieldnum{"UserName"} = $fieldnum{"User-Name"} ;
+  $otherfieldnum{"NASIPAddress"} = $fieldnum{"RAS-Client"} ;
+
+  # leave the format here - might later change that based on
+  # type of input (watcher or not)
+  
+  # lines per page (54 output, 4 header)
+  $= = $linesperpage ;
+  $= = 999999 if $noformat ;
+  $asterisk = " " ;
+  $asterisk = "*" if $offset ;
+
+
+
+format STDOUT_TOP =
+                                            Radius Log radlast Output
+                                                                          Remote Time               Watcher  GMT
+User            RAS-Client        IP              Phone                Date        From-To         Times Received
+---------------------------------------------------------------------------------------------------------------------
+.
+  format STDOUT =
+^<<<<<<<<<<<<<< ^<<<<<<<<<<<<<<<< @<<<<<<<<<<<<<< ^<<<<<<<<<<<<<<< @<<<<<<<<<<<<  @<<<-@<<<@  @<<<<<<<<<<<<  @<<<@<<<<
+$userid,  $client,         $ip,            $phone,       $begdate,      $beg,$end,$asterisk,  @watchertime
+>^<<<<<<<<<<<<< ^<<<<<<<<<<<<<<<<                 ^<<<<<<<<<<<<<<<~~
+$userid,$client,$phone
+.
+
+} #end sub initourfields
+
+sub progress {
+  return unless $verbose ;
+  mywarn("DBG: @_",$COLOR_NOTE) ;
+} #end sub progress
+
+sub setfiletype {
+  ($filetype) = (@_) ;
+  unless ($filetype eq $lastfiletype) {
+    progress("Setting file type to $filetype at line:\n$_");
+    $lastfiletype = $filetype ;
+  }
+  $gotfiletype++ unless $guess ;
+}#setfiletype
+
+sub isip {
+  local (@octets) = $_[0] =~ /^\s*(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\s*$/ ;
+  return 0 unless @octets == 4 ;
+  foreach (@octets) {
+    return 0 if ($_ < 0 or $_ > 255) ;
+  }
+  return 1;
+}#isip
+
+sub parsedatestr {
+  my ($dateline) = (@_) ;
+  return $dateline =~
+    /(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)\s+(\d+):(\d+):(\d+)\s+(\d+)\s*(.*)/;
+}#parsedatestr
+
+sub parsedatenum {
+  my ($dateline) = (@_) ;
+  return $dateline =~
+    /(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)(\d\d)/ ;
+}#parsedatenum
+
+
+sub mywarn {
+  local ($what,$color,$color2,$what2) = (@_) ;
+  $color = $COLOR_WARNING unless $color ;
+  $color2 = $color unless $color2 ;
+  $what2 = " $what2" if ($what2) ;
+  my $beep = "\a" if ($color eq $COLOR_WARNING or $color eq $COLOR_FAILURE) ;
+  warn  "${color2}${prog}[$$]$beep$what2: ${color}$what$COLOR_NORMAL\n" ;
+#  print  "\n${COLOR_WARNING}\a@_$COLOR_NORMAL\n" ;
+} # end sub mywarn
+
+sub dbg {
+  return unless $verbose;
+  mywarn("DBG: @_");
+}#dbg
+sub myinit {
+  $COLOR_SUCCESS="\033[1;32m";
+  $COLOR_SUCCESS="\033[3;32m";
+  $COLOR_FAILURE="\033[1;31m";
+  $COLOR_WARNING="\033[1;33m";
+  $COLOR_NORMAL="\033[0;39m";
+  $COLOR_NOTE="\033[0;34m";
+  use English ;
+  use File::Basename;
+  chomp($gmttime = `date -u`) ;
+  require "getopts.pl";
+  require Time::Local;
+  $prog = basename $0;
+  $linesperpage = 58 ;
+  $upp = $linesperpage - 3 ;
+  #$verbose = 1 ; # temporary default
+
+  # INITIALIZE
+#defaults and globals
+@mons = ("",Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec); # 1=Jan based
+%mons = ("Jan","01","Feb","02","Mar","03","Apr","04","May","05","Jun","06",
+	 "Jul","07","Aug","08","Sep","09","Oct","10","Nov","11","Dec","12");
+@days = (Sun,Mon,Tue,Wed,Thu,Fri,Sat,Sun,); # 0=Sun based
+$lastwhich = "notdoneyet" ;
+$grepit = 0 ; $quiet = 0 ;
+$| = 1 ; # unbuffered output
+%ourfields = () ; @fields = () ; @phone = () ; @userid = () ; 
+@client = () ; @ip = () ; @targets = () ; @dofieldnums = () ;
+%thisfield = () ;
+$mydelim = "___" ;
+$tmpdirroot = "/tmp";
+$tmpdirroot .= "/radlast.$$" ;
+$tmpdirroot++ until (! -d $tmpdirroot) ;
+$lastfiletype = "" ;
+
+usage("bad option(s)") if (! &Getopts( "hvVRd:Ds:gpcauqfxwi:o:H" ) );
+#mydie("Cannot use -g and -p together") if ($opt_g and $opt_p) ;
+mydie("Cannot use -a and -c together") if ($opt_a and $opt_c) ;
+$verbose = !$verbose if $opt_V ;
+$offsetheader = "              " ;
+if ($offset = $opt_o) {
+  mydie("Invalid offset minutes \"$offset\"") unless ($offset =~ /-{0,1}\d+/) ;
+  $offsetheader = "($offset)            " ;
+  $offsetheader = substr($offsetheader,0,13) ;
+}
+# catch these so we can clean up temporarily
+# uncompressed files if any when killed
+$SIG{INT} = \&catch_zap; 
+$SIG{HUP} = \&catch_zap; 
+$SIG{TERM} = \&catch_zap; 
+
+# Set command line options
+@ignorestr = split(/,/,$opt_i) ;
+$exactonly = $opt_x ;
+if ($exactonly) {
+  $globl="^" ; $globr = "\$" ;
+} else {
+  $globl="" ; $globr = "" ;
+}
+$showbeats = $opt_w ;
+$quiet = !$quiet if $opt_q ;
+$noformat = $opt_f ;
+$uncompress = $opt_u ;
+$activeonly = $opt_a ;
+$completeonly = $opt_c ;
+$since = $opt_s ;
+$keepdotfiles = $opt_D ;
+$dirs = "." ;
+$dirs = $opt_d if $opt_d ;
+$recurse = $opt_R ;
+$grepit = !$grepit if ($opt_g) ;
+$process = 1 ;
+$process = !$process if ($opt_p) ;
+#force this one if not processing
+$grepit = 1 if !$process ;
+
+
+  $usagetext = "
+Usage: $prog [options] [<targetlist>] [Users=users] [Clients=clients]
+
+$prog gives details about login sessions based on Radius, tacacs or
+WATCHER/WHISTLER logs, in a format similar to the Unix last command.
+
+OPTIONS
+
+ -h/H     show short/long usage statement and exit
+
+-d dirs   process ALL files in dirs listed (comma delimited,
+          defaults to ./). Helps if all of the files are pertinent.
+
+  -R      recurse, processing all files and directories (skipping
+          .snapshot/)
+
+  -D      process files beginning with \".\" (default does not)
+
+-i list   ignore files containing the strings in \"list\", a comma
+          separated list of strings (case insensitive).
+
+  -V      verbose: send progress to stderr (starting with DBG:)
+
+-s str    only process files since str, where str is MM[DD[hh[mm]]]
+          (NOTE: This is based on filename. Records in that file could
+          be from the previous day.)
+
+  -g      grep: show content of the files particular to the given
+          <targetlist> as they are found, and also process that data.
+          The line shown is \"$mydelim\" delimited, and preceded by the
+          line/record number it was found in.
+          (default DOES NOT show the relative content but DOES process)
+
+  -p      do NOT process the data found, just grep it for any entries
+          pertaining to the <targetlist> (default DOES)
+
+-o min    offset remote times by \"min\" minutes (which can be negative).
+          This can help when processing data from multiple sources
+          that report different times for the same events, or when the
+          remote time is set wrong.
+
+  -c      only show complete sessions (with both start and end time)
+
+  -a      only show active sessions (with only a start time)
+
+  -x      require exact matches (\"user\" will not match \"user17\")
+
+  -w      show watcher heartbeats (default DOES NOT)
+
+  -u      uncompress (temporarily) any .Z, .gz or .bz2 files found
+          so they can be processed (default does NOT)
+
+  -q      suppress warnings requiring user intervention (e.g., output
+          too long, too many bad lines in input)
+
+  -f      suppress page formatting (fresh headers every $upp lines)
+
+" ;
+
+$usagetextlong = "SOURCE FILES
+
+$prog processes all of the selected directories, recursively if -R is
+selected. All files found there are expected to be Radius, tacacs or
+WATCHER / WHISTLER log files and are searched for events pertaining to
+elements of the <targetlist> provided.
+
+Radius logs can be either one record per line (usually .act or .got
+files) or several lines per record. In order for $prog to recognize
+the first entry in files of the latter format, however, \"detail\" must
+appear in the filename.
+
+SPEED/PERFORMANCE
+
+$prog can process very large logs, but in that case performance can
+be greatly enhanced by grepping those logs for your desired targets
+out to a temporary directory/file, and then running radlast against
+that, instead of against the complete (large) logs. Two NOTES on that:
+
+ * Do not use this method if your target string is the IP AND
+   you know that the IP is not shown in the start records.
+
+ * A simple grep will not work if the logs are in detail format.
+   In that case, use \"grep -37 target logfile | rad-grepclean\".
+   (rad-grepclean is available wherever you found $prog.)
+
+TARGET LIST
+
+The <targetlist> is any space delimited mix, in any order, of:
+    o    IPs (one octet or more, with a \".\" at either end);
+    o    phone numbers (digits only, no \".,*- ()#\"'s);
+    o    RAS- Clients (in ALLCAPS, digits and \".\" ok); or
+    o    userids
+
+If a userid has only numbers in it, use the \"Users=\" tag to specify
+one or more comma separated elements as users, otherwise $prog will
+assume anything with all numbers is a phone number. Similarly, the
+\"Clients=\" tag specifies a comma delimited list of RAS_Clients.
+Userids and RAS_Clients are similar enough that you may be prompted to
+specify which elements of your <targetlist> are which unless one or
+both of these tags is used. This also allows you to key on the
+NAS-IP-Address when no RAS-Client entry is there.
+
+With no <targetlist>, \"Users=\" or \"Clients=\" arguments $prog displays
+results for ALL input (this can get quite long).
+
+OUTPUT
+
+The output will have fresh headers every $upp lines (unless -f used), but
+is wide enough (109 cols.) to not fit in portrait mode. Landscape mode
+works for paper printouts, but viewing the output in a wide enough
+terminal or with a browser when the output is very long works best.
+
+If -g is used, the first output will consist of:
+
+  Up to 8 fields from each line of the files selected that matches any
+  of the elements given in the list (or every line if no list used).
+  This is meant for troubleshooting and is not very human readable.
+
+Then the formatted output is always printed (unless -p is used):
+
+  The particulars for each session (matching the <targetlist> given,
+  if any) are shown in a sort of \"last\" format, where each session is
+  contained in a single line as follows and NULL is used when no
+  timestamp is found due to a missing START or STOP record. Dates shown
+  are START date, unless only a STOP record is found.
+
+                                       Remote Time       Watcher  GMT
+User   RAS-Client    IP    Phone     Date    From-To    Times Received
+-----------------------------------------------------------------------
+
+" ;
+  $versiontext = "$prog version $version
+";
+  usage() if ($opt_h or $opt_H or $opt_v) ;
+}#myinit
+sub dotmp {
+  local (@recfields) = (@_);
+  for ($i = 0 ; $i < @recfields ; $i++) {
+    dbg("recfields[$i]=$recfields[$i]=");
+  }
+}

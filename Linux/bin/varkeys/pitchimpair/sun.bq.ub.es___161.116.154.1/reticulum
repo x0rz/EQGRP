@@ -1,0 +1,20 @@
+PITCHIMPAIR___sun.bq.ub.es___161.116.154.1___20020523-221041() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.7 
+    #
+    set host sun.bq.ub.es
+    set ip 161.116.154.1
+    set hostType "Solaris27"
+    set len 476
+    set cv0 7ffaca68
+    set cv1 63f9c601
+    set cv2 db987512
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

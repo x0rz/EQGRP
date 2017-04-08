@@ -1,0 +1,20 @@
+PITCHIMPAIR___ns.eyes.co.kr___210.98.224.88___20041022-152559() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.6 
+    #
+    set host ns.eyes.co.kr
+    set ip 210.98.224.88
+    set hostType "Solaris26"
+    set len 476
+    set cv0 1d248e56
+    set cv1 67070a3b
+    set cv2 e9690fdd
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

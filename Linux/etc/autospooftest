@@ -1,0 +1,446 @@
+#!/usr/bin/env perl 
+##
+$VER="1.0.0.4";
+$tcpdumppid = 0; # PID of our tcpdump process, child via open("|");
+%fwchanges = (); # IPs we add rules for, must delete those in mymydie()
+$msg = "";       # Final success message
+@ports = ();     # Port(s) we ping in UDP/TCP mode
+@sourceips = (); # IP(s) we spoof
+@targetips = (); # IP(s) we ping to
+$publicip = "";  # Our $publicinterface IP
+$| = 1 ;
+
+myinit() ;
+
+dotest() if $continue;
+ 
+finishstuff(); # Clean up any FW rules, kill tcpdump pid if there still
+
+if ($msg) {
+    progprint($COLOR_NORMAL.$msg);
+} elsif ($targetips[0] ne $publicip) {
+    progprint
+	($COLOR_FAILURE."\n\n".
+	 "Your packets may or may not have arrived--only ".join
+	 ("\n                                           and ",@targetips)." would know.");
+} else {
+    progprint
+	("$COLOR_FAILURE\n\n".
+	 "autospooftest cannot continue${COLOR_NORMAL}--we need all of these populated, and your\n".
+	 "settings fail to get there:\n".
+	 "             SOURCEIPS = ".
+	 join("\n                         ", @sourceips)."\n".
+	 "             TARGETIPS = ".
+	 join("\n                         ", @targetips)."\n".
+	 "             PORTS     = @ports\n".
+#	 "             PUBLICIP  = $publicip\n".
+	 "");
+    sleep 1;
+
+}
+1;
+
+
+# Called via do so must end with 1;
+1;
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0 unless $calledviarequire;
+  $stoiccmd = "called as: -gs spooftest @ARGV";
+  if ($willautoport and $socket) {
+    $stoiccmd = "in $prog, called as: spooftest(@ARGV)";
+    dbg("via require autospooftest ARGV=(
+".join("\n",@ARGV)."
+) prog=$prog");
+#    progprint("$prog called -gs spooftest @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $prog = "-gs spooftest";
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $vertext = "$prog version $VER\n" ;
+  }
+  clearallopts();
+  $vertext = "$prog version $VER\n" ;
+  mymydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			    -e $nopen_mylog);
+
+  my $origoptions = "@ARGV";
+  mymydie("bad option(s)") if (! Getopts( "hvC:D:I:p:T:BFW:P:" ) ) ;
+  
+  ###########################################################################
+  # Set defaults so they make it into usage
+  ###########################################################################
+  $def_C=1;
+  $def_D="google.com";
+  $def_p="80,443";
+  $def_P="TCP";
+  $def_W=5;
+
+
+  ###########################################################################
+  # Set strings used in usage before calling it
+  ###########################################################################
+  mysetusagetexts();
+
+  # Change port default if they are switching to ICMP mode
+  $def_p = "" if $opt_P =~ /^\s*i/i;
+
+  ###########################################################################
+  # PROCESS ARGUMENTS
+  ###########################################################################
+
+  ###########################################################################
+  # Set defaults if not given via getopts
+  ###########################################################################
+  $opt_C = $def_C unless length $opt_C;
+  $opt_D = $def_D unless (length $opt_T or length $opt_D);
+  $opt_p = $def_p unless length $opt_p;
+  $opt_P = $def_P unless length $opt_P;
+  $opt_W = $def_W unless $opt_W > 0;
+
+  usage() if ($opt_h or $opt_v);
+
+  ## SETTING/ERROR CHECKING OF OPTS
+  $ipspoofnum = $opt_C;
+  $builtinsok = !$opt_B;
+  $runfwrules = !$opt_F;
+  $delaysecs  = $opt_W;
+  ($proto)    = $opt_P =~ /^\s*(.)/; $proto = lc $proto;
+
+  mymydie("-W $opt_W must be a positive integer delay")
+      unless ($delaysecs > 0);
+
+  mymydie("-P must be either UDP or TCP (or U or T):$proto:")
+      unless ($proto =~ /^[uti]$/);
+
+  if ($proto =~ /^[ut]$/) {
+      $opt_p = readfile($opt_p) if (-s $opt_p);
+      @ports = sort by_num (grep ! /^\s*\#/,split(/[\s,]+/,$opt_p));
+      
+      my @duh = (grep /\D/, (grep ! /^\s*\#/,@ports)) ;
+      mymydie("-p must be a comma delimited list of one or more\n".
+	      "integers 0 < I < 63566")
+	  if (@duh > 0 or 
+	      $ports[0] < 1 or
+	      $ports[-1] > 65535
+	      );
+  } else {
+      @ports = ("none");
+      @ports = ($opt_p) if (-s $opt_p or length $opt_p);
+  }
+  
+  mymydie("Using both -D and -T makes no sense")
+      if (length $opt_D and length $opt_T);
+
+  @targetips = ();
+  my $what =  `ifconfig $publicinterface 2>/dev/null | grep inet | grep -v inet6`;
+  ($publicip) = $what =~ 
+      /[:\s](\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s/ ;
+
+  $opt_T = readfile($opt_T) if (-s $opt_T);
+  if (length $opt_T and $opt_T ne $publicip) {
+      @targetips =  (grep ! /^\s*\#/,split(/[\s,]+/,$opt_T));
+      if (" @targetips "=~ / $publicip /) {
+	  my @newtargetips = (grep /^$publicip$/,@targetips);
+	  @targetips = (@newtargetips,grep !/^$publicip$/,@targetips);
+      } else {
+	  my ($this) = ("this","");
+	  ($this,$s) = ("these","s")
+	      if (@targetips > 1);
+	  offerabort
+	      ("Warning: $prog cannot detect success when using TARG_IP$s not the same\n".
+	       "as your own local IP ($publicip). You are planning to use $this as your\n".
+	       "TARG_IP$s (which will skip running fwrules.py to open your FW):\n\n   ".
+	       join("\n   ",@targetips));
+	  $runfwrules = 0;
+      }
+  } else {
+      @targetips = ($publicip);
+  }
+
+  foreach (@targetips) {
+      mymydie("Invalid IP: $_") unless ipcheck($_);
+  }
+  mymydie("Target IPs not defined: (@targetips)")
+      unless(@targetips);
+
+  # Connect to autoport, we need to be interactive to do nslookups.
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+
+  $continue = 1;
+  my $hoptest = `netstat -antp | grep noclient | grep $nopen_myip`;
+  unless ($hoptest =~ /ESTABLISHED.*noclient/) {
+      $continue = 0;
+      progprint
+	  ($COLOR_FAILURE.
+	   "SKIPPING SPOOFTEST, unable to confirm\n".
+	   "that $nopen_myip is an initial hop via:\n\n".
+	   "netstat -antp | grep noclient | grep $nopen_myip");
+      # DO NOT mymydie or exit here, allow script go fall off the end "1;".
+  }
+}
+#myinit
+
+sub dotest {
+
+  @sourceips = ();
+  if (length $opt_I) {
+      $opt_I = readfile($opt_I) if (-s $opt_I);
+      @sourceips =  (grep ! /^\s*\#/,split(/[\s,]+/,$opt_I));
+      foreach (@sourceips) {
+	  mymydie("Invalid IP: $_") unless ipcheck($_);
+      }
+  } else {
+      my @fqdns =   (grep ! /^\s*\#/,split(/[\s,]+/,$opt_D));
+      foreach my $n (@fqdns) {
+	  my ($output,undef,@output) = doit("-nslookup $n");
+	  unless (grep /Address: \d+\.\d+\.\d+\.\d+/ , @output or
+		  $builtinsonly or
+		  !$builtinsok) {
+	      ($output,undef,@output) = doit("nslookup $n");
+	      @output = grep /Address: \d+\.\d+\.\d+\.\d+/ , @output;
+	      # With command line nslookup, we ignore first address it
+	      # is our remote DNS server.
+	      shift @output;
+	  }
+	  foreach (@output) {
+	      push (@sourceips,$1) if /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s*$/;
+	  }
+      }
+  }
+
+  # return dies by exiting off end of script doing nothing
+  unless (@sourceips and @targetips and @ports) {
+      return;
+  }
+
+  # ASSERT: We have @sourceips,  # Being spoofed
+  #                 @targetips,  # probably our eth0
+  #                 @ports,      # EITHER port list or none if icmp
+  #                 $ipspoofnum  # spoof at most this many of @targetips
+
+  $tcpdumpcmd = "";
+  my $catchpings = 0;
+  if (grep /^$publicip$/, @targetips) {
+      $catchpings++;
+      my $portlist = "";
+      foreach my $port (@ports) {
+	  next unless ($port =~ /^\d+$/);
+	  $portlist .= " or " if $portlist;
+	  $portlist .= $port;
+      }
+      my ($gwip) = `netstat -rn | grep ^0.0.0.0.*eth0` =~ /0.0.0.0\s+(\d+\.\d+\.\d+\.\d+)/ ;
+      if ($proto eq "i") {
+	  $tcpdumpcmd = "tcpdump -n -n -tttt -i $publicinterface icmp and host $publicip and host not $gwip";
+      } else {
+	  $tcpdumpcmd = "tcpdump -n -n -tttt -i $publicinterface host $publicip and dst port $portlist and host not $gwip";
+      }
+      open(TCPDUMP,"$tcpdumpcmd |") or mymydie("Cannot successfully run: $tcpdumpcmd");
+
+    my $lines = `ps -wefwww | grep -v grep | grep "$tcpdumpcmd"` ;
+    (undef,$tcpdumppid) = $lines
+	=~ /(root|pcap)\s+(\d+)\s/;
+
+      progprint("Just started TCPDUMP child $tcpdumppid running:\n\n".
+		"   $tcpdumpcmd");
+  }
+
+  
+  my $ipcount = 1;
+  foreach my $ip (@sourceips) {
+      $fwchanges{$ip}++;
+      if($runfwrules or $catchpings) {
+	progprint("Adding $ip to local FW rules via:\n".
+		  "fwrules.py -p -IA $ip 2>&1");
+	progprint("RESULTS:\n\n".
+		  `fwrules.py -p -IA $ip 2>&1`);
+      }
+      last if $ipcount >= $ipspoofnum;
+      $ipcount++;
+  }
+  
+  my (@alloutput,$alloutput) = ();
+  
+#offerabort("
+  
+#sourceips=(@sourceips)=
+#targetips=(@targetips)=
+#ports=(@ports)=
+#  ipcount=$ipcount=
+#");
+  
+  my $pingcount = 0;
+  $ipcount = 1;
+ SOURCES:
+  foreach my $srcip (keys %fwchanges) {
+      foreach my $targetip (@targetips) {
+	  foreach my $port (@ports) {
+	      $pingcount++ if ($targetip eq $publicip);
+	      my ($output,undef,@output) = ();
+	      if ($port eq "none") {# Must be ICMP then
+		  doit("-ping -l $srcip -r $targetip -$proto");
+	      } else {
+		  doit("-ping -l $srcip -r $targetip -$proto -p $port");
+	      }
+	      $alloutput .= $output;
+	      push(@alloutput,@output);
+	  }
+	  last if $ipcount >= $ipspoofnum;
+	  $ipcount++;
+      }
+  }
+
+  if ($catchpings) {
+      progprint
+	  ($COLOR_NORMAL."\n\n".
+	   "Waiting $delaysecs seconds (use -W to wait longer) to allow pings to arrive...");
+      
+      # Wait to allow them to land back here
+      sleep $delaysecs;
+      
+      # If we can, report the results of what hit us
+      if ($tcpdumpcmd) {
+	  kill(TERM,$tcpdumppid) if ($tcpdumppid > 1);
+	  
+	  # It's dead now, but here's its output
+	  my @tcpdumpoutput = <TCPDUMP>;
+	  
+	  my @pingsreceived = ();
+	  foreach my $ip (@sourceips) {
+	      if ($proto eq "i") {
+		  push(@pingsreceived,grep /IP $ip \> $publicip: icmp/ , @tcpdumpoutput);
+	      } else {
+		  push(@pingsreceived,grep /IP $ip\.\d+ \> $publicip\.\d+: / , @tcpdumpoutput);
+	      }
+	  }
+	  my $pingsreceived = @pingsreceived;
+	  my $pctsuccess = 0;
+	  $pctsuccess = int(100 * 100 * ($pingsreceived/$pingcount))/100
+	      if ($pingcount > 0);
+	  if (ipcheck($nopen_myip)) {
+	      newhostvar("gbl_spooffrom{$nopen_myip}",$pctsuccess);
+	      
+	      my $more = "";
+	      my $contentfile = "$optmp/pitchlog.spooftest.$$";
+	      $more = "\n\nAbove content sent via -problem -T PITCHIMPAIR $contentfile\n\n"
+		  if ($pctsuccess >= 80);
+	      $msg = "\n\n".gmtime(). " GMT -- SPOOFTESTING COMPLETE.\n\n".
+		  "$pingcount packets sent here\n".
+		  "$pingsreceived packets received\n\n  ".
+		  join("  ",grep /\S/,@tcpdumpoutput)."\n\n".
+		  "I.e., $pctsuccess% success, saved as\n".
+		  "\$gbl_spooffrom{$nopen_myip} = $gbl_spooffrom{$nopen_myip}".
+		  $more;
+	      writefile($contentfile,$msg);
+	      if ($pctsuccess > 80) {
+		  mydo("autoproblem","-TPITCHIMPAIR",$contentfile);
+	      }
+	  }
+#      unlink($contentfile);
+      }
+  }
+}
+#dotest
+
+
+sub finishstuff {
+    if ($tcpdumpcmd) {
+	my $lines = `ps -wefwww | grep -v grep | grep "$tcpdumpcmd"` ;
+	(undef,$newtcpdumppid) = $lines
+	    =~ /(root|pcap)\s+(\d+)\s/;
+	unless (!$newtcpdumppid or 
+		$newtcpdumppid == $tcpdumppid) {
+	    ($ans,$tcpdumppid) = mygetinput
+		($COLOR_FAILURE."\n\n".
+		 $lines."\n\n".
+		 "This is odd!\n$COLOR_NORMAL\n".
+		 "The TCPDUMP command has changed pids somehow?\n\n".
+		 "What PID (if any) do you want to kill?".
+		 "",$newtcpdumppid,$tcpdumppid,0,"n","no","none");
+	    $tcpdumppid = 0 unless ($tcpdumppid =~ /^\d+$/);
+	}
+    }
+
+    kill(TERM,$tcpdumppid) if ($tcpdumppid > 1);
+    if (keys %fwchanges > 0) {
+      foreach my $ip (keys %fwchanges) { 
+	if($runfwrules) {
+          progprint("Deleting INBOUND-ONLY rule from $ip on our local FW:\n".
+                    "fwrules.py -D $ip 2>&1"); 
+          progprint("RESULTS:\n\n".
+                    `fwrules.py -p -D $ip 2>&1`);
+	}
+      }
+    }
+}
+#finishstuff
+
+sub mymydie {
+    finishstuff();
+    mydie(@_);
+}
+#mymydie
+
+sub mysetusagetexts {
+  # Separate long usage strings as separate function
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session when \"$prog\" or
+\"=spooftest\" is used.
+
+";
+
+  $gsusagetext="
+Usage:  $prog [OPTIONS]
+
+$prog spoofs IP(s) back to your IP, opening your FW rules first with:
+
+   fwrules.py -p -A SPOOFED_SOURCE_IP
+   -ping -r LOCAL_eth0_IP -t -p 443
+
+OPTIONS [defaults]
+
+  -B             No builtins (skips nslookup entirely if -nslookup fails)
+  -C COUNT       Number of different source IPs to spoof.                   [$def_C]
+                 If using DNS and the name resolves to fewer,
+                 that will be the number of spoofed IPs.
+  -D DNS_TARG    FQDN to resolve from which to                     [$def_D]
+                 build a list of IPs to spoof.                                
+  -F             DISABLE fwrules.py calls completely (you must
+                 set your FWs to WIDE OPEN with fwrules.py -F).
+  -I SRC_IP(s)   One or more IP addresses to spoof, comma delimited.
+  -p PORT(s)     List of comma delimited tcp ports to spoof.           [$def_p]
+                 Or, in -Pi ICMP mode, anything (which older NOPENs
+                 will just ignore).
+  -P [t|u|i]     Protocol ([t]cp,[u]dp, or [i]cmp)                        [$def_P]
+  -T TARG_IP     IP(s) to ping, comma delimited.                 [your $publicinterface IP]
+  -W SECS        Delay before closing TCPDUMP.                              [$def_W]
+
+If the -p/-D/-T argument is a local file, its contents (comma OR whitespace OR
+newline delimited) will be used as the argument(s), sans any \# commented lines.
+
+Unless your -T/TARG_IP option does not include your own IP, the success rate is
+saved and logged via any tracker log entries as a percentage success:
+
+    \$gbl_spooffrom{NOPEN_IP} = PCT
+
+If PCT >= 80, -gs problem -T PITCHIMPAIR is used to send the same output.
+
+Usage:  $prog [OPTIONS]
+
+";
+}#setusagetexts

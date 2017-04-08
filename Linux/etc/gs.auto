@@ -1,0 +1,11 @@
+#NOGS
+-lcd /current/down -nohist
+-lsh -nohist env | grep NOPEN ; echo;set | grep NOPEN
+-lsh -nohist [ "$GSOPTIONS" = "new" -o "$GSOPTIONS" = "AGAIN" ]  && rm -f "/current/tmp/autonewdone.$NOPEN_RHOSTNAME" && touch "/current/tmp/autonewdone.$NOPEN_RHOSTNAME.new" ; for W in FORCE -f -F ; do echo "$GSOPTIONS" | grep -q -- $W && touch "/current/tmp/autonewdone.$NOPEN_RHOSTNAME.FORCE" ; done ; for W in YES REGET SHORT AGAIN ; do echo "$GSOPTIONS" | grep -q -- $W && touch "/current/tmp/autonewdone.$NOPEN_RHOSTNAME.$W" ; done ; /current/etc/autocheck && /current/etc/autorunonce $GSOPTIONS
+-gs /port -nohist
+# Redo-ing -mynorc and -mypath in case newdone changed our path or aliases -nohist :: gs.auto v.  # Thu Dec  9 15:21:52 EST 2010
+-mynorc -nohist
+-mypath -nohist
+-myname2 -nohist
+-myname -nohist
+

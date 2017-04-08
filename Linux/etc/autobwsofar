@@ -1,0 +1,143 @@
+#!/usr/bin/env perl
+##
+# This should have almost no logic in it. Put it all in autoutils:nopenbwsofar(),
+
+$VER="1.0.0.4";
+$| = 1 ;
+
+myinit() ;
+
+
+
+my ($bwr,$bwt) = bwsofar_retired(both);
+my ($more,$pitchlist,$more2,%pitchlist) = ();
+
+foreach my $ip (keys %gbl_projectshash) {
+  next unless (lc $gbl_projectshash{$ip} eq "p" or
+		   lc $gbl_projectshash{$ip} eq "pitchimpair");
+  $pitchlist .= $gbl_targetline{$ip};
+  $pitchlist{$ip}++;
+
+}
+my $pitchgrep = "";
+foreach my $ip (keys %pitchlist) {
+  my $bw = bwsofar($ip);
+  $more .= "bwsofar($ip) returns $bw M\n";
+  $pitchgrep .= "|" if $pitchgrep;
+  $pitchgrep .= $ip;
+}
+
+$pitchgrep = "unixdump.*_($pitchgrep)_.*[0-9]\$" if $pitchgrep;
+
+sleep 2;
+my ($bw,@pitches) = bwsofar();
+$more .= "bwsofar() returns ($bw,@pitches)M\n";
+
+
+if (%pitchlist) {
+  $more2 = "\ncd /home/black/tmp/pcaps ; ls -alrt | egrep \"$pitchgrep\" | lss -sz\n".
+    `cd /home/black/tmp/pcaps ; ls -alrt | egrep "$pitchgrep"|lss -sz`;
+} else {  $more2 = 
+    ("\n$COLOR_FAILURE\n\n".
+     "NOTE: The new bwsofar() function is more accurate if you save your opnotes.txt\n".
+     "      with the targets section completed so it can figure out which hosts are\n".
+     "      PITCHIMPAIR hosts. Your opnotes.txt file has NO PITCHIMPAIR hosts."
+    );
+}
+
+
+
+progprint("
+
+".
+	  $more2."
+
+bwsofar() now uses pcap file sizes (see above for yours) to
+determine cumulative bandwidth. This only works if your
+opnotes.txt Targets section has the pitch line and IS SAVED.
+
+TARGETS THUS FAR:
+$COLOR_NORMAL
+gbl_targets=
+$gbl_targets=
+
+$COLOR_NOTE
+PITCHES THUS FAR:
+$COLOR_NORMAL$pitchlist
+$COLOR_NOTE
+$more
+OLD METHOD: bwsofar_retired() returns (RX,TX)==($bwr,$bwt) M (from bwmonitor.txt)\n
+tail -f /current/down/bwmonitor.txt\n".
+	  `tail -4 /current/down/bwmonitor.txt`.
+	  ""
+);
+
+1;
+
+#bg("output=$output==\noutput=(
+#.join("\n",@output)."
+#
+#openlines=$nopenlines=
+#");
+
+## END MAIN ##
+
+sub myinit {
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs bwsofar @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog = "-gs bwsofar";
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session with \"$prog\".
+
+";
+
+  $gsusagetext = "
+Usage: -gs bwsofar [-h/-v]
+
+-gs bwsofar uses the $opetc/autoutils function call bwsofar() to
+determine your bandwidth thus far on this op to ALL PITCHIMPAIR hosts.
+$prog also calls bwsofar(IP) once per pitchimpair IP found in your
+opnotes.txt and reports the result of each.
+
+If your opnotes.txt file is saved and the targets section is accurate, the
+bwsofar() function reports the bandwidth from the pcap files to all pitchimpair
+IPs contacted during your op.  If not, it reverts to the older method, using
+the bwmonitor.txt file, which is not as accurate.
+
+Usage: -gs bwsofar [-h/-v]
+
+";
+  # Handle single help/version args here, otherwise 
+  # give global ARGV to noepnbwsofar() to handle with Getopts.
+  $opt_v = $ARGV[0] eq "-v";
+  usage() if ($ARGV[0] eq "--help" or
+	      $ARGV[0] eq "-help" or
+	      $ARGV[0] eq "-h" or
+	      $ARGV[0] eq "-H" or
+	      $ARGV[0] eq "--version" or
+	      $ARGV[0] eq "-v");
+  undef $opt_v;
+  $socket = pilotstart(quiet) unless $socket;
+
+} #myinit
+

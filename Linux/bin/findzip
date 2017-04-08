@@ -1,0 +1,845 @@
+#!/bin/bash
+VER=2.1.0.14
+## 17 Dec 2012
+# shell script to unmount encrypted partitions.  This could be done easily with
+# a truecrypt command, but for backwards compatability sake, this script needs
+# has been modified.
+##
+
+# This program is a bash script, and other scripts can source $PROG to
+# import (but not run) the function findzipdev. See $PROG source for
+# more detail. When the script runs findzipdev() it will then have
+# the MNTPNT* definitions for those that are mounted.
+
+MNTPNTBASE="/mnt/zip"
+KEYFILE="/etc/keyfile"
+export TRUECRYPT=1
+export UNMOUNT=0
+export MNTPNT1="/mnt/zip"
+export MNTPNT2="/mnt/zip2"
+export MNTPNT3="/mnt/zip3"
+FG=0			#Indicate whether we are doing a thumb free TC mount
+FGFRESHEN=0		#Indicate if we are just updating user and shared files (no ops disk)
+ULSRC=0			#Whether to use ULS RC version from FG server to upgrade /usr/local/sbin
+TEMP="/home/black/tmp/fg"
+# production server FGSRV can be set prior to execution if desired, e.g.:
+# FGSERV=10.1.1.1 findzip
+if [[ -z "$FGSRV" ]] ; then
+    FGSRV=10.0.129.254
+    if [ -e /home/black/tmp/fgTest ] ; then
+        # To test, create this file with FGSRV 1.2.3.4
+            FGSRV=`cat /home/black/tmp/fgTest | awk '{print $2}'`
+            echo "/home/black/tmp/fgTest exists, setting FGSRV = $FGSRV"
+    elif [ -e /mnt/hgfs/host/site.txt ] ; then
+            case `cat /mnt/hgfs/host/site.txt` in
+                    North)
+                            FGSRV=10.0.129.254
+                            ;;
+                    South)
+                            FGSRV=10.11.129.253
+                            ;;
+                    East)
+                            FGSRV=10.21.129.254
+                            ;;
+                    West)
+                            FGSRV=10.31.129.254
+                            ;;
+            esac
+    fi
+fi
+
+FGUSER=op
+FGCURRENTLOC=/current/fg
+FGPROMPTTYPE=0
+
+#if using password: FGKEYAUTH="none"
+FGKEYAUTH="/etc/keyfile.scp"
+
+TIMEOUT=0
+#DEBUG=1
+
+#Need to figure out if we are gen3 and our site (will be used to determine FG SRV IP in the future)
+FGGEN3SITE="`cat /mnt/hgfs/host/site.txt 2>/dev/null`"
+#Set FGGEN3 to something, this is only used locally scrubhands does its own check and setting of this var in it's context
+[ "$FGGEN3SITE" ] && FGGEN3="YES -- Site = $FGGEN3SITE"
+
+[ "$DEBUG" ] && echo "DEBUGGING ON"
+
+# Grab our OPUSER if we've got one
+if [ -e /current/down/opnotes.txt ]; then
+	TMPOPUSER=`grep -i OPUSER /current/down/opnotes.txt | awk -F= '{ print $2 }'`
+	if [ $TMPOPUSER ]; then OPUSER=$TMPOPUSER ; fi
+	[ "$DEBUG" ] && echo "Attempted to read OPUSER from opnotes, result is: $OPUSER"
+fi
+
+findzipdev() {
+
+#
+# All these exports are legacy, I would rather leave them in than risk 
+# breaking something
+#
+	export MNTPNT1="/mnt/zip"
+	export MNTPNT2="/mnt/zip2"
+	export MNTPNT3="/mnt/zip3"
+	export ALLMNTS="$MNTPNT1 $MNTPNT2 $MNTPNT3"
+	export LASTMNT=`echo $ALLMNTS | sed "s/.* //g"`
+
+	[ "$*" = "-u" ] && UNMOUNT=1
+	[ "$*" = "-f" ] && FG=1              		#if we were called with -f set our var
+	[ "$*" = "-F" ] && FG=1 && FGFRESHEN=1          #if we were called with -f set our var
+	
+	#
+	# If the  -ause kernel module is not loaded, truecrypt cannot mount the
+	# encrypted partition, this checks and tries to load it
+	#
+
+	FUSE_DRIVER_LOADED=`lsmod | grep "^fuse"`
+#	echo "FUSE_DRIVER_LOADED=${FUSE_DRIVER_LOADED}"
+	if [[ -z ${FUSE_DRIVER_LOADED} ]] ; then 
+		echo "fuse module not loaded, attempting to load it" ; 
+		modprobe fuse
+		FUSE_DRIVER_LOADED=$?
+#		echo "FUSE_DRIVER_LOADED=${FUSE_DRIVER_LOADED}"
+		if [[ ${FUSE_DRIVER_LOADED} -gt 0 ]] ; then 
+			echo "Loading module failed, exiting"; exit -1 ; 
+		fi
+	fi
+
+
+#
+# Legacy Variables, could probably get rid of them
+#
+
+	# Our /mnt/zip* devices
+	DEV1=`mount | grep " on $MNTPNT1 " | head -1 | sed "s/ .*//g"`
+	DEV2=`mount | grep " on $MNTPNT2 " | head -1 | sed "s/ .*//g"`
+	DEV3=`mount | grep " on $MNTPNT3 " | head -1 | sed "s/ .*//g"`
+
+	# Other non /mnt/zip* devices
+	OTHDEV1=`mount | grep -v " on $MNTPNT1" | grep "^/" | head -1 | sed "s/ .*//g"`
+	OTHDEV2=`mount | grep -v " on $MNTPNT1" | grep "^/" | head -2 | tail -1 | sed "s/ .*//g"`
+	[ "$OTHDEV2" = "$OTHDEV1" ] && OTHDEV2=""
+	OTHDEV3=`mount | grep -v " on $MNTPNT1" | grep "^/" | head -3 | tail -1 | sed "s/ .*//g"`
+	[ "$OTHDEV3" = "$OTHDEV2" -o "$OTHDEV3" = "$OTHDEV1" ] && OTHDEV3=""
+
+	MNT1=`mount | grep " on $MNTPNT1 " | head -1 | sed "s/.* on //g" | sed "s/ .*//g"`
+	MNT2=`mount | grep " on $MNTPNT2 " | head -1 | sed "s/.* on //g" | sed "s/ .*//g"`
+	MNT3=`mount | grep " on $MNTPNT3 " | head -1 | sed "s/.* on //g" | sed "s/ .*//g"`
+
+
+#
+# This next line greps through /var/log/messages and pulls out USB devices.
+# It pulls out sd[abc] etc instead of sd[abc]1 because we are using full disk 
+# encryption and therfore don't have sd[abc]1
+#
+	USBDEVS=`egrep "kernel: Attached scsi removable disk" /var/log/messages | sed "s/^.*removable disk sd\([a-h]\).*$/sd\1/g" | sort | uniq`
+
+[ "$DEBUG" ] && echo USBDEVS=$USBDEVS
+
+#
+# If any USB devices are mounted, unmount  them.  I am not sure if this will 
+# unmount CDROM drives, I guess it depends on if they are recognized as scsi 
+# removable disks.  We should never mount a thumb drive once this goes into
+# effect.
+#
+	echo "Unmounting all USB devices"
+	for USBDEV in $USBDEVS; do
+		umount /dev/${USBDEV}* 2>/dev/null
+	done
+
+#
+# If we are called as uz or with the -u option, unmount everything and return
+#
+	RESULT2=0
+	if [ $UNMOUNT -gt 0 ] ; then
+	    #Figure out what we've got mounted (a block special dev aka thumb or file)
+        TCLIST=`truecrypt --list 2>/dev/null|  awk '{ print $2}'`
+		TCLISTMNTDIR=`truecrypt --list 2>/dev/null|  awk '{ print $4}'`
+
+		# If we have any truecrypt files mounted (ie FG mode) - try to remove it
+		if [ ! "$TCLIST" == "" ]; then
+			echo "Unmounting all truecrypt partitions."
+			truecrypt -d
+			RESULT2=$?	
+			TCFILES=$(echo $TCLIST | tr "\n", " " )
+			#Get our list of mount locations we need to blow away (ommitting /share/down/zip)
+			TCDIRS=$(echo $TCLISTMNTDIR | sed 's#/share/down/zip##' | tr "\n", " " )
+			[ "$DEBUG" ] && echo "TCFILES is *$TCFILES* TCDIRS is *$TCDIRS*"
+						
+			for TCMNTFILE in $TCFILES $TCDIRS; do
+				[ "$DEBUG" ] && echo "TCMNTFILE is $TCMNTFILE"
+				if [ -f $TCMNTFILE ]; then
+					
+					unset REMTCMNTFILE
+					while [ "$REMTCMNTFILE" != "y" -a "$REMTCMNTFILE" != "n" ] ; do
+					echo "Would you like to remove local temporary TC file  (RECOMMENDED UNLESS YOU NEED TO REMOUNT MANUALLY): ${TCMNTFILE} (y/n)?"
+					read REMTCMNTFILE
+					done
+					if [ $REMTCMNTFILE == "y" ] ; then 
+						`rm -f ${TCMNTFILE}`
+					elif [ $REMTCMNTFILE == "n"  ] ; then
+						echo "!!! YOU NEED TO REMOVE ${TCMNTFILE} ON YOUR OWN WHEN YOU ARE DONE COPYING DATA OUT OF THE TC FILE !!!"
+					fi
+					
+				fi #if the file exists
+				
+				if [ -d $TCMNTFILE ]; then
+					echo "Removing mount location $TCMNTFILE"
+					rmdir $TCMNTFILE
+				fi
+				
+			done #for TCMNTFILE
+		fi  # if we have any tc --list output
+			
+		#now cleanup shared and user storage if there are files there
+		while [ "$REMFGTMP" != "y" -a "$REMFGTMP" != "n" ]  && [ -d /home/black/tmp/fg/localCopy ] ; do
+		   find ${TEMP}/localCopy/* -type d | xargs ls -latrR 
+		   echo "Would you like to remove the above user and shared FG files (y/n)?"
+		   read REMFGTMP
+		done
+		if [ "$REMFGTMP" == "y" ] ; then `find ${TEMP}/localCopy -type d | xargs rm -fr`; fi
+		
+		
+	    if [ $TRUECRYPT -gt 0 ] ; then
+			echo "Unmounting all truecrypt partitions."
+			truecrypt -d
+			RESULT2=$?
+			LEFTOVER=`truecrypt --list 2>/dev/null`
+			[[ -z "$LEFTOVER" ]] || return 1
+			[[ -z "$LEFTOVER" ]] && return 0
+	    else
+			echo umount ${MNTPNTBASE}*
+			umount ${MNTPNTBASE}* 2>/dev/null
+			RESULT2=$?
+	    fi
+
+	    rmdir ${MNTPNTBASE}* 2>/dev/null
+	    return $RESULT2
+	fi
+
+
+#
+# This is the heart of the new code.  MNTPNTBASE (defined at the top of this
+# file) holds the first mount point to try.  If that one is already mounted, or
+# is non-directory file, then increment by one and try again (/mnt/zip2, etc)
+# there is no hard stop here.  Conceviebly, you could get to /mnt/zip999, but
+# I hope not.
+#
+
+	MNTPNT="${MNTPNTBASE}"
+	ZIPNUM="1"
+	RESULT=1
+	for USBDEV in ${USBDEVS}; do
+
+		#if we are in FG mode, don't mount a TC thumb
+		if [ $FG -gt 0 ]; then 
+			echo "WARNING: We aren't mounting your thumb drive, rerun mz with -t and don't use -f (or any other FG options) if you want to do this!";
+			break; 
+		fi  
+
+		if [ ! -e /dev/${USBDEV} ] ; then continue; fi
+		while [ -e "${MNTPNT}" -a ! -d "${MNTPNT}" ]; do
+	#			echo "${MNTPNT} exists and is not a folder, skipping"
+				ZIPNUM=`echo "$ZIPNUM + 1" | bc`
+				MNTPNT="${MNTPNTBASE}${ZIPNUM}"
+				continue
+			done
+			MNTRESULTS=`mount | egrep " on $MNTPNT "`
+			while [ -n "${MNTRESULTS}" ] ; do
+	#			echo "${MNTPNT} is already mounted to, moving on"
+				ZIPNUM=`echo "$ZIPNUM + 1" | bc`
+				MNTPNT="${MNTPNTBASE}${ZIPNUM}"
+				MNTRESULTS=`mount | egrep " on $MNTPNT "`
+			done
+
+	#
+	# If the mount point we are trying to mount to does not exist, create it.
+	#
+			[[ -d ${MNTPNT} ]] || mkdir ${MNTPNT}
+
+	#
+	# The one truecrypt line does most of the work.
+	#
+			[ -e /dev/${USBDEV}1 -a -b /dev/${USBDEV}1 ] && USBDEV="${USBDEV}1" && export ${USBDEV}
+			if [ $TRUECRYPT -gt 0 ] ; then
+			    echo "Mounting /dev/${USBDEV} READONLY to ${MNTPNT} with truecrypt::"
+			    echo "# truecrypt -t -k \"${KEYFILE}\" -m ro /dev/${USBDEV} ${MNTPNT} 2>/dev/null "
+			    truecrypt -t -k "${KEYFILE}" -m ro /dev/${USBDEV} ${MNTPNT} 2>/dev/null 
+			else
+			    echo "Mounting /dev/${USBDEV} READONLY to ${MNTPNT} without truecrypt::"
+			    echo "# mount -o ro /dev/${USBDEV} $MNTPNT"
+			    mount -o ro /dev/${USBDEV} $MNTPNT
+			fi
+	#
+	# After a successful mount, ls the zip drive
+	#
+			SUCCESS=$?
+	#		echo "SUCCESS=$SUCCESS"
+			if [ ${SUCCESS} -eq 0 ] ; then RESULT=0; fi
+			[ ${SUCCESS} -eq 0 ] && echo "ls -alrtd ${MNTPNT}/*"
+			[ ${SUCCESS} -eq 0 ] && ls -alrtd ${MNTPNT}/*
+			[ ${SUCCESS} -gt 0 ] && echo
+		done
+	
+	#
+	# If we getting the files w/o a thumb
+	#
+		FGADDLARGS=""
+		if [ $FG -gt 0 ]; then
+			
+			if [ ${TIMEOUT} -gt 0 ] ; then
+				FGADDLARGS=`echo $FGADDLARGS --timeout $TIMEOUT`	
+			fi
+
+			if [ "$FGALTUSER" != "" ] ; then
+				OPUSER=$FGALTUSER
+			fi
+
+			if [ "$OPUSER" == "" ] ; then
+				#Read our OPUSER from env if it is there...
+				OPUSER=`echo $OPUSER`
+
+			TEST=`echo "$OPUSER" | tr -d "0-9"`
+    			if [ "$TEST" ] ; then
+					echo "Invalid USERID (\$OPUSER=${OPUSER}), must be all digits" && exit;
+    			else		
+					echo "Unable to determine your USER ID, please enter it now"
+					read OPUSER
+				fi
+			fi
+			if [ ${FGPROMPTTYPE} -eq 1 ] ; then
+				echo "Please view the options and enter a valid type"
+				fg.py -h
+				echo "Enter your comma seperated selection (ie unix_rc,win_rel):"
+				read FGTYPE
+			elif [ "$FGTYPE" == "" ]; then
+				FGTYPE="unix_rel" # our default case
+			fi
+                        echo $FGTYPE | grep -q unix_rc && ULSRC=1
+			
+			
+			# If we are doing a full mz -f, drop data into temp dir since there is no /current yet
+			#if [ $FGFRESHEN -eq 0 -a $FG -gt 0 ] ; then
+			#	FGCURRENTLOC="${TEMP}/localCopy/"
+			#else [ $FGFRESHEN -eq 1 -a $FG -gt 0 -a ! -e "/current" ]
+			#	echo "doing an mz -F before scrubbing, files will be put in ${TEMP}/localCopy/ for now"
+			#	FGCURRENTLOC="${TEMP}/localCopy/"
+			#fi
+		
+			if [ $FG -gt 0 -a -e "/current" ] ; then
+				#This is the default case, but to be sure
+				FGCURRENTLOC=/current/fg
+			elif [ $FG -gt 0 ] ; then
+				#Set our copy dir to temporary location for scrubhands to move later
+				FGCURRENTLOC=${TEMP}/localCopy/
+				echo "Looks like we haven't scrubbed yet, setting FG dir to $FGCURRENTLOC"
+			fi 
+
+			#Create mount point and temp dir if needed
+			[[ -d ${MNTPNT} ]] || mkdir ${MNTPNT}
+			[[ -d ${TEMP} ]] || mkdir ${TEMP}
+			[[ -d ${FGCURRENTLOC}/${OPUSER} ]] || mkdir -p ${FGCURRENTLOC}/${OPUSER}
+			[[ -d ${FGCURRENTLOC}/shared ]] || mkdir -p ${FGCURRENTLOC}/shared
+			
+			# Set FG usage information for scrubhands tracker use
+			if [ $FGFRESHEN -eq 0 -a $FG -gt 0 ] ; then
+				DATE=`date -u`
+				SITE=`cat /mnt/hgfs/host/site.txt | tr -d '\n'`
+				TRANSSITE=`echo $SITE | sed 's#North#0#' | sed 's#South#10#' | sed 's#South-NEW#11#' | sed 's#East#20#' | sed 's#East-NEW#21#' | sed 's#West#30#' | sed 's#West-NEW#31#'`
+				HOST=`cat /mnt/hgfs/host/host.txt | tr -d '\n'`
+				OPNAME=`cat /mnt/hgfs/host/opname.txt | tr -d '\n'`
+				PRIVIP="10.$TRANSSITE.130.$HOST"
+				echo "$DATE $PRIVIP TYPE $FGTYPE OPNAME $OPNAME" > $FGCURRENTLOC/fg.log
+			fi
+			
+			[ "$DEBUG" ] && echo "DEBUGGING: FGSRVPASS: $FGSRVPASS  and FGTCPASS: $FGTCPASS"
+			
+			# If the password wasn't set coming into the script (unless we have a keyfile):
+			if [ ! "$FGSRVPASS" -a $FG -gt 0 -a $FGKEYAUTH == "none" ]; then
+				echo "Enter the *CURRENT* FG server password:"
+				read FGSRVPASS
+				echo "Ok, thanks - enter the next password so you can do other things while I copy the files"
+			fi
+			
+			# Only get the TC password if we need it 
+			if [ $FGFRESHEN -eq 0 -a ! "$FGTCPASS" ] ; then 
+				echo "Enter the *CURRENT* FG truecrypt password:"
+				read FGTCPASS 
+			fi
+
+			echo "GEN 3 is $FGGEN3"
+			#Update /usr/local/sbin IFF we are in FG mode, on gen3, and we aren't in -F mode and the user hasn't used -U
+			if [ $FG -gt 0 -a "$FGGEN3" -a "$DOUPGRADE" != "no" -a $FGFRESHEN -eq 0 ] ; then
+				#TODO verify we are gen 3!!!!!
+				# Check for ULS updates
+				cd ${TEMP}	
+
+				if [ $FGKEYAUTH == "none" ] ; then
+					echo "RUNNING: fg.py -l $FGUSER -p '${FGSRVPASS}' --userID ${OPUSER} -s $FGSRV --diskDIR -f uls_ver"
+					fg.py -l $FGUSER -p "${FGSRVPASS}" --userID ${OPUSER} -s $FGSRV --diskDIR -f uls_ver
+				else
+					echo "RUNNING fg.py -l $FGUSER -i ${FGKEYAUTH} --userID ${OPUSER} -s $FGSRV --diskDIR -f uls_ver"
+					fg.py -l $FGUSER -i ${FGKEYAUTH} --userID ${OPUSER} -s $FGSRV --diskDIR -f uls_ver
+				fi
+		
+				ULSLOCALVER=`ls /usr/local/sbin/uls_ver.* 2>&1 | perl -ne '$_=~/.*uls_ver\.([\d\w\.]+)/; print "$1";'`
+
+
+				ULSCURVER=`ls /home/black/tmp/fg/uls_ver.* 2>&1 | perl -ne '$_=~/.*uls_ver\.([\d\w\.]+)/; print "$1";'`
+
+				#If the user asked for the RC and the RC version file exists
+				ULSRCVERFILE=`find /home/black/tmp/fg -iname '*uls_ver_rc.*'`
+				echo "ULSRCVERFILE is $ULSRCVERFILE"
+				if [ $ULSRC -gt 0  -a -e "${ULSRCVERFILE}" ]; then
+					ULSCURVER=`ls /home/black/tmp/fg/uls_ver_rc.* | perl -ne '$_=~/.*uls_ver_rc\.([\d\w\.]+)/; print "$1";'`
+					#OUT=`ls /home/black/tmp/fg/uls_ver_rc.*`
+					#echo "ls line is $OUT"
+				else  # if we don't have an upgrade ver file on the server we are going to stop trying to use ulsrc
+					ULSRC=0
+				fi
+
+				echo "Checking /usr/local/sbin upgradables version number: $ULSCURVER (latest) $ULSLOCALVER (local copy)"
+
+				if [[ "$ULSCURVER" > "$ULSLOCALVER" || $ULSRC -gt 0 ]] ; then
+					echo "Upgrading /usr/local/sbin"
+					ULSTARGET="uls_rel"		
+	
+					if [ $ULSRC -gt 0 ] ; then 
+						echo "****** GETTING ULS_RC and forcing upgrade **********"  
+						ULSTARGET="uls_rc"  
+					fi
+
+					if [ $FGKEYAUTH == "none" ] ; then					
+						fg.py -l $FGUSER -p "${FGSRVPASS}" --userID ${OPUSER} -s $FGSRV --diskDIR -f $ULSTARGET
+					else
+						fg.py -l $FGUSER -i ${FGKEYAUTH} --userID ${OPUSER} -s $FGSRV --diskDIR -f $ULSTARGET
+					fi
+
+					ULSFETCHEDFILE=`find ${TEMP} -maxdepth 1 -type f -iname '*uls_r*'`
+					if [ -e "${ULSFETCHEDFILE}" ] ; then
+						FINDZIPCHSUMBEFORE=`cksum /usr/local/sbin/findzip`
+						TAROUT=`tar -xjvf $ULSFETCHEDFILE --strip-path 1 -C /usr/local/sbin`
+						echo "$TAROUT" | grep -v uls_ver | xargs -i basename {} | xargs -i chmod +x /usr/local/sbin/{}
+						echo "Updated and chmoded:"
+						echo  "$TAROUT"
+						FINDZIPCHSUMAFTER=`cksum /usr/local/sbin/findzip`
+						rm -f /usr/local/sbin/uls_ver.*
+						mv $ULSFETCHEDFILE /tmp
+						#mv ${TEMP}/uls_ver.* /usr/local/sbin
+						echo "Touching  /usr/local/sbin/uls_ver.$ULSCURVER"
+						`touch /usr/local/sbin/uls_ver.$ULSCURVER`
+						echo "/usr/local/sbin upgraded to version $ULSCURVER"
+						echo "findzip Chksum comparison"
+						echo "before: $FINDZIPCHSUMBEFORE" 
+						echo "after: $FINDZIPCHSUMAFTER"
+						if [[ $FINDZIPCHSUMBEFORE != $FINDZIPCHSUMAFTER ]] ; then
+							echo "Upgraded findzip (this program), need to rerun this program!!!!!"
+
+							if [ $ULSRC -gt 0 ] ; then
+								#note: sed is intentionally not using g for global to avoid removing -X options to -s
+								TMPARGVSTRING=`echo $ORIGARGVSTRING | sed 's#[ ]*-X##'`
+								ORIGARGVSTRING=`echo $TMPARGVSTRING`
+								echo "Removing -X from our re-execution of findzip"
+
+								#echo "Touching ${TEMP}/uls_ver.999rc to prevent further upgrades"
+								#rm -f ${TEMP}/uls_ver.*
+								#touch ${TEMP}/uls_ver.999rc
+							fi	
+
+							echo "**** Running: findzip $ORIGARGVSTRING *****"
+							export -p FGSRVPASS=$FGSRVPASS
+							export -p FGTCPASS=$FGTCPASS
+
+							exec findzip $ORIGARGVSTRING
+							echo "YOU SHOULDN'T SEE THIS MESSAGE (we just exec'd our script .....)"
+							exit
+						fi
+					fi
+				fi
+			elif [ "$DOUPGRADE" == "no" ]; then 
+				echo "Skipping upgrade of /usr/local/sbin DOUPGRADE=${DOUPGRADE}"
+			elif [ $FG -gt 0 -a ! "$FGGEN3" -a "$DOUPGRADE" != "no" -a $FGFRESHEN -eq 0 ] ; then
+				echo "***********************************************************************************************************"
+				echo "WARNING!!!! WARNING!!!! You are attempting to run FG mode on < GEN 3, we won't be updating /usr/local/sbin!"
+				echo "It is suggested you ctrl-C now unless you *KNOW* what you are doing (hit return to continue...)"
+				echo "***********************************************************************************************************"
+				read blah
+			fi   #if we are FGGEN3, do local upgrades
+			
+			echo "First getting user and shared files, then opsdisk"
+
+			#Try to cd into our user directory, failing that make the directory and try again (this could be a NEW user who specified the -I option, in which case the directory won't be there yet)
+			cd $FGCURRENTLOC/${OPUSER} || mkdir $FGCURRENTLOC/${OPUSER} && cd $FGCURRENTLOC/${OPUSER} 
+			if [ $FGKEYAUTH == "none" ] ; then			
+				echo "RUNNING: fg.py -l $FGUSER -p '$FGSRVPASS' --userID ${OPUSER} -s $FGSRV --userDIR " 
+				fg.py -l $FGUSER -p "${FGSRVPASS}" --userID ${OPUSER} -s $FGSRV --userDIR 
+				if [ $FGFRESHEN -eq 0 ]; then
+					echo "Now getting infrastructure info using the above with -f (infra.txt)"
+					fg.py -l $FGUSER -p "${FGSRVPASS}" --userID ${OPUSER} -s $FGSRV --userDIR -f infra.txt 
+				fi
+			else
+				echo "RUNNING: fg.py -l $FGUSER -i ${FGKEYAUTH} --userID ${OPUSER} -s $FGSRV --userDIR "
+				fg.py -l $FGUSER -i ${FGKEYAUTH} --userID ${OPUSER} -s $FGSRV --userDIR 
+				if [ $FGFRESHEN -eq 0 ]; then
+					echo "Now getting  infrastructure info using the above with -f (infra.txt)"
+					fg.py -l $FGUSER -i ${FGKEYAUTH} --userID ${OPUSER} -s $FGSRV --userDIR -f infra.txt 
+				fi
+			fi
+			echo "chmoding files we just got a+rw"
+			chmod a+rw $FGCURRENTLOC/${OPUSER}/*
+
+			cd $FGCURRENTLOC/shared 
+			if [ $FGKEYAUTH == "none" ] ; then			
+				echo "RUNNING: fg.py -l $FGUSER -p '$FGSRVPASS' --userID ${OPUSER} -s $FGSRV --sharedDIR "
+				fg.py -l $FGUSER -p "${FGSRVPASS}" --userID ${OPUSER} -s $FGSRV --sharedDIR
+			else
+				echo "RUNNING: fg.py -l $FGUSER -i ${FGKEYAUTH} --userID ${OPUSER} -s $FGSRV --sharedDIR "
+				fg.py -l $FGUSER -i ${FGKEYAUTH} --userID ${OPUSER} -s $FGSRV --sharedDIR
+			fi
+			echo "chmoding files we just got a+rw"
+			chmod a+rw $FGCURRENTLOC/shared/*
+			
+			echo "Here are your LOCAL files (if not there already, they will move to /current/fg after scrubhands):"
+			find $FGCURRENTLOC -type f
+			echo ""	
+
+			# If we are doing a full mz -f
+			if [ $FGFRESHEN -eq 0 ] ; then
+			
+				arr=$(echo $FGTYPE | tr "," "\n")
+				MNTLIST=""
+				
+				for FGDISK in $arr
+				do
+					[ $DEBUG ] && echo "DEBUG: Fetching a disk of $FGDISK"
+
+					cd ${TEMP}	
+
+					if [ $FGKEYAUTH == "none" ] ; then
+						echo "RUNNING: fg.py -l $FGUSER -p '${FGSRVPASS}' --userID ${OPUSER} -s $FGSRV --diskDIR -f ^${FGDISK}"
+						fg.py -l $FGUSER -p "${FGSRVPASS}" --userID ${OPUSER} -s $FGSRV --diskDIR -f ^$FGDISK
+					else
+						echo "RUNNING: fg.py -l $FGUSER -i ${FGKEYAUTH} --userID ${OPUSER} -s $FGSRV --diskDIR -f ^${FGDISK}"
+						fg.py -l $FGUSER -i ${FGKEYAUTH} --userID ${OPUSER} -s $FGSRV --diskDIR -f ^$FGDISK
+					fi
+									
+					if [ `echo $FGDISK | perl -ne '$_=~/^win_/;print "$&"'` ] ; then MNTPNT="/share/down/zip"; 
+					elif [ `echo $FGDISK | perl -ne '$_=~/^unix_/;print "$&"'` ] ; then MNTPNT="/mnt/zip"; 
+					else
+						TMPVARWIN=`echo $FGDISK | perl -ne '$_=~/^(.*)_win/;print "$1"'`
+						TMPVARNIX=`echo $FGDISK | perl -ne '$_=~/^(.*)_unix/;print "$1"'`
+						if [ "${TMPVARWIN}" != "" ]; then MNTPNT="/share/down/$TMPVARWIN"; 
+						elif [ "${TMPVARNIX}" != "" ]; then MNTPNT="/mnt/$TMPVARNIX";  
+						fi
+					fi
+					
+					if [ $MNTPNT == "" ]; then
+						MNTPNT="/mnt/unk"
+						echo "Couldn't determine where to mount this zip, going with $MNTPNT"
+					fi
+							
+					FETCHEDFILE=`find ${TEMP} -maxdepth 1 -type f | grep $FGDISK`
+					echo "Fetched file is $FETCHEDFILE"
+					if [ `echo $FETCHEDFILE | wc -w` -gt 1 ]; then 
+						FETCHEDFILE=`echo $FETCHEDFILE | sed -r 's/[ \t\n]+/\n/g'` 
+						echo "WARNING: Found multiple disks, possibly from a previous failed run of mz!"
+						echo "Which one would you like to attempt to mount as $MNTPNT?"
+						echo "$FETCHEDFILE"	
+						echo "CHOOSE ONE (or ctrl-C to bail and fix yourself):"
+
+
+						read FETCHEDFILE 
+					fi
+					
+					#If we didn't get a file of that type, go on to next disk
+					if [ "${FETCHEDFILE}" == "" ]; then echo "WARNING: We didn't get a disk file of type \"${FGDISK}\" (user specified)"; continue; fi
+					
+					#TODO handle case where there are multiple files for each match ie more than one win_rel (shouldn't happen) 
+					#   -- might happen in case of failed download, etc sitting in TMP
+					
+					#If the mnt point isn't there, make it
+					[[ -d ${MNTPNT} ]] || mkdir ${MNTPNT}
+					
+					MNTLIST="${MNTLIST} ${MNTPNT}" 
+					
+					echo "RUNNING: truecrypt -t -p=\"<pass>\" -k \"${KEYFILE}\" -m ro --fs-options=fmask=0113,dmask=0002 --protect-hidden=no ${FETCHEDFILE}  ${MNTPNT}"
+					truecrypt -t -p="${FGTCPASS}" -k "${KEYFILE}" -m ro --fs-options=fmask=0113,dmask=0002 --protect-hidden=no ${FETCHEDFILE}  ${MNTPNT}
+					
+				done
+								
+				#For now, unfortunate duplication of code:
+				SUCCESS=$?
+				#		echo "SUCCESS=$SUCCESS"
+				if [ ${SUCCESS} -eq 0 ] ; then RESULT=0; fi
+				# this used to be ls -alrtd ${MNTLIST}/* ${TEMP}/localCopy/${OPUSER} ${TEMP}/localCopy/shared
+				[ ${SUCCESS} -eq 0 ] && echo "ls -al ${MNTLIST} ${TEMP}/localCopy/${OPUSER} ${TEMP}/localCopy/shared"
+				[ ${SUCCESS} -eq 0 ] && echo
+				[ ${SUCCESS} -eq 0 ] && ls -al ${MNTLIST} ${TEMP}/localCopy/${OPUSER} ${TEMP}/localCopy/shared
+				[ ${SUCCESS} -gt 0 ] && echo
+			fi # FG disk mounting case
+
+		fi
+
+	#
+	# scrubands uses $MNTPNT, and THISMNT is used by legacy code if findzip is not 
+	# sourced
+	#
+		export MNTPNT=${MNTPNT}
+		THISMNT=${MNTPNT}
+
+	if [ "$SHOPTS" ] ; then
+	#Fix up our SHOPTS line to properly exec scrubhands
+	SHOPTS=`echo "scrubhands $SHOPTS"`
+	fi
+
+	# See if we have any useful pastables
+	#PASTELIST=`find ${TEMP} -iname '*pastable*'`
+	PASTELIST=`find  ${TEMP} -iname '*\.txt' | xargs egrep -H 'scrubhands \-|mz \-' | sort -u | sed 's#:#:\n#' | sed 's#/home/black/tmp/fg/localCopy/#-Match from pastable file #g'`
+	INFRALIST=`find  ${TEMP} -iname '*infra.txt*' | xargs egrep 'LOCAL:' | sed 's#LOCAL:[ ]*##'`
+	
+	#If we found pastables with scrubhands lines, offer to use those
+	#also check that we haven't scrubbed yet (does /current exist) and aren't just doing a -F
+	if [ "$PASTELIST" -a  $FG -gt 0 -a $FGFRESHEN -eq 0 -a ! -e /current ]; then
+		echo ""
+		echo "oooooooooooo00000000000000000000000000000000oooooooooooo"
+		#If we were invoked with -s give those opts to user
+		if [ "$SHOPTS" ]; then
+			echo "Scrubhands lines from how you invoked THIS program: "
+			echo "$SHOPTS"
+			echo "----================================================----"	
+		fi
+
+		echo "Scrubhands pastables found. The required scrubhands -t option will be added for you."
+		echo "$PASTELIST" 
+
+
+		if [ "$INFRALIST" ]; then
+			echo "----================================================----"	
+			echo "Infrastructure found (edit scrubhands line above if desired)"
+			echo "      MAKE SURE NO ONE ELSE IS USING YOUR ADDRESSES!        "
+			echo "$INFRALIST"
+		fi			
+		echo "oooooooooooo00000000000000000000000000000000oooooooooooo"
+		if [ "`echo $PASTLIST | sed -e 's,.*mz.*-s,scrubhands,g' -e 's,.*scrubhands -t,scrubhands,g'`" = "$SHOPTS" ] ; then
+			echo We compared these, and options are identical. Using the last one.
+			echo "   " $PASTELIST 
+			echo "   " $SHOPTS
+		else
+			echo "PASTE YOUR CHOICE TO START SCRUBHANDS OR TYPE IN YOUR OWN (CTRL-C to ABORT SCRUB):" 
+			read SHLINE
+		fi
+		#If we don't have required -t for FG mode, add it
+		GREPRESULT=`echo  $SHLINE | grep ' -t '`
+		if [ ! "$GREPRESULT" ]; then
+			TMPSHLINE=`echo $SHLINE | sed 's#scrubhands #scrubhands -t #'`	
+			SHLINE=$TMPSHLINE
+		fi
+	fi   # if [ "$PASTELIST" ]; 
+
+	if [ "$SHLINE" ]; then
+		SHEXEC=`echo $SHLINE`
+	elif [ "$SHOPTS" ]; then
+		SHEXEC=`echo $SHOPTS`
+	fi
+
+	# If -s was used (or we had a scrubhands line given to us during op setup), we are going to update /usr/local/sbin and then call scrubhands for initial op setup
+	if [ "$SHEXEC" ]; then
+		echo -e "\n\n\aAbout to run: $SHEXEC"
+		[ $DEBUG ] && unset DEBUG && echo -e "\n\n\aWARNING: Just unset DEBUG before calling scrubhands since that might not be what you intended\n\n"
+		sleep 5
+		exec $SHEXEC
+	fi
+
+	#
+	# Return 0 if even one encrypted partion is mounted
+	#
+		if [ $TRUECRYPT -gt 0 ] ; then
+		    truecrypt --list > /dev/null 2>&1
+		    RESULT=$?
+		fi
+	return $RESULT
+}
+
+
+#
+# if we are not called as mz,uz or findzip, exit.  This allows this script to 
+# be sourced so other scripts can have the findzipdev() functionality
+#
+if [ ! "`echo $0 | egrep \"uz$|findzip|mz$\"`" ] ; then
+#	exit 1
+	return
+fi
+if [ "`echo $0 | egrep \"uz|unfindzip\"`" ] ; then
+	UNMOUNT=1
+fi
+
+
+# Since we were not sourced then, we define our own PROG, VER and usage()
+PROG=`basename ${0}`
+
+usagetext="
+Usage: $PROG [-t] [-u] [-q] [-f] [-F] [-p] [-d disk_type] [-O timeout] [-i identityfile] [-I user] [-s SCRUBHANDS OPTS]
+
+  -t	disable use of TRUECRYPT 	
+  -u	Attempts to unmount the device $PROG most recently mounted, removing mount directory
+  -q	suppress informational and error message
+  -O	FG ssh session timeout - how long to wait on a copy before bailing
+  -d	Mount FG disk type (multiple allowed, comma seperated). \"PROMPT\" will give you a list of possible disk types.
+		EXAMPLE: -d unix_rel,win_rc (unix_rel is default) -or-  -d PROMPT 
+  -f	FG / thumb free (-f) option will copy the appropriate disk files locally and unpack them. 
+		into /mnt/zip
+  -F	FG freshen: copies your files (but not the opsdisk) to $FGCURRENTLOC or $TEMP/fg/localCopy (pre-scrub).
+  -U	SKIP the upgrade process (should only be done when you are testing your own /usr/local/sbin changes)
+  -X	Select the RC for /usr/local/sbin updates. Currently only supported in FG mode
+  -p	Use an SCP password instead of shared key for scp and sftp sessions (you will be prompted for it)
+  -i	Use an alternate ssh key/identity file
+  -I	Specify a user id when copying user data from server ( does not have to match the -I option used with -s )
+		EXAMPLE: mz -I 12345 -d unix_rel,win_rel  (pull down files waiting including those with pastables and mount disks)
+  -s	Mount FG ops disk in /mnt/zip (and other locations), then start scrubhands with these options ( -f is inferred)
+		NOTE: -s option MUST BE LAST, arguments following this option will be passed to scrubhands!
+		EXAMPLES: mz -s -I 12345 -P MYPROJ -S 12345678901234 1.2.3.4/0/1
+		          mz -d unix_rel,win_rel -s -I 12345 -P MYPROJ -S 12345678901234 1.2.3.4/0/1
+
+findzip tries to find a removable USB drive, using recent log entries
+in /var/log/messages to find the right device. If it cannot, it
+proceeds to try and find a ZIP drive. It can mount up to three distinct
+devices in this manner.
+
+findzip when used with any FG options will attempt to run scrubhands for you IF 
+you specify -s -OR- pastables are found with scrubhands lines. You can abort
+this attempt and be left with mounted disks and copied files.
+
+In FG mode, to manually set the FG server IP, set the FGSRV variable to that IP, e.g.:
+     FGSRV=10.1.1.1 findzip -f
+
+If it finds one not already mounted, it is mounted as $MNTPNT1 or
+$MNTPNT2 or $MNTPNT3, whichever is first available. It will export MNTZIP1 - MNTZIP3
+and MNTZIP
+
+"
+
+usage() {
+    [ "$1" = "exit" ] && EXIT=1 && shift
+    if [ "$1" = "-h" ] ; then
+        shift
+        [ "$ERRSTR" ] || ERRSTR="\nNOTE: \a THE NEW WAY REQUIRES NO UU*CODE NOR ANY E=\"ratpreargs\"!!!!"
+        echo -e "$usagetext"
+    fi
+    # We want -v output to be just two digits, so scrubver is #.#
+    # and suitever can have whole #.#.#.# in it.
+    if [ "$1" = "-v" ] ; then
+        shift
+    fi
+    echo "$PROG version $VER"
+    ERRSTR="${*}"
+    if [ "$ERRSTR" ] ; then
+        echo -e "\a${ERRSTR}"
+    fi
+    [ "$EXIT" ] && exit
+} # end usage
+
+
+MYDIR=`dirname $0`
+if [ ! -e "$MYDIR/unfindzip" ] ; then
+    ln -sf findzip $MYDIR/unfindzip
+    ln -sf findzip $MYDIR/mz
+    ln -sf findzip $MYDIR/uz
+fi
+
+QUIET=""
+TRUECRYPT=1
+ORIGARGVSTRING=$*
+while getopts UhvqutfFpXO:d:i:I:s: optvar ; do
+  [ "$DEBUG" ] && echo "Looking at $optvar, line is $*"
+  case "$optvar" in
+  v|h) usage exit -$optvar ;;
+  q)  QUIET="#QUIET " ;;
+  u)  UNMOUNT=1 ;;
+  t)  TRUECRYPT=0 ;;
+  f)  echo "got -f"
+      FG=1 ;;
+  F)  FG=1 && FGFRESHEN=1 ;;
+  p)  FGKEYAUTH="none" ;;
+  O)  if [ $OPTARG -gt 0  ] ; then
+         TIMEOUT=$OPTARG 
+	  echo "Setting ssh timeout to $TIMEOUT"
+      else 
+	  usage exit "-O argument not recognized: $OPTARG (should be numeric)"        
+      fi ;;
+  i) if [ -e $OPTARG ] ; then
+         FGKEYAUTH=$OPTARG
+     else
+          usage exit "keyfile $OPTARG does not exist!"
+     fi ;;
+  d)  FG=1
+      # Check for -d that is followed by something not starting with - (should be an argument)
+      if [ "$OPTARG" = "PROMPT" ]; then
+	  	FGPROMPTTYPE=1
+	  else 
+	    FGTYPE=$OPTARG
+      fi 
+      echo $FGTYPE | grep -q unix_rc && ULSRC=1
+	  ;;
+  I) if [ $OPTARG -gt 0  ] ; then
+	FG=1
+	FGALTUSER=$OPTARG
+	echo "Using $FGALTUSER when copying files from server"  
+     else
+	usage exit "-I argument not recognized: $OPTARG (should be numeric) "
+     fi ;; 
+  s)  #echo "s case  optvar: $optvar    1 is $1"
+      FG=1
+      #Parse out everything following the -s as a scrubhands argument (getopts won't handle this)
+		SHOPTS=`echo $* | perl -ne '$_=~/\s?\-s (.*)/; print "-t $1";'`
+	  
+	  #Get the OPUSER string from the scrubhands arguments passed in
+	  OPUSER=`echo $SHOPTS | perl -ne '$_=~/(\-I)\s+(\d+)/;print $2'`
+  ;;
+  U)  echo "SKIPPING upgrade of /usr/local/bin"
+	  DOUPGRADE="no"
+  ;;
+  X) ULSRC=1  
+  ;;
+  *)  usage exit "Argument not recognized: $optvar  (double check usage, maybe you forgot an argument to an option!!)"        ;;
+  esac
+done
+shift `expr $OPTIND - 1`
+
+[ "$DEBUG" ] && echo "DEBUG: OPTS are FG: $FG OPUSER: $OPUSER FGTYPE: $FGTYPE FGPROMPTTPYE: $FGPROMPTTYPE SHOPTS: $SHOPTS"
+
+ROOT=`id -u`
+
+if [ $ROOT != 0 ] ; then
+    [ "$QUIET" ] || echo You must be root 1>&2
+    exit 1
+fi
+
+findzipdev
+RESULT=$?
+
+
+if [ $UNMOUNT -gt 0 ] ; then
+    rmdir ${MNTPNTBASE}* 2>/dev/null
+    for mnt in $ALLMNTS ; do
+        if [ -d $mnt ] ; then
+            MORE=""
+            mount | grep -q " on ${mnt} " && MORE="This device is still mounted"
+            [ "$MORE" ] && echo "$MORE"
+            echo ls -arlt $mnt 1>&2
+            ls -arlt $mnt 1>&2
+        else
+            echo $mnt unmounted and removed
+        fi
+    done
+    exit $RESULT
+fi
+
+if [ "$THISMNT" -a -d $THISMNT ] ; then
+    # We export MNTPNT as the most recently mounted one
+    export MNTPNT=$THISMNT
+fi
+
+echo
+df -h ${MNTPNTBASE}* | grep zip ; df -h ${MNTPNTBASE}* | grep Avail
+exit $RESULT
+

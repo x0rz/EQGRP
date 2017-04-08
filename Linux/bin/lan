@@ -1,0 +1,190 @@
+#!/bin/bash
+#
+# Configures the nat box for operation
+#
+# Source function library.
+NC_IP_PORT=2
+NC_ISP_PORT=3
+TCPDUMP_FILE=/tmp/tcpdump_output
+IP_FILE=/tmp/ip_address
+ISP_FILE=/tmp/isp_info
+
+. /etc/rc.d/init.d/functions
+
+flush ()
+{
+	/sbin/iptables -P INPUT ACCEPT
+	/sbin/iptables -P FORWARD ACCEPT
+	/sbin/iptables -P OUTPUT ACCEPT
+	 
+	#
+	# reset the default policies in the nat table.
+	#
+	/sbin/iptables -t nat -P PREROUTING ACCEPT
+	/sbin/iptables -t nat -P POSTROUTING ACCEPT
+	/sbin/iptables -t nat -P OUTPUT ACCEPT
+	 
+	#
+	# flush all the rules in the filter and nat tables.
+	#
+	/sbin/iptables -F
+	/sbin/iptables -t nat -F
+
+	#
+	# erase all chains that's not default in filter and nat table.
+	#
+	/sbin/iptables -X
+	/sbin/iptables -t nat -X
+	 
+	#
+	# zero the packet and byte counters in all chains
+	#
+	/sbin/iptables -Z
+	/sbin/iptables -t nat -Z
+}
+
+usage()
+{ 
+	echo "Use: {phone|lan} {start|stop|restart|reload|status} {lan:ip}" 
+	echo "example:	lan start 192.168.1.1"
+	echo "example:  lan stop"
+	echo "example:	phone start"
+	echo "example:	phone stop"
+	echo "ip address will be stored in $IP_FILE"
+	echo "isp information will be stored in $ISP_FILE"
+	echo "tcpdump output will be stored in $TCPDUMP_FILE"
+}
+
+if [ ! -f /etc/ppp/ip-up.local ]
+then
+	echo 'missing ip-up.local'
+	exit 1
+fi
+
+if [ $# -lt 1 ] 
+then
+	usage
+	exit 1
+fi
+
+#
+#	See how we were called.
+#
+
+case `basename $0` in
+	phone)
+		case "$1" in
+			start)
+				echo -n "
+Starting wvdial (see vi xterm just started): "
+				/usr/X11R6/bin/xterm -e /usr/local/sbin/setupisp &
+
+				until [ "`ifconfig ppp0 2>/dev/null | grep addr`" -o ! "`ps -ef | grep setupisp | grep -v grep`" ]
+				do
+				  sleep 1
+				done
+				echo ""
+				[ "`ifconfig ppp0 2>/dev/null | grep addr`" ] || exit 
+				echo_success
+				echo ""
+				#following no longer needed without separate dial/op boxes
+				#/usr/bin/nc -l -p $NC_ISP_PORT < $ISP_FILE
+
+				IP=`/sbin/ifconfig ppp0 | grep "inet addr:" | cut -f2 -d":" | cut -f1 -d" "`
+				echo ${IP} > ${IP_FILE}
+				#following no longer needed without separate dial/op boxes
+				#/usr/bin/nc -l -p ${NC_IP_PORT} < ${IP_FILE} &
+
+				echo "Your IP is ${IP}"
+				if [ ! "`route -n | grep "^0.0.0.0" | grep ppp0`" ] ; then
+					[ "$BOOTUP" = "color" ] && $SETCOLOR_WARNING
+					echo "You have no default route to ppp0!!"
+					[ "$BOOTUP" = "color" ] && $SETCOLOR_NORMAL
+					echo -n "Do you want to set default to ppp0? [Y] "
+					read ans
+					if [ ! "$ans" -o "$ans" = "y" -o "$ans" = "Y" ] ; then
+						route del default
+						route add default ppp0
+						echo "OK. Route added"
+						netstat -rn
+					else
+						echo "OK. not adding route.  good luck"
+					fi
+				fi
+#				echo 'Starting nat'
+#				/usr/local/sbin/nat_start ppp0
+#				/usr/local/sbin/ids_start start ppp0 ${IP} ${TCPDUMP_FILE}
+				exit 0
+				;;
+  			stop)
+				echo -n "stopping nc"
+				#kill -9 `pidofproc /usr/bin/nc`
+				killproc /usr/bin/nc
+				echo
+#				echo 'Stopping nat'
+#				flush
+#				/usr/local/sbin/ids_start stop ${TCPDUMP_FILE}
+				echo -n 'Stopping pppd: '
+			        killproc pppd
+			        echo
+				;;
+  			reload|restart)
+				${0} stop
+				${0} start
+				;;
+  			status)
+				/usr/local/sbin/ids_start status
+				;;
+  			*)
+				usage
+				exit 1
+		esac
+		;;
+	lan)
+		case "$1" in
+			start)
+				echo "option deprecated..."
+				exit 1
+				if [ $# -ne 2 ] 
+				then
+					echo 'You must at least specify an IP address when starting on a lan.'
+					usage
+					exit 1
+				fi
+				echo ${2} > ${IP_FILE}
+				#/usr/bin/nc -l -p ${NC_IP_PORT} < ${IP_FILE} &
+
+				echo 'configuring lan'
+				/bin/bash /usr/local/sbin/nat_scrubhands ${2} 
+				echo 'Starting nat'
+			        /usr/local/sbin/nat_start eth0
+                                /usr/local/sbin/ids_start start eth0 ${2} ${TCPDUMP_FILE}
+				;;
+			stop)
+				echo "option deprecated..."
+				exit 1
+				echo -n 'stopping nc'
+				killproc /usr/bin/nc
+				echo
+				echo 'Stopping nat'
+				flush
+				/usr/local/sbin/ids_start stop ${TCPDUMP_FILE}
+			        ;;
+			reload|restart)
+				$0 stop
+			        $0 start
+			        ;;
+			status)
+				/usr/local/sbin/ids_start status
+			        ;;
+			*)
+				usage
+			        exit 1
+		esac
+		;;
+	*)
+		usage
+		exit 1
+esac
+
+exit 0

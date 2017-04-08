@@ -1,0 +1,37 @@
+#NOGS
+# Get the operating system level
+oslevel
+
+# List all installed software
+lslpp -L all
+
+# List loaded kernel extensions
+genkex
+
+# List all installed devices verbosely
+lscfg -v
+
+# List attributes about the system
+lsattr -EHl sys0
+
+# List attributes about the processor
+lsattr -EHl proc0
+
+# Reports type of machine
+bootinfo -T
+
+# Displays possible kernel mode (not what its running)
+bootinfo -y
+
+# List of files in the boot directory
+-ls /usr/lib/boot
+
+# What gets run on reboot
+cat /etc/inittab
+
+# List of possible kernel extensions
+-ls /usr/lib/drivers/
+
+# List system configuration information
+prtconf
+

@@ -1,0 +1,22 @@
+#NOGS
+
+# tripwire
+-get -q /etc/twcfg.txt /etc/tw.config /etc/twpol.txt /opt/*/twcfg.txt
+-get -q /opt/*/tw.config /opt/*/twpol.txt /usr/etc/twcfg.txt
+-get -q /usr/etc/tw.config /usr/etc/twpol.txt /usr/local/etc/twcfg.txt
+-get -q /usr/local/etc/tw.config /usr/local/etc/twpol.txt
+-get -q /usr/TSS/bin/twcfg.txt /usr/TSS/policy/twpol.txt
+-ls /opt/*/lib/tw.db* /opt/*/tw.db* /tmp/twz* /usr/lib/tw.db* /var/lib/tripwire*
+-ls /usr/local/*bin/sig* /usr/local/*bin/trip* /usr/local/*bin/twadmin*
+-ls /usr/local/trip* /usr/local/etc/trip* /usr/local/tw* /usr/local/etc/tw*
+-ls /usr/local/*bin/twprint* /usr/local/lib/tw.db* /usr/local/man/*4*/tw*
+-ls /usr/local/man/5*/twfiles* /usr/local/man/*8*/trip* /usr/man/*4*/tw*
+-ls /usr/man/5*/twfiles* /usr/man/*8*/trip* /usr/man/*8*/tw*
+-ls /usr/share/man/*4*/tw* /usr/share/man/5*/twfiles* /usr/share/man/*8*/sig*
+-ls /usr/share/man/*8*/trip* /usr/share/man/*8*/tw* /usr/TSS /usr/TSS/bin
+-ls /usr/TSS/policy
+
+# asset
+grep aset /var/spool/cron/crontabs/*
+-ls -R /usr/aset
+

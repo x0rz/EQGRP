@@ -1,0 +1,116 @@
+#!/usr/bin/env perl
+$version = "1.0.0.1";
+myinit();
+$ua = LWP::UserAgent->new;
+$ua->agent("MyApp/0.1 ");
+# Create a request
+foreach $url (@urls) {
+  $url = "http://$url"
+    unless $url =~ m,^http://, or $url =~ m,^ftp://, ;
+  my $req = HTTP::Request->new(GET => "$url");
+  $req->content_type('application/x-www-form-urlencoded');
+  $req->content('query=libwww-perl&mode=dist');
+
+  # Pass request to the user agent and get a response back
+  my $res = $ua->request($req);
+
+  $retval=0; # 0==success
+  # Check the outcome of the response
+  if ($res->is_success) {
+    unless ($quiet) {
+      if ($showHeaders) {
+      # this prints headers line by line instead of using $res->as_string to do 
+      # the whole thing (uncomment if you want this)
+#NOTE: header_field_names did not exist on NT for me.
+#      foreach $header ($res->header_field_names) {
+#	print "$header: ".$res->header($header)."\n";
+#      }
+      # headers and content
+	print $res->as_string;
+      } else { #content only
+	print $res->content;
+      }
+    }
+  } else {
+    print $res->status_line, "\n";
+    ($retval) = $res->status_line =~ /(\d*)/;
+    $retval = 1 unless $retval;
+  }
+}
+exit $retval;
+
+sub usage {
+  print $usagetext unless !$helpFlag and $versionFlag;
+  print $vertext ;
+  exit;
+} # usage
+
+sub myinit {
+  require HTTP::Request;
+  use File::Basename ;
+  $prog = basename $0 ;
+  use LWP::UserAgent;
+  $vertext = "$prog version $version\n" ;
+  $usagetext = "
+Usage: $prog [options] URL1 [URL2 ...]
+
+$prog browses each URL# given, sending the ascii HTML output
+to stdout. If URLs are given on both the command line and via the
+--file=file argument, they are all surfed.
+
+If URL does not begin with \"(ftp|http)://\", that is prepended.
+
+FTP URLs requie Net/FTP.pm. This FTP URL will show a listing of that
+user's directory on host:
+
+ ftp://username:password\@host/directory
+
+OR this will pull the actual file if it exists, binary or ascii:
+
+ ftp://username:password\@host/directory/remotefile
+
+Be sure to redirect it to a file if it is binary, your stdout will not
+like it much.
+
+
+OPTIONS
+ --file=file     Browse URL(s) contained in file, one per line
+ --quiet         Show only error output--if URL has content, it
+                 is not shown.
+ --help          Show this usage
+ --version       Show $prog version number
+ --headers       Show headers before HTML response
+
+RETURN VALUE
+
+On success (for the final URL if multiple were fetched), $prog
+returns zero (0), and on failure it returns the HTTP error number
+modulo 256 (e.g., for \"500 Can't connect\" it returns 244).
+
+TIMEOUT: If the target host does not answer, there is a three minute
+TCP timeout before $prog exits.
+
+";
+  use Getopt::Long ();
+  Getopt::Long::Configure('no_pass_through');
+  Getopt::Long::GetOptions
+      (
+       'file=s'      => \$urlfile,
+       'quiet'       => \$quiet,
+       'headers'     => \$showHeaders,
+       'help'        => \$helpFlag,
+       'version'     => \$versionFlag,
+      );
+
+  die("$urlfile must exist\n")
+    if ($urlfile and ! -e $urlfile);
+  usage() if $helpFlag or $versionFlag or (!@ARGV and !$urlfile);
+  push(@urls,@ARGV);
+  if (open(IN,$urlfile)) {
+    while(<IN>) {
+      chomp;chomp;
+      push(@urls,$_) if $_;
+    }
+    close(IN);
+  }
+}

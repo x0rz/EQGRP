@@ -1,0 +1,26 @@
+
+# Linux	Mon Jun 28 22:38:56 UTC 2010
+
+:PATH=/bin:/usr/bin:/sbin:/usr/sbin
+
+alias -pacct=-ls -t /var/log/*acct* /var/*acc* /var/log/account/*acct*
+
+# Was: alias =ps=ps -auxwwwww
+alias =ps=ps -HlAwwwef
+alias =psg=ps -HlAwwwef | grep
+alias =nsg=netstat -an | grep 
+alias =arp=arp -an
+alias =ping=ping -c 1
+alias =df=df -k
+alias =di=df -li
+alias =procinfo=cat /proc/cpuinfo
+alias =rpcinfo=rpcinfo -p
+alias =locale=locale
+alias =alwaysdothis=-gs autodothis.linux
+alias =autorpc=-scan rpc 127.0.0.1 one
+alias =surveydothis=-gs surveydothis.linux
+alias =surveydothis2=-gs kernelstuff.linux
+alias =route=route -n
+alias =ipl=-gs iptables-list
+alias =pse=ps -HlAwwwef | egrep
+alias =psgv=ps -HlAwwwef | egrep -v 

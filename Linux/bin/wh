@@ -1,0 +1,208 @@
+#!/usr/bin/env perl
+#
+#
+# 19 JUN 2002: added -cCGgxl arguments and $VER and whll/whlL options
+#
+# now checks entire path and shows each
+# hit with a 'ls -a[l]', in the order found
+#
+#
+use File::Basename;
+#unless (`perl -e "use Time::HiRes qw( sleep ) ;" 2>&1`) {
+  #use Time::HiRes qw( sleep ) ;
+  #$sleepval = 0.1 ; 
+#} else { 
+  $sleepval = 1 ;
+#}
+$progname = basename ${0};
+$VER = "2.3";
+$| = 1 ;
+require "getopts.pl";
+&Getopts( "gGCchxvl:i1Vs" );
+#if (`uname` eq "Linux\n") {
+  $COLOR_SUCCESS="\033[1;32m";
+  $COLOR_FAILURE="\033[1;31m";
+  $COLOR_WARNING="\033[1;33m";
+  $COLOR_NORMAL="\033[0;39m";
+  $COLOR_NOTE="\033[0;34m";
+#}
+$usagetext = "
+Usage:  $progname [-c|C] [-G | -g] [-xiV1] [-l lsargs] <list>
+        $progname -h                      (shows this usage statement)
+
+        $progname is similar to which except every executable occurrence
+        of programs in <list> in the user's current PATH is shown.
+
+        When called as \"whl\", a long listing is shown, with date/time;
+        as \"wh\" or \"whls\" only a short listing is shown;
+        as \"whd\", results in a new shell in first entry's dir;
+        as \"whL\" or \"whll\", links are followed; and
+        as \"whV\" uses the -V option on each executable found.
+
+  -c|C  show a count of how many matches for each file (-C shows count
+        only, not files)
+
+  -g    uses globbing to find all executable programs in PATH starting
+        with the string(s) provided in <list>
+
+  -G    uses globbing to find all executable programs in PATH CONTAINING
+        the string(s) provided in <list>. (overrides -g if also given)
+
+  -s    sort end result through \"lsstamp -s\", if available, with each
+        entry entry preceeded by its rank in the path (ignored if end
+        result has no date--e.g., called as \"wh\" or \"whls\").
+
+  -x    looks for all files, executable or otherwise
+
+  -i    case-insensitive search
+
+  -V    Show the output of \"prog -v\" (version) for each program found
+        ${COLOR_WARNING}NOTE: can have unexpected results if program found does
+        not expect the -v argument! (Especially using -g/G)$COLOR_NORMAL
+
+  -1    Show only the first match found in path (more like \"which\")
+
+  -l    The optional \"-l lsargs\" argument is passed to ls when showing
+        the files found; e.g. to show access time use \"-l u\", to show
+        inode and access time, use \"-l iu\"
+
+$progname version $VER
+";
+chomp($path = $ENV{'PATH'});
+($path) or die "No PATH environment variable";
+
+if ($opt_h) {
+  print "$usagetext";
+  exit;
+}
+if ($opt_v) {
+  print "$progname version $VER\n";
+  exit;
+}
+$execstr = "executable " unless ($opt_x) ;
+$case = "-i" if $opt_i ;
+# if called as "wh"
+if ( $progname eq "wh" or $progname =~ /whls/ ) {
+  # don't do long listing
+  $lsarg = "a";
+} else {
+  # otherwise (whl), do
+  $lsarg = "al";
+}
+$cdalso = ($progname =~ /wh(ls){0,1}d/) ;
+if ( $progname eq "whL" or $progname eq "whll" ) {
+  $lsarg .= "L"
+}
+$opt_1++ if ($progname eq "wh1" or $progname eq "which") ;
+
+$lsarg .= $opt_l if $opt_l;
+if ($sortit = $opt_s) {
+  if ($lsarg =~ /l/) {
+    if (`lsstamp -v 2>/dev/null`) {
+      if (open(TMPOUT,"> /tmp/whl.$ENV{USER}$$")) {
+	select TMPOUT ;
+      } else {
+	warn "Unable to open /tmp/whl.$ENV{USER}$$ for write. Unable to do -s option." ;
+	$sortit = 0 ;
+      }
+    } else {
+      warn "Unable to find lsstamp in your path. Unable to do -s option." ;
+      $sortit = 0 ;
+    }
+  } else {
+    # quietly throw away the -s if no l in $lsarg
+    $sortit = 0 ;
+  }
+}
+@runs = ("-v") if ($opt_V or $progname eq "whV") ;
+
+FILE: foreach $file ( @ARGV ) {
+  # only do any one file once
+  next if ($filesdone{$file}) ;
+  $filesdone{$file}++;
+  $found = 0;
+  %dirsdone = () ;
+  foreach $dir ( split( /:/ , $path ) ) {
+    # only do any one dir once
+    next if ($dirsdone{$dir}) ;
+    $dirsdone{$dir}++;
+    if ($opt_G) {
+      @args = split (/\n/, `cd $dir 2>/dev/null ; ls -1 | grep $case ${file} 2>/dev/null`);
+    }  elsif ($opt_g) {
+      @args = split (/\n/, `cd $dir 2>/dev/null ; ls -1 | grep $case "^${file}" 2>/dev/null`);
+    } else {
+#      @args = ($file);
+      @args = split (/\n/, `cd $dir 2>/dev/null ; ls -1 | grep $case "^${file}\$" 2>/dev/null`);
+    }
+    foreach $a (@args) {
+      if ( ! -d "$dir/$a" && ( -x _ || ($opt_x && -f _ ) ) ) {
+	$found++;
+	my $rank = "" ;
+	if ($sortit) {
+	  $rank = sprintf("%02d: ",$found) ;
+	}
+	print "${rank}${COLOR_NOTE}".`ls -$lsarg $dir/$a`."${COLOR_NORMAL}" unless $opt_C;
+	$firsthit = "$dir/$a" unless $firsthit ;
+	$numfilesfound{$file}++ ;
+	$filesfound{$file} = "$dir/$a" ;
+	foreach $parm (@runs) {
+	  # we're running prog -v for each if $opt_V only,
+	  # else @runs is empty
+	  $pid = fork();
+	  # fork in case kid never dies naturally with this parameter
+	  if (! $pid ) {
+	    print STDOUT "${COLOR_SUCCESS}$dir/$a:\t";
+	    exec ("$dir/$a $parm 2>&1") ;
+	    print STDOUT "${COLOR_NORMAL}";
+	    exit ;
+	  }
+	  sleep $sleepval; $sleeptotal += $sleepval ;
+	  # look for kid not dying, kill after 0.4 seconds, kill -9 after 1.5 secs
+	  while ($tmp = `ps -ef | grep $pid | grep -v grep | grep -v defunct`) {
+	    $count++;
+	    sleep $sleepval; $sleeptotal += $sleepval ;
+	    if ( $sleeptotal > 0.4 ) {
+	      warn "$dir/$a not dead after $sleeptotal secs (pid $pid) - sending SIG TERM\n" ;
+	      kill (TERM,$pid);
+	    }
+	    kill (9,$pid) if ( $sleeptotal > 1.5 );
+	    if ($sleeptotal > 8.0) {
+	      warn "${COLOR_WARNING}
+WARNING: Hmm...Can't seem to kill (SIG TERM or KILL) $pid after $sleeptotal seconds...
+         continuing...\n${COLOR_NORMAL}\n" ;
+	      last ;
+	    }
+	  } # end while
+	} # end foreach $parm (@runs)
+	next FILE if $opt_1 ; # only one hit per file wanted
+      } # end if
+    } # end foreach $a (@args)
+  } # end foreach $dir in $path
+  if ( ! $found ) {
+    print STDERR "no $file in $path\n";
+  } else {
+    if ($sortit) {
+      close(TMPOUT) ;
+      select STDOUT ;
+      print `lsstamp -s /tmp/whl.$ENV{USER}$$` ;
+      unlink("/tmp/whl.$ENV{USER}$$") ;
+    }
+    if ($opt_c or $opt_C) {
+      $plural = "";
+      $plural = "es" if ($numfilesfound{$file} > 1);
+      $fileglob = $file;
+      $fileglob = "${file}*" if ($opt_g);
+      $fileglob = "*${file}*" if ($opt_G);
+      print "$progname: $numfilesfound{$file} ${execstr}match$plural for $fileglob";
+      print ", executable or otherwise" unless $execstr;
+      print "\n";
+    }
+    $cdhere = dirname("$firsthit") if $cdalso ;
+  }
+} # next $file in @ARGV
+
+print "${COLOR_NORMAL}";
+if ($cdhere) {
+  print "\nNew shell with working directory: $cdhere\n\n";
+  exec("cd $cdhere ; bash");
+}

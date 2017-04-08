@@ -1,0 +1,11 @@
+#!/bin/sh
+LINE=${*}
+[ "$PORT" ] || PORT=`cat /current/bin/.tunnelport`
+[ "$PORT" ] || PORT=18787
+if [ "$LINE" ] ; then
+  echo echo "$LINE" '| nc -w1 -u 127.0.0.1' $PORT
+  echo "$LINE" | nc -w1 -u 127.0.0.1 $PORT
+else
+  echo 'echo "s" | nc -w1 -u 127.0.0.1' $PORT
+  echo "s" | nc -w1 -u 127.0.0.1 $PORT
+fi

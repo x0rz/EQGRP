@@ -1,0 +1,104 @@
+#!/bin/bash
+check=0
+X=0
+localsite=North
+
+while  [ "$check" != 1 ]
+do
+
+echo
+echo
+echo "**********************************************************"
+echo      "$localsite Linux Suite Selector"
+echo "************************************************v1.0******"
+echo 
+echo
+echo
+echo
+echo
+echo "(1) What is the Local Suite number between 1 - 80"
+echo
+echo
+echo
+echo
+echo 
+echo
+echo
+echo
+
+
+echo "Please enter the Suite number (number): "
+
+read number
+
+if [ "$number" -gt "0" ] ; then 
+if [ "$number" -lt "81" ] ; then check=1
+fi
+else check=0
+fi
+
+done
+
+echo "$number" > /suite.txt
+
+offset=10
+
+host=$[offset+2*number+number]
+WinOP=$[host+1]
+Analyst=$[host+2]
+
+W=10
+
+Y=130
+Z=$host
+GW=1
+
+
+rm -f /root/Desktop/LaunchVNC
+
+####### Modify the smb.conf file to listen for the correct network #################
+cp -f /etc/samba/smb.conf.orig /etc/samba/smb.conf
+cp -f /etc/samba/smb.conf /etc/samba/smb.conf.orig
+sed -e 's/\(hosts allow = *\).*/\110.'$X'.130.0\/24 127.0.0.1\/32/g' \
+    -e 's/\(interfaces = *\).*/\110.'$X'.130.0\/24 127.0.0.1\/32/g' /etc/samba/smb.conf > /etc/samba/smb.conf.new
+
+mv -f /etc/samba/smb.conf.new /etc/samba/smb.conf
+####### Modify the smb.conf file to listen for the correct network #################
+
+echo x11vnc -rfbport 2100 -display :0 -shared -passwd gimme123 -wireframe -allinput -notruecolor -solid darkblue -viewonly -nosetclipboard -allow 10.$X.130.$Analyst -listen $W.$X.$Y.$host > /root/Desktop/LaunchVNC
+
+chmod 755 /root/Desktop/LaunchVNC
+####################################################################################
+
+
+cat <<EOF | tee /tmp/suiteinfo
+
+
+**********************************************************
+
+          The LinuxOP IP is: $W.$X.$Y.$Z
+
+          The WinOP ..IP is: $W.$X.$Y.$WinOP
+          The Analyst IP is: $W.$X.$Y.$Analyst
+
+**********************************************************
+
+
+EOF
+
+# -------------------------------------------------------------------------------------
+# Set tcp to the IP address of Suite number selected.
+
+ ifconfig eth1 $W.$X.$Y.$Z netmask 255.255.255.0
+ 
+ route add -net $W.0.0.0 netmask 255.0.0.0 gw $W.$X.$Y.$GW
+
+# -------------------------------------------------------------------------------------
+
+[ -x  /root/Desktop/sshon.pl ] && \
+    /usr/bin/perl /root/Desktop/sshon.pl
+# @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+
+
+

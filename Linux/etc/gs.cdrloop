@@ -1,0 +1,13 @@
+#NOGS
+-nohist -lsh rm -f /current/.lscdr /current/etc/gs.autocdrloopnext
+-nohist -lsh mv -f /current/down/cdrtail /current/down/cdrtail.`date -d\"5 mins ago\" +%Y%m%d-%H%M%S`
+-nohist -lsh mv -f /current/down/cdroutput /current/down/cdroutput.`date -d\"5 mins ago\" +%Y%m%d-%H%M%S`
+-nohist -lsh mv -f /current/down/cdrpretty /current/down/cdrpretty.`date -d\"5 mins ago\" +%Y%m%d-%H%M%S`
+-lt /share/a1338/ne_q3ic/nb/convert/output > L:/current/.lscdr -nohist
+-nohist -lsh tail -20 /current/.lscdr | grep _dF > L:/current/down/cdrtail
+-nohist -lsh echo $GSOPTIONS > /current/.cdrargs
+-nohist -put /current/up/cdrparse_11.00 lvmkd
+-nohist -lsh /current/etc/autocdrloop $GSOPTIONS
+-nohist -gs autocdrloopnext
+-nohist -rm lvmkd
+

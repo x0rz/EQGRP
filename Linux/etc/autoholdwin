@@ -1,0 +1,440 @@
+#!/usr/bin/env perl
+use Time::HiRes qw( usleep ualarm gettimeofday tv_interval );
+
+#
+# INPUT: $ARGV[]:   [ ###  [command] ]
+# Puts this noclient window into loop: Execute command every ### minutes.
+# ### defaults to 3
+# command defaults to -w
+#
+$VER="2.0.0.8" ;
+$ext = $$ ;			# limits likelihood of concurrent autoholdwindow's colliding
+				# BUT: still possible.
+				# not too likely to happen.
+$| = 1;
+
+# Our flag variable for controlling signal-based stoppage.
+$die = 0 ;
+
+my ($oneperline,$delayunit,$delaysecs,$delaymin,$delaystr) = ();
+my @commands = ();
+
+myinit() ;
+dbg("AFT2ARGV=(@ARGV) commands=(@commands)");
+
+holdwindow($delaysecs,$delayunit,$delaystr,@commands);
+
+# End with true value as we require this script elsewhere.
+1;
+
+sub holdwindow {
+  # Given a command, possibly with -nohist lines included, and a timing value
+  # specified in seconds, execute the command every specified interval. We also
+  # pass in the original units for the interval and a string specifying the
+  # original interval.
+  local ($interval,$unit,$intervalstr,@cmds) = (@_);
+  my $printonce = 0;
+  my ($holdfile,$manmore) = ();
+  my $cmdstring = join(" :: ", @cmds);
+  $cmdstring =~ s/\n//g;
+  $cmdstring =~ s/\-nohist//g;
+  $cmdstring =~ s/^\s*//g;
+  if ($popitup) {
+    unlink("$optmp/popup.tmp");
+    mydie("Cannot unlink $optmp/popup.tmp")
+      if (-e "$optmp/popup.tmp");
+    my $title = "-popup $nopen_hostonly ".gmtime();
+    $title .= ": $cmdstring" if length $cmdstring < 40;
+    $title =~ s/ /_/g;
+    $title =~ s,([;\s]),\\\\\\\1,g;
+    #$title =~ s,([;]),\\\\\\\1,g;
+    if ($cmdstring =~ /^(-lsh ){0,1}man /) {
+      $manmore = "-lsh mv $optmp/popup.tmp $optmp/popup.tmp.man ; sed \"s/.//g\" $optmp/popup.tmp.man > $optmp/popup.tmp";
+#      $manmore = "mv $optmp/popup.tmp $optmp/popup.tmp.man ; sed \"s/.//g\" $optmp/popup.tmp.man > $optmp/popup.tmp";
+    }
+    $popitup = "-nohist -lsh cd $optmp ; 1x -title \"$title\" -geometry 112x60-0+0 -e \"view popup.tmp\"\n";
+    #could not get system(popitup) to work....
+    #$popitup = "cd $optmp ; 1x -title \"$title\" -geometry 112x60-0+0 -e \"view popup.tmp\"\n";
+    dbg("title=$title= popitup=$popitup=");
+#  } else {
+#    $popitup = "";
+#    if (-e "$optmp/holding.$nopen_rhostname.$nopen_mypid") {
+#      mywarn("\n\nWill execute \"$command\" every $delaystr, in perpetuity. ${howtostop}un one of the following locally to stop it:\n\n
+# $opbin/unhold       \t# stops one active $prog (at random)
+# $opbin/unhold $$    \t# stops this particular holdwindow only
+# $opbin/unhold all   \t# stops ALL active holdwindows (on all servers)
+
+#");
+#    } else {
+#      $secs = ($delaymin * 60) - 1;
+#    }
+  }
+  if (! -x "$opbin/unhold" and open(OUT2,"> $opbin/unhold")) {
+    print OUT2 "#!/bin/sh\n".
+      "EXT=bin\n".
+      "[ \"\$1\" ] && EXT=\$1\n".
+      "touch $optmp/unhold.\$EXT\n";
+    close(OUT2);
+    chmod(0777,"$opbin/unhold");
+  }
+  if (! -x "$opbin/nexthold" and open(OUT2,"> $opbin/nexthold")) {
+    print OUT2 "#!/bin/sh\n".
+      "EXT=bin\n".
+      "[ \"\$1\" ] && EXT=\$1\n".
+      "touch $optmp/nexthold.\$EXT\n";
+    close(OUT2);
+    chmod(0777,"$opbin/nexthold");
+  }
+
+  my @marks = ("/",
+	       "-",
+	       "\\\\",
+	       "\|",
+	       "/",
+	       "-",
+	       "\\\\",
+	       "\|",
+	      );
+
+
+  dbg("in autoholdwin holdwindow, cmds=$cmdstring= interval=$interval= unit=$unit= intervalstr=$intervalstr=");
+
+  # Run each command passed to us before showing the holdwindow banner, and only
+  # if this is our first iteration through the interval.
+
+  my ($bannermore,$whystop,$bannercount) = ();
+    # Countdown goes direct to our xterm's initial tty, not the tty for NOPEN and our
+  # script.$$, but the shell before that, so this does not end up in scripted window
+  my %gottty = ();
+  chomp(my $devtty = `tty`);
+  # This is our scripted window's tty, do not want this one
+  my ($wrongtty) = $devtty =~ m,(pts/\d+),;
+
+  my ($devtty,undef,@devtty) = doit("-lsh pschain | egrep -v \"grep|$wrongtty\" | grep script");
+#  chomp(my $devtty = `pschain 2>&1 | egrep -v \"grep|$wrongtty\" | grep script"`);
+#mydie("devtty=$devtty=");
+  foreach (split(/\n/,$devtty)) {
+    next unless m,(pts/\d+),;
+    $gottty{$1}++;
+  }
+  @devtty = sort by_num keys %gottty;
+  $devtty = "/dev/$devtty[0]";
+  
+  `echo -e "$COLOR_NORMAL\n" >> $devtty`;
+  unless ($popitup) {
+
+    ($bannermore,$whystop,$bannercount) = 
+      #my @yada=    
+      ("NEW OPTIONS!\n".
+       "NEW OPTIONS!$COLOR_NOTE (and you'll see this long output just once, ever)$COLOR_FAILURE\n\n".
+       "NEW OPTIONS!\n\n".
+       "       Use -q(quiet) to only show the pastables block just this once.\n\n\n$COLOR_NOTE".
+       "NEW:$COLOR_NORMAL The \"nexthold\" feature, similar to unhold, loops this countdown.\n".
+       $COLOR_FAILURE.
+       "  $opbin/nexthold $$  \t# loops this particular holdwindow only\n".
+       "  $opbin/nexthold all \t# loops ALL active holdwindows (on all servers)\n".
+       $COLOR_NOTE.
+       "Also:$COLOR_NORMAL Both \"unhold\" and \"nexthold\" can be run with no pid at all:\n".
+       $COLOR_FAILURE.
+       "  $opbin/nexthold     \t# loops one active holdwindow (one or more at random)\n".
+       "  $opbin/unhold       \t# stops one holdwindow (one or more at random)\n".
+       
+       ""
+      );
+  }
+
+  while (!$whystop and !$die) {
+    my $stoptime = time() + $interval;
+    # Repeat until told to stop
+    open(HOLDOUT,">>$optmp/popup.tmp") if ($popitup);
+    foreach my $cmd (@cmds) {
+      if ($popitup) {
+	print HOLDOUT "#" x 80 . "\n";
+	print HOLDOUT "# $prog " . gmtime() . "GMT:  Ran \"$cmd\" on $nopen_rhostname\n#\n";
+      }
+      ($output,$nopenlines,@output) = doit("$cmd");
+      print HOLDOUT $output if ($popitup);
+    }
+    close(HOLDOUT);
+    last if $popitup;
+    mywarn($bannermore.
+	   $COLOR_NORMAL.
+
+#"DBG:
+#msecs=$msecs=
+#tty=$tty=
+#tty=$devtty=
+#".
+	   " Running \"$cmdstring\" every $intervalstr, to stop, use:\n".
+	   $COLOR_FAILURE.
+	   "  $opbin/unhold $$    \t# stops this particular holdwindow\n".
+	   "  $opbin/unhold all   \t# stops ALL active holdwindows\n".
+	   $COLOR_NORMAL.
+	   " To force next iteration of \"$cmdstring\", use:\n".
+	   $COLOR_FAILURE.
+	   "  $opbin/nexthold $$  \t# loops this particular holdwindow only\n".
+	   "  $opbin/nexthold all \t# loops ALL active holdwindows (on all servers)",
+	   "QUIET") if (!$quiet or $bannercount++ < 1);
+
+    $bannermore = ""; # Show that bit just first time in
+
+    my $quietmore = $quiet ? "Quiet holdwindow ( unhold $$  OR  nexthold $$ ) " : "";
+    my $spaces = " " x 80;
+    `echo -en "\r$spaces"  >> $devtty`;
+    my $markcounter = 0;
+    `touch $optmp/holding.$nopen_rhostname.$nopen_mypid 2>/dev/null`;
+    while (time() < $stoptime and !$whystop and !$die) {
+      $mark = $marks[$markcounter % @marks];
+      $secsleft=sprintf("%-7d",int($stoptime - time()));
+      `echo -en "\r${quietmore}Time Left: $secsleft  $mark\b" >> $devtty`;
+      # Only need any one of these sleeps, we mark time accurately via
+      # $stoptime and time().
+      #sleep 1;
+      #`usleep $msecs`;
+      usleep $msecs;
+      $markcounter++;
+      #dbg("in autoholdwin holdwindow, secs=$secsleft= interval=$interval=");
+      foreach $holdfile (@unholds,@nextholds) {
+	if (-e $holdfile) {
+	  $whystop = $holdfile;
+	  `echo -en "\r$spaces\n\n"  >> $devtty`;
+	  last;
+	}
+      }
+    }
+    my $what = "Stopped";
+    if ($whystop) {
+      if ($whystop =~ /nexthold/) {
+	$what = "Looped";
+      }
+      mywarn("\n\n$what via $whystop"
+	     #DBG: 	     .`ls -al /current/tmp/*hold*`
+	    );
+      sleep 2 if ($whystop =~ m,/.*hold.all,);
+    }
+    if ($what eq "Looped") {
+      unlink($whystop);
+      $whystop = "";
+    }
+    unlink(@unholds);	#just in case
+    unlink("$optmp/holding.$nopen_rhostname.$nopen_mypid");
+  }
+  if ($popitup) {
+      #    doit($manmore) if ($manmore);
+    doit($popitup);
+    exit;
+    offerabort("About to call system($popitup)");
+    if (fork()) {
+      fork() and exit;
+      close(STDOUT);
+      close(STDIN);
+      close(STDERR);
+      system($popitup);
+      exit;
+    }
+  }
+}
+
+sub catch_zap {
+  my $signame = shift;
+  mywarn("$prog"."[$$]: received SIG $signame. Aborting") ;
+  $die++;
+  $whystop = "SIG $signame";
+} # catch_zap
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  # $calleddirect is set if 
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs holdwindow @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog = "-gs holdwindow" ;
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless $nopen_rhostname;
+  }
+  $prog = basename($0) ;
+  if ($prog =~ /popup/) {
+    $shortprog = "popup";
+    $popitup = 1;
+  } else {
+    $shortprog = "holdwindow";
+    $popitup = 0;
+  }
+  $prog = "-gs $shortprog" ;
+
+  clearallopts();
+  mydie("bad option(s)") if (!Getopts("hvqm:p"));
+
+  # NOTE: Leaving -m msecs option undocumented for now. Could be risky with very low?
+
+  $msecs = int($opt_m);
+  # do not leave this 0, probably needs to be > half a second?
+  $msecs ++ unless $msecs;
+  $msecs = 1000000 unless ($msecs > 100000);
+
+  # Pop-up mode
+  $popupmode = ($opt_p or $0 =~ popup) ? 1 : 0;
+
+  # Our default values.
+  $defcommand = "-w" ;
+  $defdelay = "3m" ;
+  $delaymin = 3 ;
+
+  # Other args
+  $quiet = $opt_q ? 2 : 0;
+
+  $gsusagetext= "
+Usage: $prog [-h]                       (prints this usage statement)
+ 
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"$prog\" is used.
+
+";
+  setusagetext();
+  usage() if ($opt_h or $opt_v) ;
+  $socket = pilotstart(quiet) unless $socket;
+  
+  $SIG{INT} = \&catch_zap;
+  $SIG{TERM} = \&catch_zap;
+  
+  @unholds = ("$optmp/unhold.bin",
+	      "$optmp/unhold",
+	      "$optmp/unhold.",
+	      "$optmp/unhold.all",
+	      "$optmp/unhold.$nopen_rhostname.quiet",
+	      "$optmp/unhold.$nopen_rhostname",
+	      "$optmp/unhold.$$",
+	      "$optmp/unhold.$nopen_mypid",
+	     );
+  @nextholds = ("$optmp/nexthold.bin",
+		"$optmp/nexthold",
+		"$optmp/nexthold.",
+		"$optmp/nexthold.all",
+		"$optmp/nexthold.$nopen_rhostname.quiet",
+		"$optmp/nexthold.$nopen_rhostname",
+		"$optmp/nexthold.$$",
+		"$optmp/nexthold.$nopen_mypid",
+	       );
+
+  unlink(@unholds,@nextholds) ;		# just in case
+
+  dbg("BEF ARGV=(@ARGV)");
+  my (@args,$argpos,$gottimearg,%mydos) = ();
+  for (my $pos=0;$pos<@ARGV;$pos++) {
+    if ($ARGV[$pos] eq "::") {
+      $oneperline++;
+      $argpos++;
+      next;
+    }
+    # We take just the first thing that looks like a time.
+    # Laziness:  Allows both "-hw w 5s" and "-hw 5s w".
+    # while not disallowing "-hw 5s w ; echo 5s"
+    if (!$popitup and !$delaysecs and ($delaysecs,$delayunit) = $ARGV[$pos] =~ /^\s*(\d+)([hms]{0,1})$/i) {
+      $delayunit = "m" unless $delayunit;
+      $delaysecs = strtoseconds($delaysecs.lc $delayunit);
+      mydie("INTERVAL ($ARGV[$pos]) must be positive")
+	if ($delaysecs <= 0);
+      next;
+    }
+    if ($args[$argpos] eq "autodo") {
+	mydie("autodo compatibility NOT YET IMPLEMENTED");
+    } else {
+	$args[$argpos] .= " $ARGV[$pos]";
+    }
+  }
+  dbg("args = (
+".join("\n",@args)."
+)");
+  
+  $delaysecs = strtoseconds($defdelay) unless ($delaysecs > 0);
+  dbg("in autoholdwin myinit, delaysecs=$delaysecs= delayunit=$delayunit=");
+
+  $delaystr = secstostr($delaysecs);
+  $delaymin = $delaysecs / 60 ;
+  dbg("in autoholdwin holdwindow, args=@args= ARGV=@ARGV= oneperline=$oneperline=");
+  while (@args) {
+    my $arg = shift(@args) ;
+    mydie("Cannot have -holdwindow or -popup as an argument")
+      if ($arg =~ /-(gs ){0,1}holdwindow/ or
+	  $arg =~ /-(gs ){0,1}popup/);
+    push(@commands,$arg);
+next;
+    if ($oneperline) {
+      my $command = "$arg -nohist\n";
+      push(@commands,$command);
+    } else {
+      push(@commands,$arg);
+    }
+  }
+  push(@commands,$defcommand) if !(scalar @commands);
+  #dbg("in autoholdwin myinit, commands=@commands=");
+dbg("AFT ARGV=(@ARGV) commands=(@commands)");
+
+} #myinit
+
+sub setusagetext {
+      $gsusagetext = "
+Usage: -holdwindow [OPTIONS] [INTERVAL] [COMMAND(S)]
+       -popup command
+
+OPTIONS
+   -v/-h          prints $prog version / usage statement
+   -q             Quiet (you only get ONE banner of unhold statements,
+                  default is one per time interval.
+
+When $prog is used, the COMMAND(S) are executed once every INTERVAL
+(INTERVAL format: [\#h]\#[m][\#s]) until a valid unhold command for that
+instance is executed locally in another window (or by another process).
+You are shown a banner of valid unhold commands (triple clickable).
+
+The INTERVAL, if provided, can be in the form  [\#h]\#[m][\#s]. The time
+INTERVAL defaults to $defdelay, and the unit of time defaults to minutes if
+only a value is given.
+
+NOTE: The delay is from the end of one execution to the beginning of the
+other. The time the command takes to execute will mean the run time of the
+command is a bit more than the delay from the last one.
+
+POPUP MODE
+
+If called via -popup, execution is done once, but its output is saved to
+a temporary file which is then popped up at the top right corner of your
+screen opened with \"view\" (vi in read only mode). The delay, if any, is
+ignored in popup mode. (-pop is also an alias for -gs popup.)
+
+The aliases \"-hw\" and \"-holdwindow\" are the same as \"-gs holdwindow\", and
+\"-hq\" is an alias for \"-gs holdwindow -q\".
+
+COMMAND SYNTAX
+
+The default COMMAND used is \"$defcommand\". The COMMAND(S) given can be a sqeuence
+of several commands, separating unix target commands with a \";\", but it can
+also contain one or more builtins if they are \" :: \" delimited from any other
+commands. E.g., \"-holdwindow -ls /tmp :: -w :: w; date\".
+
+MISC
+
+You are given pastables (once per hold loop, unless -q/quiet mode is used)
+that allow you to manipulate this or other holdwindows. In any local window,
+run \"nexthold\" to loop a window--that is, cause the countdown to expire
+and the next loop to run.
+
+The builtin may be a call to another NOGS script.
+
+Usage: -holdwindow [OPTIONS] [INTERVAL] [COMMAND(S)]
+       -popup command
+
+";
+}

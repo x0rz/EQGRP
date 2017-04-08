@@ -1,0 +1,14 @@
+-rwxr-xr-x  1 root root   40013 Oct 14 13:39 Dewdrop_3.1.0.1_i386-linux
+-rwxr-xr-x  1 root root   37504 Oct 14 13:41 Dewdrop_3.1.0.2_sparc-solaris8-10
+-rwxr-xr-x  1 root root   37504 Oct 15 15:02 Dewdrop_3.1.0.3_sparc-solaris-gcc
+-rwxr-xr-x  1 root root   79758 Oct 15 15:03 Dewdrop_3.1.0.4_i386-freebsd-gcc
+
+-rwxr-xr-x  1 root root 66369 Oct 14 13:41 ../bin/tipoff-3.1.0.x
+
+2009-10-15 15:09:05 EDT  These Dewdrops, used with this tipoff (not released yet as of 15 OCT)
+can handle the new tipoff option --execute, which uses the reverse callback to upload the
+binary without any shell or uu*code. Use the ourtn/-irtun option -w BIN to use this feature,
+using -J to piont to ../bin/tipoff-3.1.0.x.
+
+
+

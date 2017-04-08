@@ -1,0 +1,5 @@
+PITCHIMPAIR___zanburu.grupocorreo.es___194.30.32.113___20040614-190127() {
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.7 
+    export TARG_AYT="277a7150 faa87f10 d64f01cc"
+    [ "$UTC_OFFSET" ] || export UTC_OFFSET=120
+}

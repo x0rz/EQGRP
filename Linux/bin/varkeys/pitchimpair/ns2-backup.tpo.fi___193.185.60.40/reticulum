@@ -1,0 +1,20 @@
+PITCHIMPAIR___ns2-backup.tpo.fi___193.185.60.40___20021010-101507() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.6 
+    #
+    set host ns2-backup.tpo.fi
+    set ip 193.185.60.40
+    set hostType "Solaris26"
+    set len 476
+    set cv0 f8f0dad5
+    set cv1 01434225
+    set cv2 a8ec3c12
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

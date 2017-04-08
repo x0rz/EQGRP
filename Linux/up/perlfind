@@ -1,0 +1,162 @@
+#!/usr/bin/perl
+    eval 'exec /usr/bin/perl -S $0 ${1+"$@"}'
+        if 0; #$running_under_some_shell
+
+use strict;
+use File::Find ();
+#use Getopt::Long;
+
+# Set the variable $File::Find::dont_use_nlink if you're using AFS,
+# since AFS cheats.
+
+# for the convenience of &wanted calls, including -eval statements:
+use vars qw/*name *dir *prune/;
+*name   = *File::Find::name;
+*dir    = *File::Find::dir;
+*prune  = *File::Find::prune;
+
+my $findmounts = $ENV{'F'};
+#my $after_mdate = $ENV{'M'};
+#my $after_cdate = $ENV{'C'};
+#my $after_adate = $ENV{'A'};
+
+my $after_date = $ENV{'M'} || $ENV{'C'} || $ENV{'A'} || 0;
+
+my ($after_year, $after_mon, $after_day);
+if ($after_date) {
+    ($after_year, $after_mon, $after_day) = $after_date =~ m/^(\d{4})(\d\d)(\d\d)/;
+}
+
+my @fdirs = split(/ /, $findmounts);
+
+printf "  inode mode       link owner    group        size   mtime               atime               ctime               filename\n";
+
+sub wanted;
+sub ls ();
+
+my @rwx = qw(--- --x -w- -wx r-- r-x rw- rwx);
+my @moname = qw(Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec);
+
+my (%uid, %user);
+while (my ($name, $pw, $uid) = getpwent) {
+    $user{$uid} = $name unless exists $user{$uid};
+}
+
+my (%gid, %group);
+while (my ($name, $pw, $gid) = getgrent) {
+    $group{$gid} = $name unless exists $group{$gid};
+}
+
+
+# Traverse desired filesystems
+
+
+File::Find::find({wanted => \&wanted},@fdirs);
+exit;
+
+
+sub wanted {
+    my ($dev,$ino,$mode,$nlink,$uid,$gid);
+
+    (($dev,$ino,$mode,$nlink,$uid,$gid) = lstat($_)) &&
+    !($File::Find::prune |= ($dev != $File::Find::topdev))
+    && ls();
+}
+
+
+sub sizemm {
+    my $rdev = shift;
+    sprintf("%3d, %3d", ($rdev >> 8) & 0xff, $rdev & 0xff);
+}
+
+sub ls () {
+    my ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,
+        $atime,$mtime,$ctime,$blksize,$blocks) = lstat(_);
+    my $pname = $name;
+
+    $blocks
+        or $blocks = int(($size + 1023) / 1024);
+
+    my $perms = $rwx[$mode & 7];
+    $mode >>= 3;
+    $perms = $rwx[$mode & 7] . $perms;
+    $mode >>= 3;
+    $perms = $rwx[$mode & 7] . $perms;
+    substr($perms, 2, 1) =~ tr/-x/Ss/ if -u _;
+    substr($perms, 5, 1) =~ tr/-x/Ss/ if -g _;
+    substr($perms, 8, 1) =~ tr/-x/Tt/ if -k _;
+    if    (-f _) { $perms = '-' . $perms; }
+    elsif (-d _) { $perms = 'd' . $perms; }
+    elsif (-l _) { $perms = 'l' . $perms; $pname .= ' -> ' . readlink($_); }
+    elsif (-c _) { $perms = 'c' . $perms; $size = sizemm($rdev); }
+    elsif (-b _) { $perms = 'b' . $perms; $size = sizemm($rdev); }
+    elsif (-p _) { $perms = 'p' . $perms; }
+    elsif (-S _) { $perms = 's' . $perms; }
+    else         { $perms = '?' . $perms; }
+
+    my $user = $user{$uid} || $uid;
+    my $group = $group{$gid} || $gid;
+
+    #mtime
+    my ($msec,$mmin,$mhour,$mmday,$mmon,$mtimeyear) = localtime($mtime);
+        $mtimeyear += 1900;
+        my $mmtime = sprintf("%02d:%02d:%02d %d", $mhour, $mmin, $msec, $mtimeyear);
+        
+    #atime
+    my ($asec,$amin,$ahour,$amday,$amon,$atimeyear) = localtime($atime);
+        $atimeyear += 1900;
+        my $aatime = sprintf("%02d:%02d:%02d %d", $ahour, $amin, $asec, $atimeyear);
+
+    #ctime
+    my ($csec,$cmin,$chour,$cmday,$cmon,$ctimeyear) = localtime($ctime);
+        $ctimeyear += 1900;
+        my $cctime = sprintf("%02d:%02d:%02d %d", $chour, $cmin, $csec, $ctimeyear);
+    
+    if ($after_year) {
+        if ($ENV{'M'}) {
+            next if $mtimeyear < $after_year;
+            if ($after_year == $mtimeyear) {
+                next if ($mmon+1) < $after_mon;
+    	    if ( ($mmon+1) == $after_mon) {
+                    next if $mmday < $after_day;
+                }
+            }
+        } elsif ($ENV{'C'}) {
+            next if $ctimeyear < $after_year;
+            if ($after_year == $ctimeyear) {
+                next if ($cmon+1) < $after_mon;
+    	    if ( ($cmon+1) == $after_mon) {
+                    next if $cmday < $after_day;
+                }
+            }
+        } elsif ($ENV{'A'}) {
+            next if $atimeyear < $after_year;
+            if ($after_year == $atimeyear) {
+                next if ($amon+1) < $after_mon;
+    	    if ( ($amon+1) == $after_mon) {
+                    next if $amday < $after_day;
+                }
+            }
+        }
+    }
+
+    printf "%7lu %-10s %4d %-8s %-8s %10s | %s %2d %5s | %s %2d %5s | %s %2d %5s | %s\n",
+            $ino,
+                      $perms,
+                            $nlink,
+                                $user,
+                                     $group,
+                                          $size,
+                                              $moname[$mmon],
+                                                 $mmday,
+                                                     $mmtime,
+							$moname[$amon],
+							   $amday,
+							     $aatime,
+								$moname[$cmon],
+								  $cmday,
+									$cctime,
+                                                         $pname;
+    1;
+}
+

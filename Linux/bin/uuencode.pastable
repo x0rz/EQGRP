@@ -1,0 +1,87 @@
+#!/bin/sh
+[ "$1" = "-v" ] && echo "$0 version 1.1.0.1" && exit
+
+STARTLINE=`grep -n DIRECTIONS $0 | tail -1 | cut -f 1 -d ":"`
+PROG=`basename $0`
+USAGETEXT="
+Usage (locally):
+   $PROG [noecho] file1 [file2 ...]
+
+ file1 [file2 ...] 
+   files on remote system to uuencode. These should be the full path
+   name or relative to the remote system's current directory. The
+   uuencoded output will decode to a file in ./ with every '/'
+   replaced with a '_'. E.g., '/bin/sh' will be locally decoded as 
+   './_bin_sh'.
+
+ noecho 
+   with this option, uuencoded output is sent to files on remote
+   system. Otherwise, the default is to echo the uuencoded output,
+   which can then be retrieved from scripted output or terminal logging.
+
+ $PROG is run locally to give a (very long) command line to
+ paste to a remote system's perl interpreter. This command uses perl to
+ uuencode files on the remote system. After uudecoding on this end, 
+ files are a few bytes longer. Commands are provided to run locally
+ (split, mv, etc.) to uudecode and recover the correct length file.
+"
+if [ "$1" = "noecho" ] ; then
+  shift
+  tail --lines=+$STARTLINE $0 | sed "s#FILES#${*}#g" | sed "s#echo=\"y\"#echo=\"n\"#g" ;
+  exit
+fi
+if [ "${*}" = "" ] || [ "$1" = "-h" ] || [ "$1" = "--help" ] ; then
+  echo "$USAGETEXT"
+  exit
+fi
+tail --lines=+$STARTLINE $0 | sed "s#FILES#${*}#g";
+exit
+### DIRECTIONS (uuENcode.pastable):
+###
+### You might want to do this if you have which available:
+          which perl
+### Paste following perl code starting with "perl -e" line and ending with
+### the line containing terminating single quote. 
+###
+### START HIGHLIGHTING WITH FOLLOWING LINE
+perl -e '@files = split (/ +/,"FILES");
+$echo="y";
+while ($file = shift @files) {
+ if (! -e $file ) { warn "no such file $file...\n"; next; }
+ $size = -s _ ;
+ $newname = $file; $newname =~ s/\//_/g;
+ if ( $echo eq "y") {
+  $echo=" to stdout"; select STDOUT;
+ } elsif (! open (OUT,"> ./$newname.uu") ) {
+  warn "cannot creat ./$newname.uu...\n";
+  next;
+ } else {
+  select OUT;
+ }
+ if (! open (IN, "< $file") ) {
+  close (OUT); unlink ("./$newname.uu") unless $echo;
+  warn "cannot open $file for read\n";
+  next;
+ }
+ print "begin 700 ./$newname\n";
+ while ($count = read(IN,$buf,900) ) {
+  $buf .= "\0" while (length ($buf) % 3); print pack("u",$buf);
+ }
+ print "end\n";
+ close (OUT); select STDOUT;
+ print "\nwrote $newname.uu$echo:\n\nAt other end:\n
+ uudecode $newname.uu\n mv $newname $newname.long
+ split -b $size $newname.long\n mv xaa $newname\n rm -f xaa xab\n\n
+";
+ if ($echo eq "n") {
+   print "
+ ls -al @files ./$newname*\n";
+   print `ls -al @files ./$newname*`;
+ }
+} # end while @ARGV
+'
+
+### STOP HIGHLIGHTING, BUT INCLUDE ABOVE LINE WITH SINGLE QUOTE
+
+### When pasted (unless noecho option used) you will see the uuencoded
+### output scroll by. Be sure you have a way to retrieve it. 

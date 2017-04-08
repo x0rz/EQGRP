@@ -1,0 +1,465 @@
+#!/usr/bin/env perl
+##
+$VER="1.5.1.6" ;
+
+# TODO: Add "where are we" by default highlight our stuff
+#       Add -V option to filter out, comma delimited.
+# nopen seems happier with stderr in lsh runs
+#select STDERR ;
+$| = 1 ;
+
+# %nasties is global, now defined in autoutils....
+myinit() ;
+%warnedalready = () ;
+
+my %mon = ("jan" => 0, "feb" => 1, "mar" => 2, "apr" => 3, "may" => 4, "jun" => 5, "jul" => 6, "aug" => 7, "sep" => 8, "oct" => 9, "nov" => 10, "dec" => 11);
+
+my $psargs = "";
+# Figure out what ps to use for this guy.
+unless (-e "$optmp/pscommand.$nopen_rhostname") {
+  # Figure out what rcfile we're using.
+  my $rcfile = "";
+  $rcfile = "$opetc/norc.solaris" if $solaristarget;
+  $rcfile = "$opetc/norc.linux" if $linuxtarget;
+  $rcfile = "$opetc/norc.hpux" if $hpuxtarget;
+  $rcfile = "$opetc/norc.aix" if $aixtarget;
+  $rcfile = "$opetc/norc.bsd" if $freebsdtarget;
+  $rcfile = "$opetc/norc.junos" if $junostarget;
+  $rcfile = "$opetc/norc.darwin" if $darwintarget;
+  $rcfile = "$opetc/norc.mirapoint" if $mirapointtarget;
+  dbg("in autopscheck, rcfile =$rcfile=");
+
+  mymydie("Odd....Unable to discover which norc file to use for this platform: $nopen_serverinfo")
+	unless (-s $rcfile);
+  my @lines = grep ! /^\s*\#/ , readfile("ARRAY",$rcfile);
+  @lines = grep /^\s*alias\s+=ps=/ , @lines;
+  ($pscommand,$psargs) = $lines[0] =~  /^\s*alias\s=ps=(\S+)\s(\S+)/;
+  mymydie("Odd....Unable to discover =ps command in $rcfile for this platform: $nopen_serverinfo")
+	unless ($pscommand);
+  if (open(OUT,"> $optmp/pscommand.$nopen_rhostname")) {
+    print OUT "$pscommand\n";
+    print OUT "$psargs\n";
+  }
+  close(OUT);
+} else {
+  if (open(IN,"$optmp/pscommand.$nopen_rhostname")) {
+    chomp($pscommand = <IN>);
+    chomp($psargs = <IN>);
+  }
+  else {
+    # Set sensible defaults for this command, to ensure that we get at least
+    # some type of output.
+    $pscommand = "ps";
+    $psargs = "-ef";
+  }
+  close(IN);
+}
+
+# save these in case we want to run both and compare
+my ($origpscommand,$origpsargs) = ($pscommand,$psargs);
+my $nohackcommand=0;
+if ((@hackdirs or @hackfiles) and !(-e "$optmp/hackpscommand.$nopen_rhostname")) {
+  #TODO: First try -cksum to find good one if we do use it instead of
+  #      running an unknown with "-h".
+  if (-e "$optargetcommands/ps.$nopen_rhostname") {
+    # This one, if there, was done with the maybe hacked ps so we rename 
+    # it that way.
+    rename("$optargetcommands/ps.$nopen_rhostname","$optargetcommands/ps.hacked.$nopen_rhostname");
+  }
+  my $hackpscommand = "";
+  my $trieddirs=0;
+  my %donealready = ();
+  while (!$hackpscommand) {
+    foreach $hackfile (@hackfiles) {
+      $hackfile =~ s/^\s*//;
+      $hackfile =~ s/\s*$//;
+      if (($hackfile =~ /\s*/) or ($hackfile =~ /^Remote/)) {
+        dbg("in autopscheck (1), something broke! hackfiles is the content of -help!");
+	$nohackcommand=1;
+	last;
+      }
+      next if $donealready{$hackfile}++;
+      preservefile("$optmp/.psstrings");
+      # Hmm....we redirect this to L: file, but somehow $output still has output in it
+      ($output,$nopenlines,@output) = doit("-strings $hackfile > L:$optmp/.psstrings");
+      preservefile("$optmp/.psstrings");
+      #    if ($output =~ /usage.*\s*ps\s/) {
+      # Weird, but even though we redirected to L:, the $output is still set
+      # by doit() to the output of the command, which the user does not see.
+      if ($output =~ /pid[^\n]*ppid/) {
+	($output,$nopenlines,@output) = doit("file $hackfile");
+	$hackpscommand = $hackfile if ($output =~ /executable/i);
+      }
+    }
+    unless ($hackpscommand) {
+      $trieddirs++;
+      @hackfiles = ();
+      foreach $hackdir (@hackdirs) {
+        if ($hackdir =~ /^Remote/) {
+          dbg("in autopscheck (2), something broke! hackdir is the content of -help!");
+	  $nohackcommand=1;
+	  last;
+        }
+	($output,$nopenlines,@output) = doit("-ls -1 $hackdir");
+	foreach $hackfile (grep { !/\/\.{1,2}$/ and !/We will be reading from/ } @output) {
+	  $hackfile =~ s/^\s*//;
+	  $hackfile =~ s/\s*$//;
+          if (($hackfile =~ /\s*/) or ($hackfile =~ /^Remote/)) {
+           dbg("in autopscheck (3), something broke! hackfile is the content of -help!");
+	   $nohackcommand=1;
+	   last;
+          }
+	  next if $donealready{$hackfile};
+	  push(@hackfiles,$hackfile);
+	}
+      }
+      last unless @hackfiles;
+    }
+    dbg("in autopscheck !hackpscommand, nohackcommand = =$nohackcommand=");
+    last unless !$nohackcommand;
+  }
+  if ($hackpscommand and open(OUT,"> $optmp/hackpscommand.$nopen_rhostname")) {
+    print OUT "$hackpscommand\n";
+    print OUT "$psargs\n";
+  }
+  close(OUT);
+}
+
+if (-e "$optmp/hackpscommand.$nopen_rhostname") {
+  if (open(IN,"$optmp/hackpscommand.$nopen_rhostname")) {
+    chomp($pscommand = <IN>);
+    chomp($psargs = <IN>);
+  }
+  close(IN);
+}
+
+preservefile("$optargetcommands/ps.$nopen_rhostname");
+dbg("in autopscheck, pscommand = =$pscommand=, psargs =$psargs=");
+
+
+if ($comparehacked and $pscommand ne $origpscommand) {
+  progprint("Saving \"$origpscommand $psargs\" to $optargetcommands/ps.hacked.$nopen_rhostname");
+  preservefile("$optargetcommands/ps.hacked.$nopen_rhostname");
+  doit("$origpscommand $psargs >T:$optargetcommands/ps.hacked.$nopen_rhostname");
+  progprint("Saving \"$pscommand $psargs\" to $optargetcommands/ps.$nopen_rhostname");
+  doit("$pscommand $psargs >T:$optargetcommands/ps.$nopen_rhostname");
+  if (-x "/usr/bin/kompare") {
+    doit("-lsh /usr/bin/kompare $optargetcommands/ps.$nopen_rhostname $optargetcommands/ps.hacked.$nopen_rhostname 2>/dev/null >/dev/null &");
+  } else {
+    doit("-lsh xterm -hold -e \"diff $optargetcommands/ps.$nopen_rhostname $optargetcommands/ps.hacked.$nopen_rhostname\"");
+  }
+} else {
+  ($output,$nopenlines,@output) = doit("$pscommand $psargs >T:$optargetcommands/ps.$nopen_rhostname");
+}
+
+
+#Global $printlater appended to by printlater()
+$printlater = "";
+
+unless (open(IN,"$optargetcommands/ps.$nopen_rhostname")) {
+    mymydie("could not open $optargetcommands/ps.$nopen_rhostname");
+}
+my %fieldnum=();
+$line="";
+while ($line = <IN>) {
+  next if $line =~ /^We will be reading from \d+/;
+  if ($line =~ /PID.*TT.*TIME/) {
+    $header .= uc $line ;
+    my $tmpheader = $header ;
+    $tmpheader =~ s/^\s+// ;
+    my (@fieldnames) = split (/\s+/,$tmpheader) ;
+#dbg("fn=@fieldnames");
+    for $i (0..$#fieldnames) {
+      $fieldnum{$fieldnames[$i]} = $i ;
+#dbg("Setting  \$fieldnum \{$fieldnames[$i]} = $i ");
+    }
+#    printlater($line) if $nosort ;
+#    printlater($line) ;
+    foreach (keys %fieldnum) {
+    }
+    next ;
+  }
+  $line =~ s/(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+/$1/i ;
+  if ($nosort) {
+    printlater($line) ;
+  } else {
+    #    my (@pids) = $line =~ /(\d+)\s+(\d+)\s+\d+\s+(\S+)/ ;
+    my $tmpline = $line ;
+    $tmpline =~ s/^\s+// ;
+    my (@fields) = split(/\s+/,$tmpline) ;
+    if ($timesort) {
+      $time = $fields[$fieldnum{STIME}];
+      $time = $fields[$fieldnum{START}] unless ($fieldnum{STIME} > 0) ;
+      if ($time =~ /[a-z]/i) {	# gotmonthhere
+	$outputalpha{$time} .= $line ;
+      }
+      elsif ($time =~ /\d{4}/) { # got year
+	$outputyear{$time} .= $line ;
+      }
+      else {
+	$output{$time} .= $line ;
+      }
+      #progprint("DBG: sorting on $time (choices are STIME=$fieldnum{STIME} and START=$fieldnum{START})") if $debug ;
+    } else {
+      unless (defined $fieldnum{$fieldtosort}) {
+	mywarn("Unable to sort by $fieldtosort--sorting by PID instead") 
+	  unless ($fieldtosort eq "PID");
+	$fieldtosort = "PID" ;
+      }
+#      dbg("Sorting by \$fieldnum"."{$fieldtosort}=$fieldnum{$fieldtosort}=$fields[$fieldnum{$fieldtosort}]");
+      progprint("DBG: Sorting by \$fieldnum"."{$fieldtosort}=$fieldnum{$fieldtosort}=$fields[$fieldnum{$fieldtosort}]") if $debug ;
+      for ($i=0;$i<@fields;$i++) {
+      }
+      $output{$fields[$fieldnum{$fieldtosort}]} .= $line ;
+      $numonly = 0 unless ($fields[$fieldnum{$fieldtosort}] =~ /^\d+\.{0,1}\d*$/ );
+    }
+  }
+  chomp;
+  %warnedalready = () ;
+  foreach $nasty (keys %nasties) {
+    if ($line =~ /$nasty/) {
+      my $warning = "\'$nasty\' ($nasties{$nasty})";
+      mymywarn($warning,"$line");
+      sleep 1;
+    }				#if
+  }				#foreach $nasty
+}				#foreach @output
+close(IN) ;
+
+unless ($nosort) {
+  printlater($header) ;
+  if ($timesort) {
+    foreach (sort by_num keys %outputyear) {
+      printlater($outputyear{$_});
+    }
+    foreach (sort by_month keys %outputalpha) {
+      printlater($outputalpha{$_}) ;
+    }
+    foreach (sort keys %output) {
+      printlater($output{$_}) ;
+    }
+  } elsif ($numonly) {
+    foreach (sort by_num keys %output) {
+      printlater($output{$_}) ;
+    }
+  } else {
+    foreach (sort keys %output) {
+      printlater($output{$_}) ;
+    }
+  }
+  printlater("\n$header") ; # second one at bottom is nice
+}
+my $tmpps = $pscommand;
+
+if ($pscommand =~ /\//) {
+  $tmpps = "$COLOR_FAILURE$tmpps$COLOR_NORMAL";
+}
+
+my ($more,$more2) = ();
+if ($fieldtosort and !$nosort) {
+  $more = " (sorted by $fieldtosort)";
+}
+
+$printlater2=$printlater;
+$printlater="";
+if ($badlines) {
+  $printsh_out++ if open(SH_OUT,">> $opdir/.moreSHerrors" ) ;
+  print SH_OUT "BEGIN pscheck $nopen_rhostname: \n" if $printsh_out ;
+  if ($badcontent) {
+    print("$COLOR_NOTE\n\aThe following lines from above match one of the following:\n");
+    my $count = 1 ;
+    foreach (keys %nasties) {
+      print("\t$_") ;
+      print("\n") unless ($count++ % 5) ;
+    }
+  }
+  printboth("\n\n","multiplelines");
+  printboth($badlines,"multiplelines",$COLOR_FAILURE) ;
+  print("$COLOR_NOTE\nThis will be reported automatically.\n");
+  printboth("\n\n","multiplelines");
+  print SH_OUT "END pscheck $nopen_rhostname: \n" if $printsh_out ;
+}
+if ($printlater) {
+  my $msg = "\n\nSUSPECT ENTRIES FOUND on $nopen_rhostname with $pscommand\n".
+    "\n$COLOR_NOTE   (each line shows the suspect regexp that matched)$COLOR_FAILURE\n".
+    "$printlater\n\n";
+  if (open(TMPOUT,">$optmp/$nopen_rhostname.suspect.pscheck")) {
+    print TMPOUT $msg;
+    close(TMPOUT);
+    filepopup("$optmp/$nopen_rhostname.suspect.pscheck","-bg white -fg red -geometry 152x48");
+    $more2 = "\nSee also popped up alert showing $nopen_rhostname.suspect.pscheck.";
+  }
+  mywarn($msg);
+}
+if ($nosort) {
+  progprint("Above was $prog parsed output from:\n$tmpps $psargs",$COLOR_NORMAL);
+} else {
+  progprint("$prog parsed output$more from:\n$tmpps $psargs\n$printlater2\n\n(that was $tmpps $psargs$more)$more2",$COLOR_NORMAL);
+  if ($autoburnfile) {
+      writefile("APPEND",$autoburnfile,timestamp." $prog parsed output$more from:\n$tmpps $psargs\n$printlater2\n\n(that was $tmpps $psargs$more)$more2\n\n");
+  }
+}
+# End with true value as we require this script elsewhere.
+1;
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs pscheck @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog = "-gs pscheck";
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+
+  $autodone++ if ("@ARGV" =~ /auto(newdone|done)/) ;
+  ($autoburnfile) = "@ARGV" =~ /autoburnfile=(.*)/ ;
+  $pscommand = "=ps" unless (length $pscommand);
+  $pscommand = "ps -ef" if ($useef);
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session when \"-gs pscheck\" or
+\"=pscheck\" is used.
+
+";
+  $gsusagetext="Usage: -gs pscheck [options] [ str1 [ str2 ... ] ]
+
+-gs pscheck runs \"$pscommand\" on target and then calls
+$opetc/autopscheck to parse the output. Suspect entries in the
+output are repeated a second time ${COLOR_FAILURE}in red$COLOR_NORMAL,
+as well as reported to the powers that be.
+
+To re-sort the SAME ps output (without re-running it on target), hit
+up-arrow after running -gs pscheck and in the \"-lsh autopscheck
+\$GSOPTIONS\" command, replace the last argument (\$GSOPTIONS) with
+the new options and/or strN arguments.
+
+Default suspect entries that will be flagged in red and their comments
+(these are perl regexp's):\n\n";
+$gsusagetext .= sprintf("  %18s      %s\n","_REGEXP_","_COMMENT_");
+foreach my $key (keys %nasties) {
+  $gsusagetext .= sprintf("  %18s      %s\n",$key,$nasties{$key});
+}
+$gsusagetext .= "
+Additional suspect entries can be flagged by putting one or more strN
+arguments after all options on the command line. E.g.:
+
+\t-gs pscheck ps.-ef tail messages
+
+OPTIONS
+
+ -s       Do NOT sort (default sorts by PID), preserve original order.
+ -p       Sort by PPID instead of PID (if possible with ps output).
+ -t       Sort by start time (STIME) instead of PID.
+ -H str   Try these comma delimited files to see if maybe they are a
+          legitimate ps binary and use it instead if one is.
+ -D str   Try all files in these comma delimited directories to see if maybe
+          one is a legitimate ps binary and use it instead if one is.
+          CAUTION: A -strings is done on every file in these directories. Do
+                   not point to a directory that is huge.
+ -c       If there is a hacked ps and a legitimate one, run both and show
+          the difference.
+ -f str   Sort by ps field \"str\". If \"str\" is not a valid field, it is
+          ignored. The \"str\" is case insensitive. Examples:
+
+\t\t-f tty\t\t-f command
+\t\t-f cmd\t\t-f uid
+
+";
+  mydie("bad option(s)") if (! Getopts( "hvsptf:dH:cD:" ) ) ;
+  $debug = $opt_d ;
+  $nosort = $opt_s ;
+  $comparehacked = $opt_c;
+  $timesort = $opt_t ;
+  if ($opt_H) {
+    @hackfiles = split(/,/,$opt_H);
+  }
+  if ($opt_D) {
+    @hackdirs =  split(/,/,$opt_D);
+    foreach (@hackdirs) {
+      mydie("Directory $_ in -D argument must start with a \"/\"")
+	unless $_ =~ m,^/,;
+      mydie("Directory $_ in -D argument must not contain whitespace")
+	if /\s/;
+    }
+  }
+  $fieldtosort = "PID" ;
+  $fieldtosort = "PPID" if $opt_p ;
+  $fieldtosort = "START" if $timesort ;
+  $fieldtosort = uc $opt_f if $opt_f ;
+  $useef = $opt_e ;
+  usage() if ($opt_h or $opt_v) ;
+  foreach (@ARGV) {
+    $nasties{$_} = "User Added" unless /autodone/;
+  }
+  # $badlines is appended to by mymywarn()
+  $badlines = "" ;
+  $numonly = 1 ;
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+} #myinit
+
+sub by_month {
+  $c = $mon{substr(lc($a), 0, 3)} <=> $mon{substr(lc($b), 0, 3)};
+  if ($c == 0) {
+    return int(substr($a, 3, length($a))) <=> int(substr($b, 3, length($b)));
+  }
+  else {
+    return $c;
+  }
+}
+
+sub printboth {
+  local ($line,$code,$color,@more) = (@_) ;
+#  printlater($color.$line.$COLOR_NORMAL) ;
+  printlater($line) ;
+  if ($printsh_out) {
+    if ($code eq "multiplelines") {
+      foreach (split(/\n/,$line)) {
+	print SH_OUT $_."\n" ;
+      }
+    } else {
+      print SH_OUT "$color$line$COLOR_NORMAL" ;
+    }
+  }
+}#printboth
+
+sub mymywarn {
+  local ($nasty,$what,$color,$color2,$what2) = (@_) ;
+  $color = $COLOR_FAILURE unless $color ;
+
+  $badlines .= sprintf "MATCHES %-13s: $what",$nasty ;
+  $badcontent++ unless $what =~ /unable to sort by /i ;
+  if ($autodone) {
+    my $more = "" ;
+    open(MYOUT,">> $opdir/latewarnings.$nopen_rhostname") || return ; 
+    $more = "\nPotentially Bad Process matches \"$nasty\":\n";
+    #unless $nomore++ ;
+    print MYOUT "$more$what\n" ;
+    close MYOUT
+  }
+}
+
+sub printlater {
+  # one line per
+  local ($str) = (@_);
+  chomp($str);
+  $printlater .= $str."\n";
+#dbg($printlater);
+}

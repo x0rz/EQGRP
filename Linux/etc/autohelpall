@@ -1,0 +1,119 @@
+#!/usr/bin/env perl
+#
+# INPUT: contents of /current/etc are examined to see which -gs.blah
+#        scripts have accompanying autoblah scripts that have usage
+#        statements and then runs -gs blah -h on those.
+#
+
+# These vars are set only here, not reset in loop below
+$VER="2.0.0.1" ;
+myinit() ;
+$| = 1 ;
+unlink("$opetc/helpall.output") ;
+foreach (split(/\n/,`find $opetc/gs.* -type f -o -type l 2>/dev/null`)) {
+  next if /\~$/ ;
+  ($script) = /gs\.(.*)/ ;
+  next unless (-e "$opetc/auto$script") ;
+  next unless (length(`grep opt_h $opetc/auto$script 2>/dev/null`)) ;
+  my $h="h";
+  $h="H" if (`grep opt_H $opetc/auto$script 2>/dev/null`) ;
+  $h = "h" if ($script ne "stoicctrl" or
+	       $script eq "wearcup" or
+	       $script eq "replay" or
+	       $script =~ /helpall/);# exception, this -H is not help
+  doit("$lsh$opetc/auto$script -$h 2>&1 $tee$opetc/helpall.output\n");
+}
+progprint(".\n\n\n\n".
+	  "# See also $opetc/helpall.output which now contains the above help statements.\n");
+close(OUT) ;
+
+sub myinit {
+  $willautoport=1;
+  my $autoutils = "../etc/autoutils" ;
+  unless (-e $autoutils) {
+    $autoutils = "/current/etc/autoutils" ;
+  }
+  require $autoutils;
+  $prog = "-gs helpall" ;
+  $vertext = "$prog version $VER\n" ;
+  mydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			    -e $nopen_mylog);
+  
+  use File::Basename ;
+  $opdir = ".." unless (-e $nopen_mylog);
+  if ($opdir eq ".") {
+    $stdoutalso=1;
+    `mkdir -p $opetc $opdown $opbin $optmp`;
+  }
+  usage("bad option(s)") if (! Getopts( "hv" ) ) ;
+  $vertext = "$prog version $VER\n" ;
+  unless ($nopen_rhostname) {
+    $commandline=1;
+    $tmpdir = "/tmp" ;
+    $extrausage = "${COLOR_FAILURE}
+$prog is the equivalent NOPEN command to run in a noclient window.$COLOR_NORMAL
+" ;
+  $prog = basename $0 ;
+  }
+  $usagetext="
+Usage: $prog [-h]                    (prints this usage statement)
+       $prog
+$extrausage
+
+When run in a noclient window, -gs.helpall calls autohelpall.
+
+autohelpall looks through all NOPEN gs.* scripts in $opetc or
+../etc (or ./ if those do not exist) and determines which have matching
+auto* scripts. For those that do, the ones that have usage statements
+available are executed with the \"-h\" option, or with \"-H\" if that
+appears to give longer usage.
+
+" ;
+  unless (-w $opetc and -d _) {
+    if (-r "../etc" and -d _) {
+      $opetc = "../etc" ;
+    } else {
+      $opetc = "." ;
+    }
+  }
+  $nohist="-nohist " ;
+  $lsh = "-lsh " ;
+  $tee = ">> T:" ;
+  usage() if ($opt_v or $opt_h );
+  $socket = pilotstart(quiet);
+} #myinit
+
+sub getline {
+  # globals used/changed: $lastlinetime
+  my ($gotone,$linetime,$line,$lineoutput,$skipone) = () ;
+  while ($line = <IN>) {
+#    next if ($line =~ /DBG\d*:/) ;
+    $line =~ s/\r//g ; # Get rid of ^M's
+    if ($line =~ /(\d\d\-\d\d\-\d\d\ \d\d\:\d\d\:\d\d)\sGMT\]\[.*\-\>/) {
+      if ($linetime) {
+	# 2nd match for this is next block so rewind a line and return
+	my $seekval = -1 * length($line) ;
+        my $err = seek(IN,$seekval,1) ;
+        $line = $prevline ;
+	last ;
+      } else {
+	$linetime = $line ;
+      }
+    }
+    if (!$gotone and $line =~ /^\[(.*)\]\s*$/ and $skipone++) {
+      $gotone = $1 ;
+    }
+    $lineoutput .= $line ;
+    my $prevline = $line ;
+  }
+  return ($linetime,$gotone,$lineoutput);
+}
+
+sub printboth {
+  local($_) = (@_) ;
+  print OUT  ;
+  print STDOUT if $stdoutalso ;
+  print OUTF if $outfile ;
+}

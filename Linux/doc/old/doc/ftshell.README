@@ -1,0 +1,125 @@
+Name:		ftshell
+
+
+Update (05 OCT 2004):
+
+v3.8: Added -V option. See also new usage (via -h) and ChangeLog.
+
+Update (20 OCT 2003):
+
+Added -B option. If possible, this execs a /bin/bash (repeating the unsets)
+and changes your prompt to date/time/user@host/wdir (a two line prompt). 
+Added showthis--now ftshell puts the contents of the environment variable 
+SHOWTHIS onto the banner when entering interactive mode.
+Moved that banner into its own proc and moved it closer to the bottom of
+the output so visible when everything stops.
+
+Update (28 JAN 2003):
+
+Fixed bug in all the which statements and checking that output.
+Now it checks for "no" in the which output (as in "no file blah found")
+but also confirms that the output has the expected content (i.e., that 
+the "which perl" output has the string "perl" in it). Added df -k.
+
+Update (22 JAN 2003):
+
+Added -q and -Q options to be quiet and quieter when ourtn uses ftshell
+with -I.
+
+Update (17 DEC 2002):
+
+Now beeps and gives errors in color if unable to upload due to no perl
+and no uudecode, leaving user in interactive mode.
+
+Update (16 DEC 2002):
+
+Now a Ctrl-C by user exits ftshell with a 1 not 0, so ourtn
+will stop hopping.
+
+Update (15 NOV 2002):
+
+Now takes -I argument indicating an INCISION connection, which
+forces a few commands before going to interactive mode (unsets,
+w, date, cd, etc.) In upload mode (-u), these same commands are
+done, too.
+
+Update (23 OCT 2002):
+
+Now will use perl to uudecode if uudecode not on target, and 
+upload fails nicely if neither uudecode nor perl is there.
+
+Added interactive procedure.
+
+Environment vars A and B used to execute commands on target,
+usually the rat and prep commands for running the rat (cd, etc.).
+
+Now have options -r ratname and -u uploadfile, to upload a local
+uploadfile and call it ratname on target as soon as connection
+is established.
+
+Synoposis:
+
+An expect wrapper used for transfering files.  It is intended to
+be used with programs such as telent and rlogin to give them the
+ability to transfer files over the existing telnet/rlogin connection.
+
+Usage:
+
+ftshell command command_args
+
+e.g.  ftshell telnet foo.bar.net
+
+
+Description:
+
+Run ftshell with some other command such as telnet to get that
+telnet session the ability to upload/download files over the
+telnet connection.  when running, ftshell has a menu which is
+access via an escape code.  The escape code is '~~'.  Typing '?'
+at the prompt causes a detailed menu to appear.
+
+When a file is transfered, it is compressed and uuencoded and
+moved to the other system.  A display of the number of bytes
+transfered is updated at most once per second.
+Whe uploading a file that needs compression, one temporary file
+is created on the remote system.  It is the name of the file with
+a .Z appended.
+
+The compression or uuencodeing will not occur if the file
+is already compressed or encoded as determined from its filename.
+(e.g. .uu, .Z, .gz, .gz.uu, ...)
+
+Commands:
+
+~~g remoteFile [localFile]
+	Get file from remote system
+~~p localFile [remoteFile]
+	Put file on remote system
+~~c [localDir]
+	Change local directory (cd) or show current one.
+~~~
+	Send '~' to remote system
+~~?
+	Show detailed menu
+~~v
+	Toggle verbose mode
+~~e
+	Toggle check of exit codes on remote commands
+~~^Z
+	Suspend ftshell
+
+
+Bugs:
+
+It is assumed the remote system is Unix and has the standard
+set of commands available in the default search path.
+
+It is assumed that uuencode and uudecode as well as compress
+are available on the remote system.
+
+The '~~e' command is an ugly hack to work around a problem with
+ftshell not being able to correctly determine the exit status of
+commands issuded on the remote system.
+
+A '/' cannot be in a filename of a file being transfered if that
+file is already compressed or uuencoded.  [[This might be fixed.]]

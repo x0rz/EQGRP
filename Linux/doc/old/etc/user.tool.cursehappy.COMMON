@@ -1,0 +1,327 @@
+################ CURSEHAPPY #########################
+############### PARSING  ###################################################################
+
+### vi Search/Replace commands ###
+### ProjectName - self explanatory
+### Date field - today's date, used for output files
+### Rec type - record type correlates with ProjectName, valid values: eh, ls, ss, wb
+### Host - hostname of the box (not IP address)
+### Cryptkey - encryption key (use output from below md5sum command)
+
+md5sum /current/down/tcpdump.raw
+
+mx
+:%s/PROJECTNAME/PROJECTNAME/g
+:%s/DDMonYY/DDMonYY/g
+:%s/HOST/HOST/g
+:%s/CRYPTKEY/CRYPTKEY/g
+'x 
+
+### Save the encryption key locally:
+
+echo CRYPTKEY > /current/down/cryptkey.cursehappy.DDMonYY
+
+####### Prepare files containing numbers to search for:
+
+# if files containing the numbers to search available:
+mkdir /current/down/argfiles
+cd /current/down/argfiles
+mz
+cp /mnt/zip*/arg* /current/down/argfiles
+	#or
+cp /mnt/zip*/PROJECTNAME/arg* /current/down/argfiles
+
+ls -altr
+
+
+### Prep the argfiles:
+### make sure the files are ASCII and contain NO EMPTY LINES!!
+### make sure the last line does not contain a null character at the end
+###	(vi the file, add a carriage return to the last line, then delete the empty
+###	line and save)
+### "file" results:
+### 	This will not work: ASCII text, with CRLF line terminators
+### 	This WILL: 	    ASCII text
+cat arg*
+file arg*
+dos2unix arg*
+file arg*
+
+# if no data media is provided:
+# locally, create a file of numbers to grep for with each number on a separate line
+#       make sure there are NO EMPTY LINES!!!!
+# Format of each type of argument:
+# p123456789 - phone number
+# s123456789 - IMSI
+# e123456789 - IMEI
+# c123/456   - Cell/LAC (no leading 0's)
+
+cd /current/down/argfiles
+vi /current/down/argfiles/argfile1.txt
+
+
+
+########## To look at CDR directories try the following:
+
+### Use the following commands to determine the location of current
+### CDR data storage;  Once you identify the location of the data, you'll
+### use the head/tail commands to determine the date ranges being saved.
+### These date ranges will be used as args in the cursehappy commands.
+
+### Typical file locations per host:
+
+########################## wholeblue:
+# tpmw01  10.3.4.55
+# tpmw02  10.3.4.56
+
+### verifies isb, khi, and lhr directories:
+ls -ld /tp/med/datastore/collect/siemens_msc_*
+ls -ld /tp/med/datastore/collect/siemens_msc_*/.tmp_ncr
+ls -ld /tp/med/archive/collect/siemens_msc_*
+ls -ld /tp/med/archive/collect/siemens_msc_*/.tmp_ncr
+
+### shows oldest and newest files in directories:
+ls -latr /tp/med/datastore/collect/*isb*/*.MSC | head -10
+ls -latr /tp/med/datastore/collect/*isb*/*.MSC | tail -10
+ls -latr /tp/med/datastore/collect/*khi*/*.MSC | head -10
+ls -latr /tp/med/datastore/collect/*khi*/*.MSC | tail -10
+ls -latr /tp/med/datastore/collect/*lhr*/*.MSC | head -10
+ls -latr /tp/med/datastore/collect/*lhr*/*.MSC | tail -10
+
+ls -latr /tp/med/datastore/collect/*isb*/.tmp_ncr/*.MSC | head -10
+ls -latr /tp/med/datastore/collect/*isb*/.tmp_ncr/*.MSC | tail -10
+ls -latr /tp/med/datastore/collect/*khi*/.tmp_ncr/*.MSC | head -10
+ls -latr /tp/med/datastore/collect/*khi*/.tmp_ncr/*.MSC | tail -10
+ls -latr /tp/med/datastore/collect/*lhr*/.tmp_ncr/*.MSC | head -10
+ls -latr /tp/med/datastore/collect/*lhr*/.tmp_ncr/*.MSC | tail -10
+
+ls -latr /tp/med/archive/collect/siemens_msc_isb01/*.MSC | head -10
+ls -latr /tp/med/archive/collect/siemens_msc_isb01/*.MSC | tail -10
+ls -latr /tp/med/archive/collect/siemens_msc_khi01/*.MSC | head -10
+ls -latr /tp/med/archive/collect/siemens_msc_khi01/*.MSC | tail -10
+ls -latr /tp/med/archive/collect/siemens_msc_lhr01/*.MSC | head -10
+ls -latr /tp/med/archive/collect/siemens_msc_lhr01/*.MSC | tail -10
+
+ls -latr /tp/med/archive/collect/siemens_msc_isb01/.tmp_ncr/*.MSC | head -10
+ls -latr /tp/med/archive/collect/siemens_msc_isb01/.tmp_ncr/*.MSC | tail -10
+ls -latr /tp/med/archive/collect/siemens_msc_khi01/.tmp_ncr/*.MSC | head -10
+ls -latr /tp/med/archive/collect/siemens_msc_khi01/.tmp_ncr/*.MSC | tail -10
+ls -latr /tp/med/archive/collect/siemens_msc_lhr01/.tmp_ncr/*.MSC | head -10
+ls -latr /tp/med/archive/collect/siemens_msc_lhr01/.tmp_ncr/*.MSC | tail -10
+
+
+#  isbapro1 10.5.7.51
+# nothing new
+-lt /u01/product_evdp/evident/data_store/collect
+ls -latr /u01/product_evdp/evident/data_store/collect/siemens_msc | head -10
+ls -latr /u01/product_evdp/evident/data_store/collect/siemens_msc | tail -10
+ls -latr /u01/product_evdp/evident/data_store/collect/siemens_msc_khi01 | head -10
+ls -latr /u01/product_evdp/evident/data_store/collect/siemens_msc_khi01 | tail -10
+ls -latr /u01/product_evdp/evident/data_store/collect/siemens_msc_isb01 | head -10
+ls -latr /u01/product_evdp/evident/data_store/collect/siemens_msc_isb01 | tail -10
+ls -latr /u01/product_evdp/evident/data_store/collect/siemens_msc_lhr01 | head -10
+ls -latr /u01/product_evdp/evident/data_store/collect/siemens_msc_lhr01 | tail -10
+
+-lt /u03/archive/collect
+# newer stuff
+ls -latr /u03/archive/collect/siemens_msc_isb01 | head -10
+ls -latr /u03/archive/collect/siemens_msc_isb01 | tail -10
+ls -latr /u03/archive/collect/siemens_msc_isb01 | wc -l
+# old stuff:
+ls -latr /u03/archive/collect/siemens_msc_khi01 | head -10
+ls -latr /u03/archive/collect/siemens_msc_khi01 | tail -10
+
+
+########################## editionhaze:
+
+ls -latr /u06/saba/CDR/out/MS* | head -10
+ls -latr /u06/saba/CDR/out/MS* | tail -10
+ls -latr /u06/saba/CDR/out/MS* | wc -l
+
+########################## liquidsteel:
+
+########################## sicklestar:
+
+### magnum: CURSEHAPPY not working on all SS .usd files :-(
+### Try these first, should be all of them in one spot
+ls -latr /usd_archive/mc_storage/*usd | head -10
+ls -latr /usd_archive/mc_storage/*usd | tail -10
+
+### If none in previous ones...
+ls -latr /sys1/var/billing/out_coll/*usd | head -10
+ls -latr /sys1/var/billing/out_coll/*usd | tail -10
+ls -latr /sys1/var/alcatel/out_coll/*usd | head -10
+ls -latr /sys1/var/alcatel/out_coll/*usd | tail -10
+
+ls -latr /sys1/var/billing/msc_is2 | tail -20
+
+##########################  CURSEHAPPY ########################################################
+###############################################################################################
+
+### Now, encrypt the ascii list...first make sure you have the encryption tool:
+which cryptTool.v1.0.Linux2.4.18-14.targetdl
+
+### If cryptTool not in PATH, change your PATH or insert full path in command
+
+### to encrypt one at a time...skip to next comment to encrypt all at once:
+cryptTool.v1.0.Linux2.4.18-14.targetdl -i argfile1.txt -o argfile1.enc -k CRYPTKEY -b
+cryptTool.v1.0.Linux2.4.18-14.targetdl -i argfile2.txt -o argfile2.enc -k CRYPTKEY -b
+
+file argfile*.enc
+
+### to encrypt all at the same time:
+for i in argfile* ; do cryptTool.v1.0.Linux2.4.18-14.targetdl -i $i -o `basename $i .txt`.enc -k CRYPTKEY -b ; done
+
+ls -l
+file argfile*.enc
+
+### encrypt the def files
+
+for i in /current/up/cursedefs/*.def ; do cryptTool.v1.0.Linux2.4.18-14.targetdl -i $i -o /current/up/cursedefs/`basename $i .def`.enc -k CRYPTKEY -b ; done
+
+ls -l
+file /current/up/cursedefs/*.enc
+
+### encrypt the def files
+
+
+
+### Tips for running the CURSEHAPPY 4.0
+
+        ### DO NOT _APPEND_ to the local file if using encryption - (no >>L: or >>T: )!!!!
+        ###     per each argfile, create .enc1, .enc1.more, .enc1.more2, etc if additional
+        ###             passes are needed for the date range
+        ### DO NOT use -loglevel if also using >L: or >T: (mixed output corrupts the decryption)
+        ### The phone list is NOT deleted automatically in v3.2
+        ###     remove it between each run as a practice
+
+### Useful options:
+-n              name of text file containing phone numbers
+-files          list of files to parse (can contain wildcards) optional - same as no option
+-d              output optional fields
+-all            all record output (no search performed)
+-loglevel [#]      level of info emitted via stderr:0,1,2,3
+-def            definition file (required)
+-lb		leave behind mode
+	 Upload the parser (CURSEHAPPY) and called it crond
+# put up the parser tool
+mkdir /tmp/.scsi
+-cd /tmp/.scsi
+
+-put /current/up/cursehappy4 crond
+
+#####  Upload the encrypted phone list as adm, modify each parser command to have the
+##### correct directory and date range of files to parse, then run the parser:
+
+##### NOTE: MUST CORRELATE NUMBERS IN ENCRYPTED TASKING FILENAMES (i.e. argfile1.enc)
+##### TO OUTPUT FILENAMES (cdrhits*.enc1, cdrhits*.enc1.more, cdrhits*.enc1.more2, etc.)
+
+##### NOTE2: GO FROM MOST RECENT TIME TO (PROBABLY CURRENT DATE) AS FAR BACK AS TIME ALLOWS
+
+############ argfile 1
+
+-put /current/up/cursedefs/PROJECTNAME.enc adm~
+-put /current/down/argfiles/argfile1.enc adm
+KEY=CRYPTKEY; export KEY; ./crond -def ./adm~ -n ./adm -d /CHANGEME/CDRFILES.2006071[3456]* >T:/current/down/cdrhits.cursehappy.HOST.DDMonYY.enc1
+-beep 15
+
+
+### Run again if needed for same tasking
+-put /current/down/argfiles/argfile1.enc adm
+-put /current/up/cursedefs/PROJECTNAME.enc adm~
+KEY=CRYPTKEY; export KEY; ./crond -def ./adm~ -n ./adm -d /CHANGEME/CDRFILES.2006071[012]* >T:/current/down/cdrhits.cursehappy.HOST.DDMonYY.enc1.more
+-beep 15
+
+
+############ argfile 2 
+
+-put /current/up/cursedefs/PROJECTNAME.enc adm~
+-put /current/down/argfiles/argfile2.enc adm
+KEY=CRYPTKEY; export KEY; ./crond -def ./adm~ -n ./adm -d /CHANGEME/CDRFILES.2006071[3456]* >T:/current/down/cdrhits.cursehappy.HOST.DDMonYY.enc2
+-beep 15
+
+
+### Run again if needed for same tasking
+-put /current/up/cursedefs/PROJECTNAME.enc adm~
+-put /current/down/argfiles/argfile2.enc adm
+KEY=CRYPTKEY; export KEY; ./crond -def ./adm~ -n ./adm -d /CHANGEME/CDRFILES.2006071[0-2]* >T:/current/down/cdrhits.cursehappy.HOST.DDMonYY.enc2.more
+-beep 15
+
+
+############ argfile 3
+
+-put /current/up/cursedefs/PROJECTNAME.enc adm~
+-put /current/down/argfiles/argfile3.enc adm
+KEY=CRYPTKEY; export KEY; ./crond -def ./adm~ -n ./adm -d /CHANGEME/CDRFILES.2006071[3456]* >T:/current/down/cdrhits.cursehappy.HOST.DDMonYY.enc3
+-beep 15
+
+
+### Run again if needed for same tasking
+-put /current/down/argfiles/argfile3.enc adm
+-put /current/up/cursedefs/PROJECTNAME.enc adm~
+KEY=CRYPTKEY; export KEY; ./crond -def ./adm~ -n ./adm -d /CHANGEME/CDRFILES.2006071[0-2]* >T:/current/down/cdrhits.cursehappy.HOST.DDMonYY.enc3.more
+-beep 15
+
+
+#############
+############# for loglevel testing (local file should be ascii?)
+#############
+
+-put /current/up/cursedefs/PROJECTNAME.enc adm~
+-put /current/down/argfiles/argfile1.enc adm
+KEY=CRYPTKEY; export KEY; ./crond -def ./adm~ -n ./adm -w e -loglevel 2 -d /CHANGEME/CDRFILES.2006071[0-2]* >T:/current/down/cdrhits.cursehappy.HOST.DDMonYY.test
+-beep 15
+
+######
+#####  when it's done running, decrypt the file (-d -c options)
+######
+
+
+cd /current/down
+ls -latr cdr*enc*
+
+# to decrypt individually:
+cryptTool.v1.0.Linux2.4.18-14.targetdl -i cdrhits.cursehappy.HOST.DDMonYY.enc1 -o cdrhits.cursehappy.HOST.DDMonYY.txt1 -k CRYPTKEY -d -c
+cryptTool.v1.0.Linux2.4.18-14.targetdl -i cdrhits.cursehappy.HOST.DDMonYY.enc2 -o cdrhits.cursehappy.HOST.DDMonYY.txt2 -k CRYPTKEY -d -c
+
+
+# or decrypt all at one time (once all are written fully)
+cd /current/down
+for i in cdrhits*enc* ; do n="`echo $i | sed \"s,enc,txt,g\"`" ; cryptTool.v1.0.Linux2.4.18-14.targetdl -i $i -o $n -k CRYPTKEY -d -c ; done
+ls -latr cdr*txt*
+
+######
+######	If you need to stop the parser before it completes:
+### Control-C the nopen window containing the parser command
+### ps -ef |grep crond
+### if the parser command is still "running", then kill the process:
+### kill -9 <PID> 
+### You'll still be able to decrypt the partially completed data pull
+
+
+
+######
+######  copy DECRYPTED data to media
+######
+ls -l cdr*txt*
+mz
+cp cdr*txt* /mnt/zip*/PROJECTNAME
+ls -l /mnt/zip*/PROJECTNAME
+uz
+
+
+#####
+#####  clean up
+#####
+-rm crond adm adm~
+-lt
+-cd /tmp
+-rm .scsi
+-lt
+
+w
+ps -ef | sort
+-lt /
+
+-burnBURN
+

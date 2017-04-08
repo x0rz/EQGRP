@@ -1,0 +1,4 @@
+#NOGS
+-lsh /current/etc/autotput $GSOPTIONS -nohist
+-gs /port -nohist
+

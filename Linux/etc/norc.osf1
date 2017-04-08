@@ -1,0 +1,20 @@
+
+# OSF/1
+
+:PATH=/bin:/usr/bin:/sbin:/usr/sbin
+
+alias -pacct=-ls -t /var/adm/*acct* /var/*acc* /var/log/account/*acct*
+
+alias =ps=ps auxwwww
+alias =psg=ps auxwwww | grep
+alias =nsg=netstat -an | grep 
+alias =arp=netstat -Hn
+alias =ping=ping -c 1
+alias =df=df -k
+alias =locale=locale
+alias =alwaysdothis=
+alias -elevate=-lsh echo -n Please insert another token..... 1>&2 ; sleep 6 ; echo .
+alias =autorpc=-scan rpc 127.0.0.1 one
+
+alias =pse=ps auxwwww | egrep
+alias =psgv=ps auxwwww | egrep -v 

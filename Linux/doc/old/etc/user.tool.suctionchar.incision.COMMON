@@ -1,0 +1,64 @@
+
+
+
+
+####   notes for clean install #####
+
+####  verify archetecture	####
+
+uname -a
+isainfo -v	
+
+
+###  verify mod tools 	####
+
+which modload
+which modinfo
+
+
+####  cp modtools to current local	####
+
+mkdir .scsi
+
+-cd .scsi
+
+cp /usr/sbin/modload ml
+cp /usr/sbin/modinfo mi
+
+
+#### put up correct mod version	VERIFY VERIFY VERIFY !!!!!! ####
+
+-put /mnt/zip/suction/sparc64-solaris_kernel-cc-release@5.9/sucmod sum
+
+
+####  load mod	###
+
+./ml sum
+
+#### verify install	####
+
+./mi
+
+### pass perimeters	VERIFY SIZE OF sum and replace count # !!!!!		####
+
+-lt
+dd if=/dev/zero of=sum bs=1 count=<size>
+
+#### remove tools 	#####
+
+-rm ml mi sum
+
+#### check logs	####
+
+-lt /var/adm /var/log
+
+-tail any file that may have been updated
+
+
+###  check suction
+
+-suc info
+
+
+
+

@@ -1,0 +1,98 @@
+#!/usr/bin/env python
+VERSION = '1.0.0.2'
+
+import os
+import sys
+import shlex
+import traceback
+
+import autoutils
+from autoutils import COLOR
+from autoutils import OptParser
+
+class autopyskel:
+
+    def __init__(self):
+
+        self.version = VERSION
+        self.nopen = autoutils.autoutils()
+        self.parser = self.get_arg_parser()
+        self.doprint = self.nopen.doprint
+
+
+    def main(self, argv):
+
+        argv = argv[1:]
+        opts, args = self.nopen.parseArgs(self.parser, argv)
+
+        # connect to autoport after parse args
+        if not self.nopen.connected:
+            self.nopen.connect()
+
+        if opts.v:
+            self.print_version(prog)
+            return self.nopen.finish()
+
+        if opts.CWD:
+            cwd = self.nopen.getcwd()
+            print 'CURRENT WORKING DIR: %s' % cwd
+
+        if opts.HIDDEN:
+            hidden = self.nopen.getHidden()
+            self.doprint('HIDDEN DIRS: %s' % ' '.join(hidden))
+        
+        if opts.INPUT:
+            answer = self.nopen.getInput('Looks like you\'re trying to write a script, want some help?', default='n')
+
+            print 'Your answer: %s' % answer
+            self.nopen.help('get help')
+
+        if opts.DIR:
+            output, nopenlines, outputlines = self.nopen.doit('-lt %s' % opts.DIR)
+            self.doprint(COLOR['fail'], 'OUTPUT:\n', output)
+
+        if opts.WRITE:
+            output, outfile = self.nopen.doitwrite(opts.WRITE)
+            self.doprint(COLOR['fail'], 'OUTPUT TO: ', outfile)
+
+        return self.nopen.finish()
+
+
+    def get_arg_parser(self):
+
+        epilog = '\n-gs pyskel version %s\n' % self.version
+
+        parser = OptParser(usage='usage: -gs pyskel [options]', epilog=epilog)
+
+        parser.add_option('-c', dest='CWD', action='store_true', help='Display the CWD')
+        parser.add_option('-d', dest='HIDDEN', action='store_true', help='Display the HIDDEN DIR')
+        parser.add_option('-i', dest='INPUT', action='store_true', help='Prompt for input')
+        parser.add_option('-l', dest='DIR', type='string', action='store', help='Do a -lt on DIR')
+        parser.add_option('-w', metavar='CMD', dest='WRITE', type='string', action='store', help='Call doitwrite() on command')
+        parser.add_option('-v', dest='v', action='store_true', help='Show version and exit.')
+
+        return parser
+
+
+    def print_version(self, prog):
+
+        script_name = os.path.basename(prog)
+
+        if script_name.startswith('auto'):
+            script_name.split('auto',1)[1]
+
+        self.doprint('-gs %s version %s' % (script_name, self.version))
+
+
+if __name__ == '__main__':
+
+    try:
+        # re-set the argv b/c NOPEN will do weird things with splitting args
+        argv = shlex.split(' '.join(sys.argv))
+        autopyskel().main(argv)
+    except Exception, e:
+        print '\n\n%sUnhandled python exception: %s%s\n\n' % \
+            (COLOR['bad'], str(e), COLOR['normal'])
+        print '%sStack trace:\n' % COLOR['fail']
+        traceback.print_exc()
+        print COLOR['normal']

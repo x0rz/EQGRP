@@ -1,0 +1,13 @@
+ls -la /usr/share/redmin/cgi/redmin
+
+cd /tmp/.scsi
+tar xvfj gr.tbz2
+./gr
+# unset HISTFILE
+# unset HISTSIZE
+# unset HISTFILESIZE
+
+check /var/log/cron 
+delete starting from: (root) LIST (root)
+going to:              (root) LIST (hacluster)
+

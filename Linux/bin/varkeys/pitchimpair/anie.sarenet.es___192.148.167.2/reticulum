@@ -1,0 +1,20 @@
+PITCHIMPAIR___anie.sarenet.es___192.148.167.2___20010919-094131() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.6 Options:I,O 
+    #
+    set host anie.sarenet.es
+    set ip 192.148.167.2
+    set hostType "Solaris26"
+    set len 476
+    set cv0 266a0d22
+    set cv1 423206e4
+    set cv2 98d20b62
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

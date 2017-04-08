@@ -1,0 +1,270 @@
+#!/usr/bin/env perl
+#
+$VER="1.0.0.7";
+
+my $crashpathroot="/var/crash";
+my $hostname="";
+my %unixfiles=();
+my %vmcorefiles=();
+my $listonly=0;
+my $runall=0;
+my $batchmode=0;
+my @accessedfiles=();
+my @listing=();
+myinit();
+my $crashdump="$opdown/crashdump.$nopen_rhostname";
+
+my (@dumpfiles) = findcrashfiles();
+unless (!@dumpfiles or $listonly) {
+    parsecrashfiles(@dumpfiles);
+    filetimeresets(@accessedfiles) if @accessedfiles;
+    nopenlss("-UGgsecure,,messages,,syslog","/var/log","/var/adm");
+    if (@listing) {
+	progprint("Crash dump saved at $crashdump\n\n\n${COLOR_FAILURE}@listing${COLOR_NORMAL}");
+    }
+    my @logdirs = ("$opdown/$nopen_rhostname/var/log","$opdown/$nopen_rhostname/var/adm");
+    my ($ans) = mygetinput
+	("\n\n".
+	 "Do you want to create a tarball of the crashdump and log files and copy-fast it?","Y");
+    if ($ans eq "y") {
+	my $crashdir = "crashdump_${nopen_rhostname}_".timestamp(short);
+	my $tmpdir = "$optmp/$crashdir";
+	mkdir($tmpdir);
+
+	my @logfiles = split(/\n/,`find @logdirs -type f`);
+	progprint($COLOR_NORMAL."\n\n".
+		  "Copying crashdump data to this temporary directory and tarring it up:\n".
+		  "$tmpdir\n\n".
+		  `cp -p $opdown/crashdump.$nopen_rhostname* $opdown/opnotes.txt $opdown/hostvars* @logfiles $tmpdir;cd  $tmpdir ; find -type f -ls | sed "s,.*root    ,,g"`.
+		  `cd $optmp ; tar cjf ../crashdump_${gbl_opuser}_$nopen_rhostname.tar.bz2 $crashdir ; ls -al crashdump_${gbl_opuser}_$nopen_rhostname.tar.bz2`.
+		  "\n\nSee popped up window to confirm copy-fast success.".
+		  "");
+	unless (fork()) {
+	    close(STDOUT);
+	    close(STDIN);
+	    close(STDERR);
+	    close($socket);
+	    dbg("EXECING: 1x -hold
+\
+ -title \"\\\"${prog}_copy-fast_popup\\\"\" -geometry 130x64-0+0 -e copy-fast $opdir$nozip$forceit$noxwait");
+	    exec("1x -hold -title \"\\\"${prog}_copy-fast_popup\\\"\" -geometry 130x64-0+0 -e copy-fast $opdir/crashdump_${gbl_opuser}_$nopen_rhostname.tar.bz2");
+	}
+    }
+}
+
+# End with true value as we require this script elsewhere.
+1;
+
+#ENDMAIN
+
+sub mymydie {
+    filetimeresets(@accessedfiles) if @accessedfiles;
+    mydie(@_);
+}
+
+sub findcrashfiles {
+    # Search for the latest crash files.
+    my $filename="";
+    my ($vmcoretodo,$unixtodo,$ans) = ();
+    ($unixoutput,$nopenlines,@unixoutput) = nopenlss("-UFQR","$crashpathroot/");
+    my $maxindex = 0;
+    foreach $filelisting (@unixoutput) {
+	# Build the separate arrays of unix.* and vmcore.* files.
+	($filename,$type,$num) = $filelisting =~ m, (/.*/(unix|vmcore)\.([0-9]+)), ;
+	if ($type eq "unix") {
+	    $unixfiles{$3} = $1;
+	} elsif ($type eq "vmcore") {
+	    $vmcorefiles{$3} = $1;
+	}
+	$maxindex = $1 if ($1 > $maxindex);
+    }
+    if (%unixfiles or %vmcorefiles) {
+	my ($filelist,@allowed) = ();
+	foreach my $key (sort by_num keys %vmcorefiles) {# = 0 ; $key <= $maxindex ; $key++) {
+	    if ($vmcorefiles{$key} and $unixfiles{$key}) {
+		$filelist .= "   $unixfiles{$key}\n";
+		$filelist .= "   $vmcorefiles{$key}\n";
+		$filelist .= "\n\n";
+		push(@allowed,$key);
+	    }
+	}
+	my $default = maxof(@allowed);
+	my ($prompt) = ("\n\n".
+			"Which set of files do you want to examine (@allowed or (A)BORT)?".
+			"");
+	($ans,$longans) = mygetinput($filelist.$prompt,$default,@allowed,"A","ABORT") unless $listonly;
+	mymydie("User aborted") if ($longans eq "a");
+    } else {
+	progprint($COLOR_FAILURE."\n\n".
+		  "No crash files found.".
+		  "");
+    }
+    return($unixfiles{$longans},$vmcorefiles{$longans});
+}
+
+sub parsecrashfiles {
+    # Right now, we're only parsing the last file pairing in the array. If
+    # we don't have a pairing, bail.
+    local ($unixfile,$vmcorefile) = (@_);
+    return 1 unless ($unixfile and $vmcorefile);
+
+    my $command="";
+    my @commands = (
+		    "showrev",
+		    "isainfo -kv",
+		    "uname -a",
+		    "modinfo",
+		    "echo kmem_flags?X | mdb -k",
+		    "echo \\\$c | mdb -k $unixfile $vmcorefile",
+		    "echo \\\$r | mdb -k $unixfile $vmcorefile",
+		    "echo \\\$\\\<panicbuf | mdb -k $unixfile $vmcorefile",
+		    "echo \\\$\\\<msgbuf | mdb -k $unixfile $vmcorefile",
+		    "echo ::ps | mdb -k $unixfile $vmcorefile",
+		    );
+    
+    
+    offerabort(
+	       "Ready to run crashdump commands against the following files:${COLOR_NOTE}\n\n".
+	       $unixfile.
+	       " ".
+	       $vmcorefile.
+	       "${COLOR_NORMAL}") unless ($runall or $batchmode);
+    
+    if (!($unixfile =~ /unix\.[0-9]+/) || !($vmcorefile =~ /vmcore\.[0-9]+/)) {
+	dbg("in autocrashdump parsecrashfiles, bad filename =$unixfile= =$vmcorefile=");
+	myalert("Bad crash filenames found!");
+	return 0;
+    }
+    else {
+	# Do the numbers match?
+	unless ((grep {/.*\.[0-9]+$/} $unixfile) eq (grep {/.*\.[0-9]+$/} $vmcorefile)) {
+	    dbg("in autocrashdump parsecrashfiles, bad number match");
+	    myalert("Unable to find a matching pair of crashfiles!");
+	    return 0;
+	}
+    }
+    
+    # Print the header to the crash file.
+    open(DUMP,"> $crashdump") or mydie("Unable to open crashdump file $crashdump: $!");
+    select DUMP;
+    my $ourgmt = gmtime();
+    $ourgmt =~ s/(\d\d\d\d)$/GMT $1/;
+    my $header = sprintf("-gs crashdump CRASH DUMP\nGENERATED ON $nopen_rhostname AT $ourgmt\nFROM FILES $unixfile $vmcorefile\n");
+    print "$header";
+    close(DUMP);
+    select STDOUT;
+
+    @accessedfiles = (dirname($_[0]),@_,);
+    filetimesave(@accessedfiles);
+
+    
+    my $selector = ">>T:";
+    if ($batchmode) {
+	$selector = ">>L:";
+    }
+    foreach $command (@commands) {
+	open(DUMP,">> $crashdump") or mydie("Unable to open crashdump file $crashdump: $!");
+	select DUMP;
+	print "-----------------------------------------\n";
+	print "COMMAND: $command\n";
+	print "-----------------------------------------\n";
+	close(DUMP);
+	select STDOUT;
+
+	doit("$command $selector$crashdump");
+	unless (($runall or $batchmode)) {
+	    my ($ans,$longans) = mygetinput
+		(
+		 "\nThat was $command".
+		 "\n\n<C>ontinue, <Abort> or say <Y>es to run remaining commands without pausing.",
+		 "C",
+		 "C","A","Y");
+	    if ($ans eq "y") {
+		$runall = 1;
+	    }
+	    elsif ($ans eq "a") {
+		mymydie("ABORTING crashdump");
+	    }
+	}
+    }
+    
+    my @autoargv = ("-L");
+    mydo("autologcheck",@autoargv) unless $batchmode;
+    
+    offerabort(
+	       "That was a listing of log files. If any of the crashdump commands logged, CLEAN THAT UP!". 
+	       "") unless $batchmode;
+    
+    ($output,$nopenlines,@listing) = doit("-lsh ls -latr $crashdump");
+    return 1;
+}
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs crashdump @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }  
+    require $autoutils;
+    $prog = "-gs crashdump";
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session when \"$prog\" or
+\"=crashdump\" is used.
+
+";
+  $gsusagetext="
+Usage: $prog [options]
+
+$prog uses -ls to find the latest set of Solaris crash files on target, then
+runs a series of commands against the crash files to generate logs that can
+be analyzed to find out why the crash took place.
+
+OPTIONS
+ -h         Show this help
+ -v         Show version
+ -l	    List the crash files only; don't analyze them.
+ -Y         Run all commands without pausing between runs.
+ -b	    Run in batch mode; generate the crash dump but don't show anything on the screen.
+
+";
+
+  mydie("bad option(s)") if (! Getopts( "hvlYb" ) );
+  usage() if ($opt_h or $opt_v);
+
+  $listonly = $opt_l;
+  $runall = $opt_Y;
+  $batchmode = $opt_b;
+
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+
+  # Bail if mdb doesn't exist.
+  ($output,$nopenlines,@output) = doit("which mdb");
+  unless ($listonly or grep {/mdb$/} @output) {
+    myalert("mdb is not installed on this target!");
+    # This will prevent parsecrashfiles() from executing. 
+    $listonly = 1;
+  }
+
+  # Save any old crash files.
+  preservefile("$opdown/crashdump.$nopen_rhostname");
+
+}

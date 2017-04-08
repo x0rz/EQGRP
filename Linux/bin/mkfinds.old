@@ -1,0 +1,127 @@
+#!/usr/bin/env perl
+$| = 1 ;
+$usagetext="
+Usage: mkfinds [-o]
+
+mkfinds looks first in /current/down/cmdout and then in ./ for any files
+of the form \"HOST-find\". If they exist, lsstamp is used to created
+three sorted find files /current/HOST.find.sorted.time[mac], one for
+each of mtime, atime and ctime.
+
+  * If the sorted files already exist there, nothing is done unless the
+    \"-o\" overwrite flag is used (use if original HOST-find has grown).
+
+  * If you created a new HOST2-find file from another host, just re-run
+    mkfinds and it will create new sorted files from the new file. 
+
+  * All sorting is done in the background, so you immediately get a
+    prompt back, along with a pastable command or two.
+
+  * mkfinds pops up a window indicating when background sorting is done.
+
+Version 1.5
+";
+if (@ARGV) {
+  if ($ARGV[0] eq "-o") {
+    $wipefirst = 1;
+  } else {
+    print "$usagetext";
+    exit ;
+  }
+}
+if (-d "/current/down/cmdout") {
+  $dir = "/current/down/cmdout";
+  $destdir = "/current";
+  $current = 1;
+} else {
+  $dir = "./";
+  $destdir = "./";
+  $current = 0;
+}
+if (`uname` eq "Linux") {
+  $www = "www" ;
+} else {
+  $www = "" ;
+}
+@timetypes = ("m","a","c");
+%column = ("m",1,
+	   "a",2,
+	   "c",3,
+	  );
+@finds = (split (/\n/, `ls -1 $dir/*-find 2>/dev/null`) );
+if (@finds) {
+  if ($#finds > 0) {
+    $theseorthis = "these source files";
+  } else {
+    $theseorthis = "this source file";
+  }
+  print "
+Making sorted finds. Found $theseorthis:\n";
+  foreach (@finds) {
+    print "\t$_\n" ;
+  }
+ } else {
+   die "nothing to do in $dir";
+}
+$allpids = "" ;
+print "\n";
+foreach $find (@finds) {
+  ($host) = $find =~ /([^\/]*)-find/ ;
+  foreach $ext (@timetypes) {
+    `rm -f $destdir/$host.find.sorted.time$ext 2>/dev/null` if $wipefirst;
+    if (! -e "$destdir/$host.find.sorted.time$ext") {
+      $pid = fork;
+      if ($pid) {
+	$allpids .= "|$pid" ;
+	print "Building new $destdir/$host.find.sorted.time$ext (pid=$pid)\n" ;
+      } else {
+	my $c = $column{$ext};
+	exec "lsstamp -s -c$c $find > $destdir/$host.find.sorted.time$ext";
+      }
+    } else {
+      print "$destdir/$host.find.sorted.time$ext exists, skipping\n";
+    }
+  }
+}
+if (! $allpids) {
+  print "Found no files to create.\n\n";
+} else {
+  $allpids =~ s/^\|// ;
+  print "\nNow creating sorted finds in background.\n\n
+     ps -ef$www | egrep '$allpids' | egrep -v 'perl|grep'\n";
+}
+print "     ls -al @finds $destdir/*find.sorted*\n
+Pastables above for your use.\n";
+
+if ($tmp = `ls -al @finds $destdir/*.find.sorted*`) {
+  print "\n$destdir currently has these sorted finds (may still be growing):\n\n$tmp\n";
+}
+if ($allpids) {
+  open (OUT,"> /tmp/mkfinds.wait") || die "Cannot open /tmp/mkfinds.wait" ;
+  print OUT <<"EOF";
+#!/usr/bin/env perl
+\$| = 1 ;
+print "\aThe mkfinds are building..." ;
+while (1) {
+  last unless `ps -ef$www | egrep '$allpids' | egrep -v 'perl|grep'` ;
+  sleep 2;
+}
+print "\a:\\n
+ls -al @finds $destdir/*.find.sorted*\\n".
+\`ls -al @finds $destdir/*.find.sorted*\`.
+"\\n\\n\\n
+
+Hit return, ^D or ^C to close this alert window\\n\\n\\n" ;
+sleep 1 ;
+print "\a\n" ;
+<STDIN> ;
+EOF
+  $xargs = "-bg white -fg darkblue -geometry 119x18+0+0 -title mkfinds_building" ;
+  close (OUT) ;
+  `chmod 777 /tmp/mkfinds.wait` ;
+  # child execs mkfinds.wait
+  close(STDOUT) ; # these were keeping NOPEN from giving prompt back
+  close(STDIN) ;
+  exec ("xterm $xargs -e /tmp/mkfinds.wait") unless ( $pid = fork ) ;
+  # parent exits - get prompt right back
+}

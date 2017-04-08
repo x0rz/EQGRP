@@ -1,0 +1,628 @@
+#!/usr/bin/env perl
+$VER="1.3.1.4" ;
+myinit() ;
+my ($clientver,$histfile,$cmdoutfile,$localcwd,$nhome,$localpid,$localppid,
+    $serverver,$wdir,$targetos,$targetcwd,$targetpid,$targetppid)
+  = parsestatus();
+if ($targetos =~ /SunOS 5.[2345]/) {
+  unless($noprompt) {
+    my ($ans) = mygetinput("$COLOR_FAILURE\n".
+"WARNING:\tOn $targetos, $prog cannot be used on files that are\n".
+"\t\tcurrently open, for example by syslogd.$COLOR_NOTE\n".
+"\n".
+"\t\tAnd -O cannot be used with $targetos since it relies on /proc/*/fd\n".
+"\n".
+"Do you wish to proceed?","N");
+    mydie("User aborted") if ($ans eq "n");
+  } else {
+    mywarn("$prog is not usable on open files below Solaris 2.6");
+    doit("-beep 9") unless (-e "$optmp/grepoutbeeped");
+    `touch $optmp/grepoutbeeped`;
+  }
+  $checkifopen=0;
+}
+
+@targetcommandsrun=("egrep","file","df","head");
+my $result = testrun(@targetcommandsrun);
+mymydie("${result} -- Cannot continue") if $result;
+
+my $cdplater=0;
+unless ($targetcwd eq $tmpdir) {
+  $cdplater++;
+  ($output,$nopenlines) = doit("-cd $tmpdir",
+			       #		 ">> $t.0",
+			       #		 "-ls $tmpdir/$t.0",
+			       #		 "-rm $t.0",
+			      );
+  my $olddir = $targetcwd;
+  my ($clientver,$histfile,$cmdoutfile,$localcwd,$nhome,$localpid,$localppid,
+    $serverver,$wdir,$targetos,$targetcwd,$targetpid,$targetppid)
+    = parsestatus(force);
+
+  mydie("Cannot -cd to $tmpdir")
+    unless ($targetcwd eq $tmpdir);
+  mywarn(".\n\n".
+	 "NOTE: The NOPEN prompt still shows the OLD cwd, $olddir,\n".
+	 "      despite the -cd working as confirmed by -status.");
+  sleep 2;
+}
+# touch $tmpdir back at end of all things
+($output,$nopenlines,@output) = doit("-ls -nd $tmpdir");
+# -ls -n now prints out extra comment lines we get rid of here
+my $tmpdirtouch = $output[0];
+$tempsup=1;
+
+($output,$nopenlines,@output) = doit("=df .");
+my $freekbytes=0;
+my $kbyte=0;
+my $availfield = undef;
+my (%lsline,%touchline,%atime,%mtime,%inode,$lastlineshort) = ();
+foreach (@output) {
+  s/\s+/ /g;
+  s/^ //;
+  unless (/ /) {
+    $lastlineshort = "$_ ";
+    next;
+  }
+  $_ = $lastlineshort . $_;
+  $lastlineshort = "";
+  (@f) = split(/ /,$_) ;
+  my $mount = pop(@f);
+  unless (defined $availfield) {
+    $kbyte++ if (/kbytes/i or /1k-blocks/i);
+    for ($i=0;$i<$#f;$i++) {
+      $availfield=$i if $f[$i] =~ /avail/i;
+      last if (defined $availfield);
+    }
+  } else {
+    $freekbytes=$f[$availfield] ;
+  }
+  dbg("kbyte=$kbyte freekbytes=$freekbytes=Parsing line:=$_=");
+}
+$freekbytes /= 2 unless $kbyte; # That is, 512 byte blocks assumed
+($lsnoutput,$nopenlines,@lsnoutput) = doit("-ls -n @targetfiles");
+foreach (@lsnoutput) {
+  # -ls -n now prints out extra comment lines we get rid of here
+  next if /^\#/;
+  my ($mtime,$atime,$file) = /touch -t (\d+):(\d+)\s+(.*)[\r\n]*/;
+  $touchline{$file} = $_;
+  $mtime{$file} = $mtime;
+  $atime{$file} = $atime;
+}
+
+# This block to test just touchback();
+#($ans,$longans) = touchback("/var/adm/messages",1);
+
+#doit("-ls /var/adm/messages /etc/passwd",
+#     "-touch -t 1116141001:1116517309    /var/adm/messages");
+#mydie("done:\n$ans\n$longans");
+
+($output,$nopenlines,@output) = doit("-ls -i @targetfiles");
+@targetfiles = () ;	# rebuild this from output not command line
+my $checkfiles = "" ;
+while (@output) {
+  my $next=0;
+  $_ = shift(@output);
+  ($inode,$type,$size,$mon,$file) =
+    /^\s*(-{0,1}\d+)\s+(.).*\s+(\d+)\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+\d{1,2}\s+[\d:]+\s+\d{4}\s*(.*)/i;
+  $inode{$file} = $inode;
+  $lsline{$file} = $_;
+  $size = $size/1024 ; # now in K
+  chomp($file);
+  $next++ if ($type eq "d") ;
+  $next++ unless ($type eq "-") ;
+#  if ($checkifopen) {
+#    my @result = checkifopen($inode);
+#    if (@result) {
+#      if ($result[0] < 0) {
+#	progprint("CANNOT check if $file is open:\n".
+#	       "\t$result[1]",1);
+#      } else {
+#	unless (-e "$opdown/ps.$nopen_rhostname") {
+#	  ($output) = doit("=ps > L:$opdown/ps.$nopen_rhostname");
+#	}
+#	if (open(IN,"$opdown/ps.$nopen_rhostname")) {
+#	  $output="$result[1]\n\n";
+#	  while (<IN>) {
+#	    $output .= $_ if (/\s$result[0]\s+\d+\s+/);
+#	  }
+#	  close(IN);
+#	}
+#	progprint("WARNING: $file seems to be open by process $result[0]:\n\n".
+#	       "$output\n\n".
+#	       "\tHOWEVER, we will proceed with the attempt, which you can skip or abort.",$COLOR_FAILURE,
+#		  "pause4");
+#      }
+#    }
+#  }
+  if (!$next) {
+    if ($size > (0.90 * $freekbytes)) {
+      $size = int(100*$size)/100 ;
+      progprint("\n\n\nSKIPPING ${size}K $file.\n\t\t".
+		"You have to figure out some other way to clean that.\n\t\t".
+		"(It is bigger than 90% of free space in $tmpdir, ${freekbytes}K free.)\n\n\n",$COLOR_FAILURE);
+      mygetinput("Hit Enter to continue.") unless $noprompt;
+      $next++;
+    } elsif ($size == 0) {
+      if ($noprompt) {
+	progprint("\n\n\nSKIPPING empty file $file.\n\n");
+      } else {
+	mygetinput("\n\n\nSKIPPING empty file $file.\n\nHit Enter to continue.");
+      }
+      $next++;
+    }
+  }
+  if ($next) {
+    # put times back on files we are done with only
+    touchback($file);
+    next;
+  }
+  $fileext{$file} = fileext($file) ;
+  push(@targetfiles,$file);
+  $checkfiles .= " $file" ;
+}
+if (@targetfiles) {
+  my %notasciifile = () ;
+  my @dothesefiles = @targetfiles ;
+  if ($checkascii and $checkfiles) {
+    ($output,$nopenlines,@output) = 
+      doit("file $checkfiles");
+    my $asciioutput = "" ;
+    my $badoutput = "" ;
+    @dothesefiles = () ;
+    while (@output) {
+      $_ = shift(@output);
+      my ($file,$rest) = /(.*):\s+(.*)/ ;
+      unless ($file and $rest) {
+	$badoutput .= $_;
+	touchback($file);
+	next;
+      }
+      unless ($rest =~ /ascii/i or $rest =~ /text/i) {
+	$notasciifile{$file} = 1 ;
+	touchback($file);
+	$asciioutput .= "\t$_" ;
+      }
+    }
+    mymydie("\n\nUnexpected/malformed output from file command:\n$badoutput\n\nBAILING!")
+      if $badoutput;
+    if ($asciioutput) {
+      progprint("NOT checking these non-ascii files (times already touched back):\n\n$asciioutput\n",
+		$COLOR_FAILURE);
+      sleep 7 ;
+    }
+  }
+
+  # Put timestamp back on ALL files. If we're checking ascii, then
+  # the "file" command above changed the access time.
+  my $matchedfiles=0;
+  my $aborted=0;
+  foreach $file (@targetfiles) {
+    if ($aborted or $notasciifile{$file}) {
+      touchback($file);
+      next;
+    }
+    if ($removetail) {
+      ($output,$nopenlines,@output) = 
+	doit("-tail -$removetail $file");
+    } else {
+      ($output,$nopenlines,@output) = 
+	doit("egrep$nocase \"$regexp\" $file");
+    }
+    if ($output) {
+      $matchedfiles++;
+      my $s="";
+      if ($removetail) {
+	$s="s" if ($removetail > 1);
+      } else {
+	$s="s" if (@output > 1);
+      }
+      $output = "(See command above for lines to remove--too long to duplicate here.)"
+	if length($output) > 512;
+      if ($noprompt) {
+	$ans = "y";
+      } else {
+	my $extrawarning="";
+	if ($checkifopen) {
+	  my @result = checkifopen($inode{$file},$file);
+	  #dbg("$#result entries in result=(@result)");
+	  if ( my ($pids) = (@result)) {
+	    my $output="";
+	    if ($pids =~ /^-\d+$/) {
+	      progprint("CANNOT check if $file is open:\n".
+			"\t$result[1]",1);
+	    } else {
+	      preservefile("$opdown/ps.$nopen_rhostname");
+	      doit("=ps > L:$opdown/ps.$nopen_rhostname");
+
+	      if (open(IN,"$opdown/ps.$nopen_rhostname")) {
+		$output="$result[1]\n";
+		while (<IN>) {
+		  foreach my $pid (split(/ /,$pids)) {
+		    $output .= $_ if (/\s$pid\s/);
+		  }
+		}
+		close(IN);
+	      }
+	      my $es = "es" if ($result[0] =~ / /);
+	      $extrawarning = $COLOR_FAILURE.
+		"WARNING: $file seems to be open by process$es $result[0]:\n\n".
+		"$output\n\n".
+		"\tHOWEVER, we will proceed with the attempt if you do not abort.\n";
+	      $extrawarning .= $COLOR_NOTE."\n".
+		"  NOTE: Proceeding with only syslogd having the file open is:\n".
+		"        OK for Solaris (>= 5.6) and\n".
+		"        OK for Linux (all) operating systems.\n"
+		  if ($nopen_server_os =~ /linux/i or
+		      $nopen_server_os =~ /(sunos|solaris)/i
+		     );
+		$COLOR_NORMAL;
+	      doit("-beep 8");
+	    }
+	  }
+	}
+	if ($removetail) {
+	  ($ans) = mygetinput
+	    ($extrawarning.
+	     "\nFinal $removetail line$s in $file:${COLOR_FAILURE}\n".
+	     "\n".
+	     "$output\n".
+	     "$COLOR_NORMAL\n".
+	     "Remove trailing $removetail line$s of $file\n".
+	     "(or Abort $prog entirely)?","N","A"
+	    );
+	} else {
+	  ($ans) = mygetinput
+	    ($extrawarning.
+	     "\nLine$s in $file matching $regexp:${COLOR_FAILURE}\n".
+	     "\n".
+	     "$output\n".
+	     "$COLOR_NORMAL\n".
+	     "Clean offending line$s from $file\n".
+	     "(or Abort $prog entirely)?","N","A"
+	    );
+	}
+      }
+      if ($ans eq "a") {
+	progprint("ABORTING!$COLOR_NOTE After we maybe set some times back.",
+		  $COLOR_FAILURE,"pause2");
+	$aborted++;
+      } elsif ($ans eq "y") {
+	$cleanedsome++;
+	if ($removetail) {
+	  ($output) = doit("wc $file");
+	  my ($headcount) = $output =~ /^\s*(\d+)/;
+	  $headcount -= $removetail;
+	  doit("head -$headcount $file > $tt ; cat $tt > $file ; rm $tt");
+	} else {
+	  doit("egrep -v$nocase \"$regexp\" $file > $tt ; cat $tt > $file ; rm $tt");
+	}
+	if ($checkresults) {
+	  if ($removetail) {
+	    dolocalecho("Following -tail should be clean if successful.",1);
+	    doit("-tail -$removetail $file");
+	  } else {
+	    dolocalecho("Following grep should come back empty if successful.",1);
+	    doit("egrep$nocase \"$regexp\" $file");
+	  }
+	}
+	if ($dateinfile) {
+	  ($output) = doit("-tail -1 $file");
+	  my ($secs) = epochseconds($output);
+	  if ($secs) {
+	    doit("-touch -t $secs:$secs $file");
+	    progprint("Used timestamp in last line of $file for mtime and atime.",
+		      $COLOR_SUCCESS,
+		      "pause1");
+	  } else {
+	    mywarn("No date/time found in last line of $file--using its original times");
+	    touchback($file,1);
+	  }
+	} else {
+	  touchback($file,1);
+	}
+      } else {
+	touchback($file);
+	my $what = "MATCHES";
+	$what = "tailed" if $removetail;
+	progprint("$file $what but not cleaning it");
+      }
+    } else { # no $output
+      if ($removetail) {
+	touchback($file);
+	progprint("This is odd...a non-empty file has no tail?",
+		  $COLOR_FAILURE,pause10);
+      } else {
+	touchback($file);
+	progprint("$file does not contain \"$regexp\"");
+      }
+    }
+  }#foreach $file
+  my $ascii = " ascii" if $checkascii ;
+  dolocalecho("No$ascii files found containing: \"$regexp\"",1)
+    unless $matchedfiles;
+  doit(
+       "-cdp"
+      ) if $cdplater;
+  if ($tmpdirtouch and !($tmpdirtouch =~ /-\d/)) {
+    ($output) = doit($tmpdirtouch);
+    mywarn("The -touch command above returned no output, which means that likely\n".
+	   "\n\n\n\t\aTHE LAST -touch DID NOT WORK!!!  So times on $tmpdir are maybe current!")
+      unless ($output);
+  }
+  if ($cleanedsome) {
+    my $what2 = "${COLOR_NOTE} (ABORTED after some cleaning)$COLOR_FAILURE"
+      if $aborted;
+    dolocalecho("Done$what2. All times touched back.",1)
+  } else {
+    my $what = "DESIRED";
+    $what = "REQUIRED" unless $matchedfiles;
+    my $what2 = "${COLOR_NOTE} (ABORTED)$COLOR_FAILURE"
+      if $aborted;
+    dolocalecho("NO CLEANING $what$what2--Times touched back",1);
+  }
+}#if @targetfiles
+
+#END MAIN LOGIC SUBS FOLLOW
+
+sub myinit {
+  $willautoport=1;
+  require "../etc/autoutils" ;
+  $prog = "-gs grepout" ;
+  $vertext = "$prog version $VER\n" ;
+  mymydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless $nopen_rhostname;
+  $t = ".t0.$nopen_mypid" ;
+  $tt = ".t1.$nopen_mypid" ;
+  mymydie("bad option(s)") if (! Getopts( "hvp:diw:CNLl:O" ) ) ;
+$usagetext = "
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"-gs grepout\" is used.
+
+";
+  $gsusagetext="Usage: $prog [options] \"egrep-regexp\" /path/to/target/file(s)
+
+$prog uses the \"egrep -v ... > t ; cat t > targfile\" trick to
+remove lines matching \"egrep-regexp\" from the file(s) given. The user
+is shown the matching content and then chooses whether or not to clean
+each file.
+$COLOR_FAILURE
+NOTE: This option cannot always be used. E.g., Solaris 2.5 and below
+      syslogd keeps its log files open and so you cannot shorten them
+      this way (use sgrep). It is up to you to know when this method
+      is safe. Even on Solaris, however, old log files can be cleaned
+      this way (since they are not currently in use). $COLOR_NORMAL
+
+The egrep-regexp argument is, oddly enough, an egrep regular
+expression.  See man egrep for more on that. For example, using
+\"one way|or another\" matches either \"one way\" or \"or another\".
+(Now you've got a Blondie song in your head. That's your reward for
+actually *reading* the usage statement. Hope you like it.  ;-D  )
+
+The file argument(s) may each be a directory or file and MUST start
+with a \"/\". They can contain \"*\" wildcards, but only if that argument
+is double quoted. If the argument (or its wildcard match on target) is
+a directory, all files in that directory are processed.
+
+The following target-resident programs will be used (their existence is
+verified before proceeding):  @targetcommandsrun
+
+All files examined/processed by $prog will have their mtime and
+atime preserved via -touch. (${COLOR_FAILURE}NOTE: This WILL change the ctime to the
+current time.$COLOR_NORMAL)
+
+NOTE 1: One temporary file (.t1.NOPENPID) is used during the cleaning
+        step, but $prog cleans this up.
+
+NOTE 2: To use the \"\$\" character in a regexp to signify end of line,
+        enter it as \"\\\\\$\" (two backslashes, then the \$).
+
+NOTE 3: Consecutive spaces must be entered as dots or alternating dots
+        and spaces. Instead of \"Nov  9\", use \"Nov .9\". Consecutive
+        spaces are shrunk down to a single space by the shell.
+
+OPTIONS
+  -i        Makes the egrep case insensitive.".
+#  -d        Debug mode--do everything but actually clean the files and
+#            show the NOGS script created to do so.
+"
+  -w /dir   Use /dir as the temporary file directory. One good reason to
+            use this is if your usual temp directory is too small for the
+            file being processed. [default: /tmp/]
+  -C        Check that grepout worked with another grep to stdout.
+            (what? you don't trust the software? bah!)
+  -N        Do NOT prompt whether or not to clean, just do so. Can be
+            bad if your regexp is not solid. ${COLOR_FAILURE}NOTE: This does NOT
+            make $prog usable with -gs holdwindow$COLOR_NORMAL.
+  -L        Disable default behavior of looking for timestamp in final
+            line of file (after cleaning) to touch time to.
+  -l ##     Remove the last ## lines of the file.
+  -O        Use -ls -i /proc/*/fd to try to determine if file being
+            processed is open. If so, you will be warned and given the option
+            to skip that file. If -N is being used, the attempt WILL BE MADE
+            anyway. (NOTE: on Solaris below 2.6, -O does not work, but you are
+            warned of this restriction.)
+
+";
+  mydie("\n\n\n$prog requires autoutils v1.0.6.3 or better\n\t\t(that is, noclient 3.0.3.2)")
+    if ((verval($autoutilsver))[1] < (verval("1.0.6.3"))[1]);
+  usage() if ($opt_h or $opt_v or !@ARGV) ;
+  $dateinfile = !$opt_L;
+  $removetail = int($opt_l) if
+    ($opt_l and ($opt_l == int($opt_l)) and $opt_l > 0);
+  unless ($removetail) {
+    $regexp = shift(@ARGV);
+  }
+  my $inquote = 0 ;
+  $inquote = ( $regexp =~ m/^\"[^\"]*$/) ;
+  @targetfiles = () ;
+  @openfiles = ();
+  # Traverse ARGV, shifting off first entry each pass. It's either
+  # more of the regexp if we're $inquote, or it's the file(s)
+  while ($_ = shift(@ARGV)) {
+    if (!$inquote and (/^\/.+/ or /^\"\/[^\"]*\"$/ or /^\/[^\"]*$/)) {
+      s/\"//g ; # no quotes after regexp we care about
+      s/^([^\\]{0,1})\*/$1\\*/ ; # escape the wildcards
+      s/([^\\]{2})\*/$1\\*/g ; # escape the wildcards unless already escaped
+      push(@targetfiles,$_) ;
+    } else {
+      if ($inquote) {
+	$inquote=0 if (/^[^\"]*\"$/) ;
+	$regexp .= " ". $_;
+      } else {
+	warn("Ignoring malformed target file $_\n");
+      }
+    }
+  }
+  ($regexp) = $1 if $regexp =~ /^\"(.*)\"$/;
+  @origtargetfiles = @targetfiles ;
+  mydie("Target file required")
+    unless(@targetfiles);
+  $noprompt = " -N" if $opt_N;
+  $tmpdir = $opt_w ;
+  $tmpdir = "/tmp" unless $tmpdir;
+  $tmpdir =~ s/\/+$// ;
+  mymydie("Invalid -w argument \"$tmpdir\":\n\tmust be a full path")
+    unless ($tmpdir =~ /^\/\S+$/) ;
+  $checkascii = " -a"; # if $opt_a ;
+  $checkresults = $opt_C;
+  $nocase = " -i" if $opt_i ;
+  $finalpass = 0 ;
+  $checkifopen=$opt_O;
+  $debug = " -d" if $opt_d ;
+  $socket = pilotstart(quiet);
+}#myinit
+
+sub mymydie {
+  local ($what,$color,$color2,$what2) = (@_) ;
+  $color = $COLOR_FAILURE unless $color ;
+  $color2 = $color unless $color2 ;
+  $what2 = " $what2" if ($what2) ;
+  doit(
+       #"rm -f $tmpdir/$t.* $tmpdir/$tt",
+       "-cdp") if $cdplater;
+  ($output) = doit($tmpdirtouch) if $tmpdirtouch;
+  mydie($what,$color,$color2,$what2);
+}
+sub dopause {
+  dolocalecho(@_) if @_ ;
+  doit("-pause") ;
+}#dopause
+
+sub fileext {
+  my $tmp = $_[0];
+  $tmp =~ s/\//_/g ;
+  return $tmp;
+}#fileext
+
+sub touchback {
+  # do nothing unless we have a valid touchline
+  # if we do touch it back
+  local ($file,$prompt) = (@_);
+  return unless $touchline{$file};
+  my ($mtime,$atime,$ans,$longans);
+  my $done=0;
+  if ($noprompt and $prompt) {
+    progprint("Defaulting to original timestamp (due to -N)");
+    $prompt=0;
+  }
+  if ($prompt) {
+    while (!$done) {
+      ($ans,$longans) =
+	mygetinput("Originally:\n\n".
+		   $lsline{$file}."\n".
+		   $touchline{$file}."\n\n".
+		   "${COLOR_FAILURE}Allowed formats include:$COLOR_NORMAL\n".
+		   " complete path or complete -ls line of reference file\n".
+		   " <epochtime> \t\t\t\t\t(used for both mtime and atime)\n".
+		   " <epochtime>:<epochtime> \t\t\t(mtime:atime)\n".
+		   " M/D[/[YY]YY] H:M[:S] M/D[/[YY]YY] H:M[:S] \t(mtime atime)\n".
+		   " M/D[/[YY]YY] H:M[:S] \t\t\t\t(used for both)\n".
+		   " \t(in M/D format, local GMT year assumed if not\n".
+		   " \tgiven, and seconds are randomized if left off.)\n\n".
+		   "Enter time(s) to use to touch $file back (or Abort): ","original");
+      if ($ans and $longans ne "original" and $ans ne "a") {
+	if ($longans =~ /^(\d+)(:\d+){0,1}\s*$/) {
+	  $mtime=$1;
+	  if (length($2)) {
+	    $atime=$2;
+	    $atime =~ s/^:+//;
+	  } else {
+	    $atime=$mtime;
+	  }
+	} elsif (my ($monnum,$mday,$year,$hrmin,$sec,$secondpart) = $longans =~
+		 /(\d+)\/(\d+)(\/\d+){0,1}\s+(\d+:\d+)(:\d+){0,1}(.*)/) {
+	  $year =~ s/^\/+//;
+	  my $mon = $mons[$monnum-1];
+	  if ($sec eq "") { # randomize $sec if not given
+	    ($sec) = padto(2,int(rand(60)));
+	    $sec = ":$sec";
+	  }
+	  # it is epochseconds() that decides to use current year if
+	  # none found in string.
+	  ($mtime) = epochseconds("$mon $mday $hrmin$sec $year");
+	  if ($secondpart and 
+	      (($monnum,$mday,$year,$hrmin,$sec) = $secondpart =~
+	       /(\d+)\/(\d+)(\/\d+){0,1}\s+(\d+:\d+)(:\d+){0,1}/)) {
+	    $year =~ s/^\/+//;
+	    $mon = $mons[$monnum-1];
+	    ($atime) = epochseconds("$mon $mday $hrmin$sec $year");
+	  } else {
+	    $atime = $mtime;
+	  }
+	} elsif ($longans =~ /(\/.*)$/) {
+	  my $reffile = $1;
+	  ($output,$nopenlines,@output) = doit("-touch $reffile $file");
+	  if ($output) {
+	    return ($output,$nopenlines,@output) ;
+	  } else {
+	    progprint("-touch line FAILED! Does $reffile exist?",$COLOR_FAILURE,"pause3");
+	    next;
+	  }
+	} else {
+	  progprint("Invalid response. Try again.",$COLOR_FAILURE,"pause3");
+	  next;
+	}
+      }
+      $done++;
+    }#while(!$done)
+  }# else defaults to touchline below
+  if ($ans eq "a") {
+    progprint("\aAborting touch on $file--times show today's date.",
+	      $COLOR_FAILURE,"pause5");
+  } else {
+    # this if forces epochtime of both to be > 0 which is fine
+    if ($mtime and $atime) {
+      return doit("-touch -t $mtime:$atime $file");
+    } else {
+      return doit($touchline{$file});
+    }
+  }
+}#touchback
+
+sub checkifopen {
+  local ($inode,$origfile) = (@_);
+  my ($output,$nopenlines,$pids,$lines,%gotpid);
+  unless (@openfiles) { # do this only once
+    ($output,$nopenlines,@openfiles) = doit("-ls -i /proc/*/fd");
+  }
+  return (-2,"cannot check /proc/*/fd") unless @openfiles;
+  foreach (@openfiles) {
+    my ($thisnode,$pid) = /^\s*(-{0,1}\d+)\s.* \/proc\/(\d*)/;
+    # Not sure why, but -ls puts " -. " in @output but user sees " -> "
+    # for links. Here we match either.
+    my ($linkedfile) = / \/proc.* -[\.\>] (\/\S*)/;
+    if ($thisnode == $inode or $linkedfile eq $origfile) {
+      $pid = 1 unless $pid > 0;
+      $lines .= "$_\n";
+      $pids .= "$pid " unless $gotpid{$pid}++;
+    }
+  }
+  chop($pids);
+  return ($pids,$lines) if $lines;
+  return ();
+}#checkifopen

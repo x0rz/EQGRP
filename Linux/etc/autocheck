@@ -1,0 +1,13 @@
+#!/usr/bin/env perl
+$VER="1.0" ;
+$nopen_mypid = $ENV{NOPEN_MYPID} ;
+$nopen_mylog = $ENV{NOPEN_MYLOG} ;
+$nopen_rhostname = $ENV{NOPEN_RHOSTNAME} ;
+$opdir = "/current" ;
+$opetc = "$opdir/etc" ;
+$opdown = "$opdir/down" ;
+if (-e "$opetc/showthis.$nopen_rhostname.$nopen_mypid") {
+  print `cat $opetc/showthis.$nopen_rhostname.$nopen_mypid` ;
+} elsif (-e "$opetc/showthis.$nopen_rhostname") {
+  print `cat $opetc/showthis.$nopen_rhostname` ;
+}

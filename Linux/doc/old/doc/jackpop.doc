@@ -1,0 +1,56 @@
+What it does:
+
+    Jackpop is a port redirector, anything that is sent to the port
+    you specify will be sent to the target that you specify, as long
+    as you are coming from the source that you specify.  It will pick 
+    up the port you are using and use that.  This allows for you to 
+    reuse the same port if you desire against the same target.  It does
+    put the correct TCP header in place, so any bad checksums will be
+    lost.
+
+    Network connections are hidden, but processes are not.
+
+Things it doesn't do:
+
+    1.  It has no encryption.  
+    2.  The port you use should not already be in LISTEN mode
+        - it does not so nice things to your target.  It will 
+          try to connect everything up, but will end up reseting you.
+    3.  It will use the destination port as the source port.  
+    4.  Process is not hidden unless you are under incision.
+    5.  Connection is connectionless, so resends are handled by endpoints
+
+Things to do:
+
+    Add encryption;
+    Add bulk port redirection;
+      - should work for yellow spirit.
+     
+Usage:
+
+TA="" SA="" TP="" LP="" jackpop
+
+TA=Target address where jackladder can be triggered
+SA=Source address, this is your address that you are connected to the internet
+TP=Target port where jack resides, port 23, port 25 etc
+LP=Listening port, this is where you direct the jackladder scripts to go
+
+Sample run: 
+
+[root@itt jackpop]# TA=murray SA=555.1.2.50 TP=25 LP=5559 ./jackpop
+got murray 
+got 555.1.2.50 
+got 25 
+got 5559 
+
+[511]
+
+ot@itt jackpop]# TA=murray SA=555.1.2.50 TP=25 LP=5559 D=hme0 ./jackpop
+got murray 
+got 555.1.2.50 
+got 25 
+got 5559 
+got hme0 
+
+[511]
+

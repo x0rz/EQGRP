@@ -1,0 +1,85 @@
+#
+# $Id: scripme.override.example,v 1.5 2005/06/07 20:39:49 ident Exp $
+#
+# This is a sample /current/etc/scripme.override file. If a file by that
+# name exists when scrubhands unpacks the op, it will be used instead
+# of the defaults to determine the number and characteristics of the
+# scripted xterms started by scrubhands (actually, started by scripme,
+# which is called by scrubhands). The following must be valid perl
+# executables that define the hash array %xtermargs.  
+# (NOTE: "perl -c filename" will confirm the validity of perl syntax.)
+#
+# sybil looks for a scripme.override to put in your op's ./etc directory
+# in the following locations, putting the first match it finds into
+# ./etc/scripme.override:
+#
+#     ~/OPS/userOverrides/scripme.override.projectname
+#     ~/OPS/userOverrides/scripme.override
+#     ~/OPS/scripme.override
+#
+# This allows you to have a generic ~/OPS/userOverrides/scripme.override
+# or ~/OPS/scripme.override file for some of your sybil builds, but
+# a project specific ~/OPS/userOverrides/scripme.override.projectname
+# file for others.
+#
+# The return value at the end is required.
+# 
+# See the xterm man page for lots more options.
+#
+# $defxargs : scripme will use these default xterm arguments any time
+# it pops up an xterm (whether for an exploit or a scripted window). 
+# Uncomment and modify if you want to override these defaults. E.g.,
+# if you wanted to reverse the background and foreground colors,
+# change the fg to a bg and vice versa.
+#
+#$defxargs="-display :0 -fn 7x13 +cm  +cn -sk -sb -sl 15000 -bg gray80 -fg black" ;
+
+# %xtermargs : In the xtermargs array, the "1", "2", etc., are the
+# 1st, 2nd, etc., scripted xterm that scrubhands/scripme will start
+# up automatically for you. If you don't have an override file, the
+# entries shown here will be what is used. I.e., scrubhands will
+# automatically start up four scripted xterms and a scripted
+# TCPDUMP window with the geometries shown.
+#
+%xtermargs = 
+(1," -geometry 80x24+0+0",
+ 2," -geometry 180x17+0+342",
+ 3," -geometry 123x44+510+0",
+ 4," -geometry 207x26+0-55",
+ "TCPDUMP","-display :0  -geometry 200x8-48-0",
+ "OPSCRIPT","-display :0  -geometry 114x52+1280+0",
+ "UNSCRIPTED1"," -geometry 150x33-0+0",
+ "UNSCRIPTED2"," -geometry 71x25-2+345",
+);
+
+# To customize your window locations and sizes, set up windows how you
+# would like them, and then use xwininfo to determine their current
+# geometry (see man xwininfo or just follow its prompt). The final
+# "-geometry" line is the one you want between the double quotes here
+# for that window.
+#
+# Below is a (commented) example, with the differences explained.
+# Note first that this one only starts 4 scripted windows.
+# Either change the above xtermargs entry to your liking or uncomment
+# (remove only the initial # sign) the one below and change it, and
+# then save this as your ~/OPS/scripme.override file.
+#
+#%xtermargs = (1,"", # use default xterm args on system for 1st window
+# 2,"-bg black -fg white", # change colors on the 2nd window and use default geometry
+# 3,"-geometry 102x40-0+0", # a tall wide window in the upper right for the 3rd
+# 4,"-geometry 102x40-0-0", # a tall wide window in the lower right for the 4th
+# # The TCPDUMP pair of lines below is required
+# "TCPDUMP",
+# "-geometry 200x14-0-165 -title 'TCPDUMP WINDOW' -name 'SCRIPTED TCPDUMP WINDOW'"
+#);
+
+# Following is equivalent to the above. Use whatever syntax you prefer.
+
+#$xtermargs{1} = "" ;
+#$xtermargs{2} = "-bg black -fg white" ;
+#$xtermargs{3} = "-geometry 102x40-0+0" ;
+#$xtermargs{4} = "-geometry 102x40-0-0" ;
+#$xtermargs{TCPDUMP} = "-geometry 200x14-0-165 -title 'TCPDUMP WINDOW' -name 'SCRIPTED TCPDUMP WINDOW'" ;
+
+
+return 1;

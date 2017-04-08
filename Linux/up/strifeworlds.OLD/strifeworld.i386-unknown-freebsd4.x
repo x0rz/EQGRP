@@ -1,0 +1,1 @@
+strifeworld.i386-unknown-freebsd4.4

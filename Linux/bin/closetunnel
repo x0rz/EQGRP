@@ -1,0 +1,9 @@
+#!/bin/sh
+[ "$PORT" ] || PORT=$1
+[ "$PORT" ] || PORT=`cat /current/bin/.tunnelport`
+[ "$PORT" ] || PORT=18787
+echo 'echo "c 1 2 3 4 5 6 7" | nc -w1 -u 127.0.0.1' $PORT
+echo 'echo "q" | nc -w1 -u 127.0.0.1' $PORT
+echo "c 1 2 3 4 5 6 7" | nc -w1 -u 127.0.0.1 $PORT
+echo "q" | nc -w1 -u 127.0.0.1 $PORT
+echo "q" | nc -w1 -u 127.0.0.1 $PORT

@@ -1,0 +1,1055 @@
+#!/usr/bin/env perl 
+
+#      print("\n\n\nNOW IN AUTOPSCOLOR WITH autoscript=$autoscript= DBG willautoport=$willautoport= socket=$socket=  ARGV=(@ARGV)\n\n\n");
+#dbg("\n\n\nNOW IN AUTOPSCOLOR WITH autoscript=$autoscript= DBG willautoport=$willautoport= socket=$socket=  ARGV=(@ARGV)\n\n\n");
+
+my $VER="1.0.0.9";
+$|=1;
+myinit() ;
+my (%procs, $normedlength, @notparsed, @nopenpids, $stoicnames,$mypid,@hiddenbins,$localupfiles,$nopenl,$nopens,$ddc,$ddw, $myppid) = ();
+
+if ($solaristarget or $linuxtarget) {
+  goahead();
+} else {
+  mywarn("This only works on Solaris or Linux systems");
+}
+# Called via do so must end with 1;
+1;
+
+# ToDo:
+# Add CWD checks for some known goods
+# How can we identify SBZ?
+# How can we identify other binaries that may be in hidden but not in up?
+
+
+sub goahead {
+    # Bad procs
+    my %reds = %nasties;
+#	(
+#	"[ds]trace]"    => "Process tracing",
+#        "top"           => "Process lister",
+#        "/trip"         => "Tripwire",
+#        "tripw"         => "Tripwire",
+#        "/tw/",         => "Tripwire",
+#        "su( -){0,1}\$" => "Root login",
+#        "hme[0-9]"      => "Network interface",
+#        "eth[0-9]"      => "Network interface",
+#        "snoop"         => "Network sniffer (Solaris)",
+#        "tcpdump"       => "Network sniffer",
+#        "prstat"        => "Process lister (Solaris)",
+#        "xen"           => "Xen VM Software",
+#        "vmw"           => "VMware",
+#        "virtual"       => "Unknown Virtual Machine?",
+#        "qemu"          => "Qemu VM Software",
+#        "ss_"           => "Sunscreen Firewall (Solaris)",
+#        "sunscreen"     => "Sunscreen Firewall (Solaris)",
+#        "ipf"           => "IPFilter (BSD)",
+#        "iptables"      => "IPTables (Linux)",
+#        "drwebd"        => "Dr. Web",
+#        "ufsdump"       => "Disk Dumper",
+#        "auditd\$"        => "Auditing Daemon",
+#        "symond"         => "System Monitor (Solaris)",
+#        "/ksg(http|ftp|auth|control)"               => "(CA-Jinchen) KILL Shield Gateway",
+#
+#		);
+
+    # Known goods for solaris, each group below is based on additions to the 
+    # group before it, and is not all-inclusive in itself
+    # The groups just reflect where I happen to find each process and may not be specific
+    # to a certain os/version
+    #
+    # Required fields: UID, TTY, CMD
+    # PID, PPID are optional
+    my @sblues = (
+        { 'UID' => "root", 'PID' => "0", 'PPID' => "0", 'TTY' => "\\?", 'CMD' => qr(^sched$) },             # 9 x86
+        { 'UID' => "root", 'PID' => "1", 'PPID' => "0", 'TTY' => "\\?", 'CMD' => qr(^/etc/init -$)},        # 9 x86
+        { 'UID' => "root", 'PID' => "2", 'PPID' => "0", 'TTY' => "\\?", 'CMD' => qr(^pageout$)},            # 9 x86
+        { 'UID' => "root", 'PID' => "3", 'PPID' => "0", 'TTY' => "\\?", 'CMD' => qr(^fsflush$)},            # 9 x86
+        { 'UID' => "root", 'PID' => "1", 'PPID' => "0", 'TTY' => "\\?", 'CMD' => qr(^/sbin/init$)},         # 10
+        
+        #root / ppid 1 / tty ?
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/sadm/lib/smc/bin/smcboot$)},        # 9 x86
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/sbin/syslogd$)},                    # 9 x86
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/lib/sysevent/syseventd$)},          # 9 x86
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/lib/picl/picld$)},                  # 9 x86
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/sbin/rpcbind$)},                    # 9 x86
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/lib/autofs/automountd$)},           # 9 x86
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/sbin/inetd -s$)},                   # 9 x86
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/lib/nfs/lockd$)},                   # 9 x86
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/sbin/cron$)},                       # 9 x86
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/sbin/nscd$)},                       # 9 x86
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/lib/power/powerd$)},                # 9 x86
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/lib/utmpd$)},                       # 9 x86
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/sbin/vold$)},                       # 9 x86
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/lib/snmp/snmpdx -y -c /etc/snmp/conf$)},    # 9 x86
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/lib/dmi/dmispd$)},                        # 9 x86
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/lib/ssh/sshd$)},                            # 9 x86
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/lib/sendmail -bd -q15m$)},                    # 9 x86
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/lib/im/htt -port 9010 -syslog -message_locale C$)},        # 9 x86
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/lib/lpsched$)},                    # 8
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/lib/efcode/sparcv9/efdaemon$)},    # 8
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/lib/svc/bin/svc.startd$)},                # 10
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/lib/svc/bin/svc.configd$)},                # 10
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/bin/auditadmr$)},                    # 10
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/sfw/sbin/snmpd$)},                # 10
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/lib/inet/inetd start$)},                # 10
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/lib/fm/fmd/fmd$)},                # 10
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/lib/dmi/snmpXdmid -s [\w\d-_.]+$)},    # 10
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/sbin/in.named$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/etc/opt/SUNWconn/atm/bin/atmsnmpd -n$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/etc/opt/SUNWconn/atm/bin/ilmid$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/lib/inet/in.ndpd$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/dt/bin/dsdm$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/bin/ksh /usr/dt/bin/sdtvolcheck -d -z 5 cdrom,zip,jaz,dvdrom,rmdisk$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "pts/\\d", 'CMD' => qr(^/usr/dt/bin/ttsession$)},
+        #{ 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^$)},
+        
+        # root / tty?
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^/usr/lib/saf/sac -t 300$)},                # 9 x86
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^/usr/openwin/bin/Xsun :0 (-defdepth \d+ )?-nobanner -auth /var/dt/A:0-\S{6}$)},        # 7
+        #{ 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^htt_server -port 9010 -syslog -message_locale C$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^mibiisa -r -p )},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^dtgreet -display :0$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^/bin/ksh /usr/dt/bin/Xsession$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^/usr/openwin/bin/fbconsole$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^rpc.ttdbserverd$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^/usr/dt/bin/rpc.ttdbserverd$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^dtwm$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^/usr/dt/bin/sdtperfmeter -f -H -t cpu -t disk -s 1 -name fpperfmeter$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^rpc.rstatd$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^/bin/cat /tmp)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^/usr/dt/bin/dtscreen -mode blank$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^/usr/dt/bin/dtexec -open 0 -ttprocid 1.1)},
+        
+        # non-root
+        { 'UID' => "daemon", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/lib/nfs/lockd$)},                    # 9 x86
+        { 'UID' => "daemon", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/lib/nfs/statd$)},                    # 9 x86
+        { 'UID' => "smmsp", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/lib/sendmail -Ac -q15m$)},        # 9 x86
+        { 'UID' => "daemon", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/lib/crypto/kcfd$)},                # 10
+        { 'UID' => "daemon", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/sbin/rpcbind$)},                    # 10
+        
+        # Non-tty ?
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "console", 'CMD' => qr(^/usr/lib/saf/ttymon -g )},            # 9 x86 / 8 / 7
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "console", 'CMD' => qr(^/usr/lib/saf/ttymon -g -d /dev/console)},            # 10
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?\\?", 'CMD' => qr(^/usr/openwin/bin/fbconsole -d :0$)},    # 9 x86
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "pts/\\d", 'CMD' => qr(^/usr/dt/bin/sdt_shell -c      unset DT;     DISPLAY=:0;       /usr/dt/bin/dt$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "pts/\\d", 'CMD' => qr(^-sh -c      unset DT;     DISPLAY=:0;       /usr/dt/bin/dtsession_res -merge$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "pts/\\d", 'CMD' => qr(^/usr/dt/bin/dtsession$)},
+        
+        # root / tty ?
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^/usr/dt/bin/dtlogin -daemon$)},            # 9 x86
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^/usr/openwin/bin/Xsun :0 -nobanner -auth /var/dt/A:0-diaiMa$)},        # 9 x86
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^/usr/sadm/lib/smc/bin/smcboot$)},        # 9 x86
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^/usr/lib/saf/ttymon$)},                    # 9 x86
+	{ 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^/usr/lib/saf/ttymon$)},                    # 9 x86
+        #{ 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^$)},
+        
+        # Other
+        #{ 'UID' => "", 'PID' => "", 'PPID' => "", 'TTY' => "", 'CMD' => qr()},
+	  ); # End Solaris blues
+
+    # Known goods for linux
+    my @lblues = (
+        # top guys
+        { 'UID' => "root", 'PID' => "1", 'PPID' => "0", 'TTY' => "\\?", 'CMD' => qr(^init)},
+        { 'UID' => "root", 'PID' => "1", 'PPID' => "0", 'TTY' => "\\?", 'CMD' => qr(^/sbin/init)},
+        { 'UID' => "root", 'PID' => "2", 'PPID' => "0", 'TTY' => "\\?", 'CMD' => qr(^\[kthreadd\])},
+
+        # root / PPID 1 / tty ?
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^\[kthread)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^\[migration)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^\[ksoftirqd)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^\[watchdog)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^\[events)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/libexec/mapping-daemon$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/sbin/acpid$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/bin/dbus-launch --exit-with-session /etc/X11/xinit/Xclients$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/libexec/gconfd-2 5$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/bin/gnome-keyring-daemon$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/libexec/bonobo-activation-server --ac-activate --ior-output-fd=18$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/libexec/gnome-settings-daemon --oaf-activate-iid=OAFIID:GNOME_SettingsDaemon --oaf-ior-fd=22$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/libexec/gam_server$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/bin/metacity --sm-client-id=default1$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^udevd$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^syslogd -m 0$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^klogd -x$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^rpc.idmapd$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^rpc.statd$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/sbin/udevd -d$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^auditd$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/sbin/hcid$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/sbin/sdpd$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^\[krfcommd)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^pcscd$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/sbin/sshd$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^cupsd$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^automount$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/bin/hidd --server$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^sendmail: accepting connections$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^anacron -s$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^crond$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/sbin/atd$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/sbin/smartd -q never$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/libexec/gdm-rh-security-token-helper$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^gpm -m /dev/)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^xinetd -stayalive)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/sbin/httpd$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "pts..", 'CMD' => qr(^\[TUX date)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^\[TUX date)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^\[TUX logger)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^\[TUX manager)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^mcstransd$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/sbin/restorecond$)},
+        
+        # root / tty ?
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[rpciod)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[cqueue)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[khungtaskd)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[kpsmoused)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[mpt_poll_0)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[mpt)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[kstriped)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[ksnapd)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[kmpathd)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[kmpath_handlerd)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[khelper)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[kacpid)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[kblockd)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[ata)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[ata_aux)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[aio)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[kauditd)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[vmhgfs)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[vmmemctl)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[pdflush)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[khubd)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[kswapd0)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[kseriod)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[kjournald)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[scsi_eh_0)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[khubd)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^/usr/bin/gdm-binary -nodaemon$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^/usr/bin/gdm-binary -nodaemon$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^/usr/X11R6/bin/X :0 -audit 0 -auth /var/gdm/:0.Xauth -nolisten tcp vt7$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^/usr/bin/gnome-session$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^/sbin/pam_timestamp_check -d root$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^/sbin/audispd$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^hald-runner$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^/usr/sbin/gdm-binary -nodaemon$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^hald-addon-storage: )},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^winbindd$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[cifsoplockd)},
+        
+        
+        # Non tty = ?
+        { 'UID' => "root", 'PID' => "", 'PPID' => "1", 'TTY' => "tty.", 'CMD' => qr(^/sbin/mingetty tty\d$)},
+        { 'UID' => "root", 'PID' => "", 'PPID' => "", 'TTY' => "tty.", 'CMD' => qr(^/usr/bin/Xorg :0 )},
+        
+        # Other users
+        { 'UID' => "htt", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/sbin/htt -retryonerror 0$)},
+        { 'UID' => "canna", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/sbin/cannaserver -syslog -u canna$)},
+        { 'UID' => "dbus", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^dbus-daemon --system$)},
+        { 'UID' => "smmsp", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^sendmail: Queue)},
+        { 'UID' => "avahi", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^avahi-daemon: running)},
+        { 'UID' => "avahi", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^avahi-daemon: chroot helper$)},
+        { 'UID' => "xfs", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^xfs -droppriv -daemon$)},
+        { 'UID' => "rpc", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^portmap$)},
+        { 'UID' => "gdm", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^/usr/libexec/gdmgreeter$)},
+        { 'UID' => "apache", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^/usr/sbin/httpd$)},
+        { 'UID' => "nscd", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^/usr/sbin/nscd$)},
+        { 'UID' => "ntp", 'PID' => "", 'PPID' => "1", 'TTY' => "\\?", 'CMD' => qr(^ntpd -u ntp:ntp)},
+        { 'UID' => "nobody", 'PID' => "", 'PPID' => "", 'TTY' => "\\?", 'CMD' => qr(^\[TUX worker )},
+
+    );
+
+    # Cautions
+    my @yellows = (
+        qr(\./),
+        qr(^/bin/bash --posix \+o history$),
+        qr(^ps ),
+#        qr(^/bin/bash ),
+#        qr(^/bin/sh ),
+#        qr(^/bin/ksh ),
+#        qr(^/bin/csh ),
+#        qr(^/bin/tcsh ),
+        qr(^sshd: root),
+    );
+    
+    # Some vars we use in this sub
+    my ($cangetprocinfo, $hiddensub,@psout,$output) = ();
+    
+
+    # Until I can find a better way to do this (pscheck style maybe), just do =ps
+    my $pscmd = "=ps";
+    # Holds the concatenated output of our sorted/colored process list for printing to the user
+
+    $hiddensub = &check_hidden;    # -ctrl -LR, save substring of our hidden
+    $cangetprocinfo = &check_proc;    # -ls /proc, check for pids
+    ($mypid, $myppid) = &get_pid;
+    
+    if ($hiddensub) {
+        @hiddenbins = &get_hiddenbins($hiddensub);
+    }
+    # List of our local files
+    if (@hiddenbins > 0) {
+        $localupfiles = `ls -lR /current/up | egrep -v '^l|/' | tr -s ' ' | cut -d' ' -f5,9 | sort -rnu`;
+    }
+    # My own nopenpids array...
+    foreach (lookupnopenpids(1)) {
+        push(@nopenpids, $_);
+    }
+    
+    # Build stoic names as a scalar, checking is much faster this way
+    my @dirs = ("/bin/", "/sbin/", "/usr/bin/", "/usr/sbin/");
+    my @pre = ("audit","boot","cache","core","cron","init","inet","filesys","key","ntp","root","sys","rpc","vol");
+    my @suf = ("adm","agen","con","clien","inf","mg","stat","ser","svc");
+    foreach $dir (@dirs) {
+        foreach $suf (@suf) {
+            foreach $pre (@pre) {
+                $stoicnames .= $dir . $pre . $suf . ' ';
+            }
+        }
+    }
+    $stoicnames .= '/usr/bin/modload ';
+
+    # Get the process list
+    my (undef, undef, @psout) = doit($pscmd);
+    
+    # Save the header off to use later
+    my $header = shift @psout;
+    # Used for keying the procs hash when generating the final output
+    my @fields = split(/\s+/, $header);
+    
+    # Here we remove entries we grepped for or grepped out
+    # Grep for any entries we do want
+    if ($opt_g) {
+        my @procarray;
+        my @greps = split(/,/, $opt_g);       
+        LINES: for (my $x = 0; $x<= $#psout; $x++) {
+            foreach my $grep (@greps) {
+                if ($psout[$x] =~ /$grep/) {
+                    push (@procarray, $psout[$x]);
+                }
+            }
+        }
+        @psout= @procarray;
+    }
+    # Grep out any entries we dont' want
+	  if ($opt_v) {
+        my @procarray;
+        my @grepouts = split(/,/, $opt_v);                    # We loop through output once here
+        LINES: for (my $x = 0; $x<= $#psout; $x++) {          # but we do it to grep out entries
+            foreach my $grepout (@grepouts) {
+                if ($psout[$x] =~ /$grepout/) {
+                    next LINES;
+                }
+            }
+            push (@procarray, $psout[$x]);
+        }
+        @psout = @procarray;
+    }
+    # End removing entries section, process list is now @psout
+    
+    # Used for padandcolor()
+    foreach (@psout) {
+        $normedlength = length if $length > $maxlength;
+    }
+    $normedlength = maxof(160,minof(160,$normedlength));
+    
+    # Warn user if we have a large process list
+    if (@psout > 300) {
+        dolocalecho("$COLOR_WARNING Processing ${@psout} lines of output, please be patient... $COLOR_NORMAL");
+    }
+    %procs = &parse_ps(\@psout);
+	  return if $procs{"FAIL"};
+	  
+    if (@psout != (keys %procs)+@notparsed) {
+      my $ops = @psout;
+      my $nps = keys %procs;
+      my $notparsed = @notparsed;
+      mywarn("Error parsing process list, we lost entries somewhere.  We have $ops original, $nps parsed and $notparsed not parsed."); 
+      return;
+    }
+    
+    #only if we have a proc filesystem and we can see our hidden dir.
+    # Otherwise, this can be bad
+    if ($hiddensub and $cangetprocinfo) {
+        &getcwds;   # Add CWDs to %procs
+    }
+    &findus;   # Uses %procs  -- relies on cwds and hiddensub to verify...
+               # if we don't have those, dont' bother...too many false positives
+    
+    # Check procs against the large arrays (reds, blues, yellows)
+    PROCS: foreach my $pid (keys %procs) {
+        next if $procs{$pid}{'NOTES'};  # Skip if this is one of ours
+        foreach my $regex (keys %reds) {
+            if ($procs{$pid}{'CMD'} =~ m#$regex#) {
+                $procs{$pid}{'NOTES'} = "$reds{$regex} ($regex)";
+                $procs{$pid}{'COLOR'} = $COLOR_FAILURE;
+                next PROCS;
+            }
+        }
+        foreach my $regex (@yellows) {
+            if ($procs{$pid}{'CMD'} =~ m#$regex#) {
+                $procs{$pid}{'NOTES'} = "Matches $regex";
+                $procs{$pid}{'COLOR'} = $COLOR_WARNING;
+                next PROCS;
+            }
+        }
+        if ($solaristarget) {
+            foreach my $rhash (@sblues) {
+                &checkblue($pid, $rhash);
+            }
+        } elsif ($linuxtarget) {
+            foreach my $rhash (@lblues) {
+                &checkblue($pid, $rhash);
+            }
+        }
+    }
+    foreach my $key (keys %procs) {
+      unless ($key =~ /\d/) {
+        dolocalecho("Uh oh, invalid entry in procs");
+      }
+    }
+    #### SORT THE PROCESS LIST  / BUILD OUTPUT ###
+    if ($opt_c) {
+        # Sort by color here
+        foreach $pid (sort by_color keys %procs) {
+            my $line;
+            for (my $x = 0; $x <= $#fields; $x++) {
+                $line .= $procs{$pid}{$fields[$x]};
+            }
+            if ($procs{$pid}{'COLOR'}) {
+                if ($procs{$pid}{'COLOR'} eq $COLOR_NOTE) {
+                    $output .= $procs{$pid}{'COLOR'} . $line . $COLOR_NORMAL . "\n";
+                } else {
+                    $output .= padandcolor($line, $procs{$pid}{'COLOR'}, $procs{$pid}{'NOTES'});
+                }
+            } else {
+                $output .= $line . "\n";
+            }
+        }
+    } elsif ($opt_t) {
+            # Sort by time here
+        foreach $pid (sort by_stime keys %procs) {
+            my $line;
+            for (my $x = 0; $x <= $#fields; $x++) {
+                $line .= $procs{$pid}{$fields[$x]};
+            }
+            if ($procs{$pid}{'COLOR'}) {
+                if ($procs{$pid}{'COLOR'} eq $COLOR_NOTE) {
+                    $output .= $procs{$pid}{'COLOR'} . $line . $COLOR_NORMAL . "\n";
+                } else {
+                    $output .= padandcolor($line, $procs{$pid}{'COLOR'}, $procs{$pid}{'NOTES'});
+                }
+            } else {
+                $output .= $line . "\n";
+            }
+        }
+    } else {
+            # Sort by pid here
+        foreach $pid (sort {$a <=> $b} keys %procs) {
+            my $line;
+            for (my $x = 0; $x <= $#fields; $x++) {
+                $line .= $procs{$pid}{$fields[$x]};
+            }
+            if ($procs{$pid}{'COLOR'}) {
+                if ($procs{$pid}{'COLOR'} eq $COLOR_NOTE) {
+                    $output .= $procs{$pid}{'COLOR'} . $line . $COLOR_NORMAL . "\n";
+                } else {
+                    $output .= padandcolor($line, $procs{$pid}{'COLOR'}, $procs{$pid}{'NOTES'});
+                }
+            } else {
+                $output .= $line . "\n";
+            }
+        }
+    }
+    
+    # Stats that are printed at the end
+    $nopenl = 0 unless $nopenl;
+    my $stats = "You have:\n";
+    if ($nopenl >= 1 && $nopens == 0) {
+        $stats .= "$nopenl Noserver(s) running in callback/listen mode.\n";
+    } elsif ($nopenl == 1 && $nopens > 0) {
+        $stats .= ($nopenl + $nopens ) . " Noserver process(es) running, $nopenl listener with $nopens clients connected.\n";
+    } else {
+        $stats .= $COLOR_WARNING . "A strange number of Noservers...I count $nopenl listeners/callbacks and $nopens clients connected to a listener." . $COLOR_NORMAL . "\n";
+    }
+    if ($ddw == 1 && $ddc == 1) {
+        $stats .= ($ddw + $ddc) . " DewDrop processes running, $ddw watcher and $ddc child.\n";
+    } elsif ($ddw == 0 && $ddc == 0) {
+        # We have no DD then.
+    } else {
+        $stats .= $COLOR_WARNING . "A strange number of DewDrop processes running...I count $ddw watcher and $ddc child process(es)." . $COLOR_NORMAL . "\n";
+    }
+    if (! $hiddensub) {
+        $stats .= $COLOR_WARNING . "We are not elevated and skipped getting CWD's.  Any matches for CWD were not included." . $COLOR_NORMAL . "\n";
+    }
+    my $info = " " x 20 . "|$COLOR_SUCCESS Our Procs $COLOR_NORMAL|$COLOR_WARNING Check Out $COLOR_NORMAL|$COLOR_FAILURE Known Bad $COLOR_NORMAL|$COLOR_NOTE Known Good $COLOR_NORMAL|\n";
+    if (@notparsed) {
+        my $unparsed;
+        foreach (@notparsed) {
+            $unparsed .= $_ . "\n";
+        }
+        $output .= "\n$COLOR_WARNING I was unable to parse the following lines:\n$unparsed $COLOR_NORMAL\n";
+    }
+    if ($opt_p) {
+        dolocalecho("$header\n\n$output\n$header\n\n$info\n$stats", POPUP);
+    } else {
+        dolocalecho("$header\n\n$output\n$header\n\n$info\n$stats");
+    }
+}
+
+# returns pid and ppid
+sub get_pid {
+    my ($pidl) = doit("-pid");
+    if ($pidl =~ m#PID \(PPID\)\s+(\d+) \((\d+)\)#) {
+        return ($1,$2);
+    }
+    return 0;
+}
+
+# Makes sure there is a /proc filesystem
+sub check_proc {
+    my (undef,undef,@out) = doit("-ls -d /proc/1");
+    if (@out > 2) {
+        return 0;
+    }
+    return 1;
+}
+
+# Returns a substring of the hidden directory, if we can see it
+sub check_hidden {
+    my $hiddensub = substr($host_hiddendir, 0, length($host_hidden) - 5);
+    return undef unless $hiddensub;
+    my ($out) = doit("-ls -d $hiddensub*");
+    if ($out =~ m,^drwx.*$host_hiddendir,) {
+        return $hiddensub
+    }
+    return undef;
+}
+
+# get cwds for all procs (uses global %procs)
+sub getcwds {
+    if ($solaristarget) {
+        my ($output,undef,@output) = doit("for p in /proc/[1-9]* ; do if [ -d \$p/cwd ]; then cd \$p/cwd && pwd | sed \"s,^,\$p:\\\t,g\" ; fi; done 2>/dev/null");
+        foreach (@output) {
+            my ($pid,$cwd) = /\/proc\/(\d+):\s*(\/\.*)/;
+            next unless $procs{$pid};
+            $procs{$pid}{'CWD'} = $cwd if ($cwd and $pid);
+        }
+    } elsif ($linuxtarget) {
+        my ($output,undef,@output) = doit("-ls /proc/[1-9]*/cwd");
+        foreach (@output) {
+            my ($pid,$cwd) = /\/proc\/(\d+)\/cwd -. (\/.*)/;
+            next unless $procs{$pid};
+            $procs{$pid}{'CWD'} = $cwd if ($cwd and $pid);
+        }
+    }
+}
+
+
+# Returns list of binaries and checks if we can see the hiddendir
+sub get_hiddenbins {
+    my $hidsubstr = shift;
+    return unless $hidsubstr;
+    my @files;
+    # We push these because if isourbin returns 0 as the index in findus, 
+    # we fail when we want to succeed.  This file ensures we always return 2+
+    push(@files, "RANDOMNONEXISTANTFILE");
+    push(@files, 0);
+    my $cmd = "-ls -R $hidsubstr*";
+    #my $cmd  = "ls -lR " . $hidsubstr . "* | grep \'\\-rwx\'";
+    my ($output, undef, @output) = doit($cmd);
+    if ($output =~ m#No such file or directory#) {
+        return 0;
+    }
+    foreach my $line (@output) {
+        my ($size,undef,$file) = $line =~ m#-rwx------\s+\d+\sroot\s+root\s+(\d+)\s\w+\s+\d+\s\d\d:\d\d\s\d{4}\s$host_hiddendir/(.*/)?([\w\d.]+)$#;
+        next unless length($file) > 0;
+        push(@files, $file);
+        push(@files, $size);
+    }
+    return @files;
+}
+
+# Parse the process list.  We keep the spacing to make it easier to print out later.
+sub parse_ps {
+    my $pslist = shift;
+    my $proccount = 0;
+    my %proclist;
+    if ($solaristarget) {
+        foreach my $procline (@{$pslist}) {
+            #                       UID      PID      PPID     C                     STIME                    TTY     TIME    CMD
+            if ($procline =~ m#^(\s*\S+\s+)((\d+)\s+)(\d+\s+)(\d+\s+)(((\d\d:\d\d:\d\d)|(\w{3} \d\d)|(-))\s+)(\S+\s+)(\S+\s+)(.*)$#) {
+                my $pid = $3;
+                $proclist{$pid}{'UID'} = $1;
+                $proclist{$pid}{'PID'} = $2;
+                $proclist{$pid}{'PPID'} = $4;
+                $proclist{$pid}{'C'} = $5;
+                $proclist{$pid}{'STIME'} = $6;
+                $proclist{$pid}{'TTY'} = $11;
+                $proclist{$pid}{'TIME'} = $12;
+                $proclist{$pid}{'CMD'} = $13;
+                $proccount++;
+                unless ($pid =~ /\d/) {
+		    mywarn("Successful match, but no PID");
+		    return ("FAIL",1);
+                }
+            } else {
+                push(@notparsed, $procline);
+                dbg("No match: $procline");
+            }
+        }
+    } elsif ($linuxtarget) {  # we're staring with F , probably linux
+        foreach my $procline (@{$pslist}) {
+                              #   F    S     UID      PID      PPID    C       PRI     NI     ADDR    SZ     WCHAN   STIME   TTY     TIME      CMD
+            if ($procline =~ m#^(\d\s)(\w\s)(\S+\s+)((\d+)\s+)(\d+\s+)(\d+\s+)(\S+\s+)(\S+\s)(\S+\s+)(\d+\s)(\S+\s+)(\S+\s+)(\S+\s+)(\S+\s)\s*(.*)$#) {
+                my $pid = $5;
+                $proclist{$pid}{'F'} = $1;
+                $proclist{$pid}{'S'} = $2;
+                $proclist{$pid}{'UID'} = $3;
+                $proclist{$pid}{'PID'} = $4;
+                $proclist{$pid}{'PPID'} = $6;
+                $proclist{$pid}{'C'} = $7;
+                $proclist{$pid}{'PRI'} = $8;
+                $proclist{$pid}{'NI'} = $9;
+                $proclist{$pid}{'ADDR'} = $10;
+                $proclist{$pid}{'SZ'} = $11;
+                $proclist{$pid}{'WCHAN'} = $12;
+                $proclist{$pid}{'STIME'} = $13;
+                $proclist{$pid}{'TTY'} = $14;
+                $proclist{$pid}{'TIME'} = $15;
+                $proclist{$pid}{'CMD'} = $16;    
+                $proccount++;
+                unless ($pid =~ /\d/) {
+                    mywarn("Successful match, but no PID");
+		    return ("FAIL",1);                }
+            } else {
+                push(@notparsed, $procline);
+                dbg("No match: $procline");
+            }
+        }
+    }
+    if ($proccount == 0) {
+        mywarn("We couldn't properly parse the process list, quitting!");
+	return("FAIL",1);
+    }
+    return %proclist;
+}
+
+# used for sortinb by color
+sub by_color {
+    my $c;
+    $c = $procs{$a}{'COLOR'} cmp $procs{$b}{'COLOR'};
+    if ($c == 0) {
+        $c = $a <=> $b;
+    }
+    return $c;    
+}
+
+# used for sorting by stime
+sub by_stime {
+    my %mon = ("Jan" => 0, "Feb" => 1, "Mar" => 2, "Apr" => 3, "May" => 4, "Jun" => 5, "Jul" => 6, "Aug" => 7, "Sep" => 8, "Oct" => 9, "Nov" => 10, "Dec" => 11);
+    my $date = qr((\w{3}) ?(\d{2}));
+    my $year = qr((\d{4}));
+    my $time = qr((\d{2}:\d{2}(:\d{2})?));
+    my $c;
+    if ($procs{$a}{'STIME'} =~ /$date/) {
+        my $amon = $1;
+        my $aday = $2;
+        if ($procs{$b}{'STIME'} =~ /$year/) {
+            return 1;
+        } elsif ($procs{$b}{'STIME'} =~ /$time/) {
+            return -1;
+        } elsif ($procs{$b}{'STIME'} =~ /$date/) {
+            my $bmon = $1;
+            my $bday = $2;
+            $c = $mon{$amon} <=> $mon{$bmon};
+            if ($c == 0) {
+                $c = $aday <=> $bday;
+            }
+        }
+    } elsif ($procs{$a}{'STIME'} =~ /$year/) {
+        my $ayear = $1;
+        if ($procs{$b}{'STIME'} =~ /$year/) {
+            # check year
+            my $byear = $1;
+            $c = $ayear <=> $byear;
+        } elsif ($procs{$b}{'STIME'} =~ /$time/) {
+            return -1;
+        } elsif ($procs{$b}{'STIME'} =~ /$date/) {
+            return -1;
+        }
+    } elsif ($procs{$a}{'STIME'} =~ /$time/) {
+        my $atime = $1;
+        if ($procs{$b}{'STIME'} =~ /$year/) {
+            return 1;
+        } elsif ($procs{$b}{'STIME'} =~ /$time/) {
+            my $btime = $1;
+            # Check time
+            $c = $atime cmp $btime;
+        } elsif ($procs{$b}{'STIME'} =~ /$date/) {
+            return 1;
+        }
+    }    
+    # Else sort by pid
+    if ($c == 0) {
+        $c = $a <=> $b;
+    }
+    return $c;    
+}
+
+
+sub checkblue {
+    my $pid = shift;
+    my $rhash = shift;
+    # The next 3 must match, or we return
+    return unless $procs{$pid}{'CMD'} =~ m#$rhash->{'CMD'}#;
+    return unless $procs{$pid}{'UID'} =~ m#$rhash->{'UID'}#;
+    return unless $procs{$pid}{'TTY'} =~ m#$rhash->{'TTY'}#;
+    if ($rhash->{'PPID'} ne "")  {
+        if ($procs{$pid}{'PPID'} =~ m#^$rhash->{'PPID'}#) {
+            if ($rhash->{'PID'} ne "") {
+                if ($procs{$pid}{'PID'} =~ m#^$rhash->{'PID'}#) {
+                    # We're good, we matched every field
+                    $procs{$pid}{'COLOR'} = $COLOR_NOTE;
+                    next PROCS;
+                }
+            } else {
+                # We're good, we matched all 3 and PPID
+                $procs{$pid}{'COLOR'} = $COLOR_NOTE;
+                next PROCS;
+            }
+        }
+    } else {
+        # We're good, we matched the 3 required
+        $procs{$pid}{'COLOR'} = $COLOR_NOTE;
+        next PROCS;
+    }
+}
+
+
+# Find nopen processes
+sub isnopen {
+    my $pid = shift;
+    if ($pid == $mypid) {
+        return 1;
+    }
+    # Search for noservers uploaded using wBIN
+    # if we have a process ending with a single space and is run by root
+    # I should update this to only match the name we got from DD
+    #    Any false matches SHOULD show up in yellow though, as they won't match any of our nopenpids...so that'll help
+    if (($procs{$pid}{'CMD'} =~ m#^[a-z]+ $#) and ($procs{$pid}{'UID'} =~ m#\s*root\s*#)) {
+        return 1;
+    }
+    # Check for sendmail run by root out of /tmp
+    if (($procs{$pid}{'CMD'} eq "sendmail") and ($procs{$pid}{'UID'} =~ m#\s*root\s*#) and (($procs{$pid}{'CWD'} eq "/tmp") or ($procs{$pid}{'CWD'} =~ /$host_hiddendir/))) {
+        return 1;
+    }
+    # This can sometimes give false positives (Ex. Your nopen exits and another process starts with the same PID), but its very unlikely to happen on a live target.
+    foreach (@nopenpids) {
+        if ($pid == $_) {  # If pid matches one of our
+            if ($procs{$pid}{'CWD'}) {  # and we have gotten the cwd
+                if (($procs{$pid}{'CWD'} =~ /$host_hiddendir/) or ($procs{$pid}{'CWD'} =~ m#/tmp#)) {   # make sure it's us
+                    return 1;
+                }
+            } else {  # If we couldn't get the cwd and pids match...we'll allow it, but only for nopen.  user will be warned on non-cwd matches anyway
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+# Find child processes of us
+sub find_children {
+    foreach my $pid (sort keys %procs) {
+        next if $procs{$pid}{'COLOR'};
+        # If the parent is set as one of us
+        my $ppid = $procs{$pid}{'PPID'};
+        $ppid =~ s/\s//g;
+        if ($procs{$ppid}{'COLOR'} eq $COLOR_SUCCESS) {
+            if ($procs{$ppid}{'NOTES'} ne "DewDrop Watcher") {
+                $procs{$pid}{'COLOR'} = $COLOR_SUCCESS;
+                $procs{$pid}{'NOTES'} = "Child of $procs{$ppid}{'NOTES'}";
+            }
+        }
+    }
+}
+
+# Checks for dd-like processes (dd, sc, etc..)
+sub isdd {
+    my $pid = shift;
+    return 0 unless $procs{$pid}{'CWD'};
+    my $proc;
+    if ($linuxtarget) {  # Linux can add a bunch of whitespace to the end...for some reason
+        $proc = $procs{$pid}{'CMD'};
+        $proc =~ s#\s+$##g;
+    } else {
+        $proc = substr($procs{$pid}{'CMD'}, 0, -1);
+    }
+    return unless $proc =~ m#^/#;
+    if ( index($stoicnames, $proc) != -1) {
+        return 1;
+    }
+    return 0;
+}
+
+# Returns the index of the binary if we find it
+sub isourbin {
+    my $pid = shift;
+    for (my $x = 0; $x <=$#hiddenbins; $x += 2) {
+        if ($procs{$pid}{'CMD'} =~ /$hiddenbins[$x]/ and $procs{$pid}{'CWD'} =~ /$host_hiddendir/) {  # If the file is in the CMD and we're running from hidden
+            return $x;
+        }
+    }
+    return 0;
+}
+
+# One loop to check nopen/dd/sc/other binaries, one to check children.  The order is arbitrary and can easily be changed if necessary.
+sub findus {
+    my $index = 0;
+    my $num = keys %procs;
+    foreach my $pid (keys %procs) {
+        # Check if the pid is nopen, and mark it as such
+        if ( &isnopen($pid) ) {
+            foreach (@nopenpids) {
+                if ($pid == $_) {
+                    $procs{$pid}{'NOTES'} = "Nopen"; 
+                    $procs{$pid}{'COLOR'} = $COLOR_SUCCESS;
+                    if ($pid == $mypid) {
+                        $procs{$pid}{'NOTES'} = "This Nopen";  # If it's this guy, append current window
+                    }
+                    last;
+                }
+            }
+            unless ($procs{$pid}{'NOTES'}) {
+                # Here, we matched nopen, but it's not in our pid list
+                $procs{$pid}{'NOTES'} = "Matches Nopen, but not in PID list";
+                $procs{$pid}{'COLOR'} = $COLOR_WARNING;
+            }
+            if ($procs{$pid}{'PPID'} =~ /^1\s+/) {
+                if ($pid == $myppid) {
+                    $procs{$pid}{'NOTES'} = "Nopen Listener"; 
+                }
+                $nopenl++; # We're either the listener or a callback
+            } else {
+                $nopens++;   # We're a child of a listener 
+            }
+        } elsif ( &isdd($pid) ) {  # If we match a stoicname, check ppid and cwd to determine what we are
+            if ($procs{$pid}{'PPID'} =~ /^1\s+/) {
+                if ($procs{$pid}{'CWD'} eq $host_hiddendir . "/a0b973925e397d9acd80e85e2eaa6e60") {  # New suctionchar runs from here
+                    $procs{$pid}{'NOTES'} = "SuctionChar";
+                    $procs{$pid}{'CMD'} =~ s/( )$//g;
+                    my $spaces = $1;
+                    if ($spaces) {
+                        $procs{$pid}{'NOTES'} .= " (Chomped " . length $spaces . " spaces)";
+                    }
+                    $procs{$pid}{'COLOR'} = $COLOR_SUCCESS;
+                } elsif ($procs{$pid}{'CWD'} eq "/var/run") {
+                    $procs{$pid}{'NOTES'} = "SuctionChar (old)";   # Old suc runs from /var/run, aparently
+                    $procs{$pid}{'COLOR'} = $COLOR_SUCCESS;
+                    $procs{$pid}{'CMD'} =~ s/( )$//g;
+                    my $spaces = $1;
+                    if ($spaces) {
+                        $procs{$pid}{'NOTES'} .= " (Chomped " . length $spaces . " spaces)";
+                    }
+                } elsif (($procs{$pid}{'CWD'} eq "/tmp") or ($procs{$pid}{'CWD'} eq $host_hiddendir)) {
+                    next if $procs{$pid}{'NOTES'} eq "DewDrop Watcher";
+                    $procs{$pid}{'NOTES'} = "SuctionChar (old)?";   # Probably suctionchar, but could be anything really
+                    $procs{$pid}{'COLOR'} = $COLOR_SUCCESS;
+                    $procs{$pid}{'CMD'} =~ s/( )$//g;
+                    my $spaces = $1;
+                    if ($spaces) {
+                        $procs{$pid}{'NOTES'} .= " (Chomped " . length $spaces . " spaces)";
+                    }
+                }
+            } else {
+                if ($procs{$pid}{'CWD'} eq $host_hiddendir) {
+                    $procs{$pid}{'NOTES'} = "DewDrop";
+                    $procs{$pid}{'COLOR'} = $COLOR_SUCCESS;
+                    $ddc++;  # Up the child count
+                    $procs{$pid}{'CMD'} =~ s/(\s+)$//g;
+                    my $spaces = $1;
+                    if ($spaces) {
+                        $procs{$pid}{'NOTES'} .= " (Chomped " . length $spaces . " spaces)";
+                    }
+                    # now do the parent as the watcher
+                    $procs{$pid}{'PPID'} =~ /(\d+)/;
+                    my $ppid = $1;
+                    next if $procs{$ppid}{'NOTES'} eq "DewDrop Watcher";
+                    $procs{$ppid}{'NOTES'} = "DewDrop Watcher";
+                    $procs{$ppid}{'COLOR'} = $COLOR_SUCCESS;
+                    $ddw++;  # Up the watcher count
+                    if ($procs{$ppid}{'CMD'} =~ s/(\s+)$//g) {
+                        $spaces = $1;
+                        if ($spaces) {
+                            $procs{$ppid}{'NOTES'} .= " (Chomped " . length $spaces . " spaces)";
+                        }
+                    }
+                }
+            }
+        } elsif ($index = &isourbin($pid)) {
+            # These are processes that match the names of binaries in our hidden
+            $procs{$pid}{'NOTES'} = "Unknown binary from hidden";
+            $procs{$pid}{'COLOR'} = $COLOR_SUCCESS;
+            
+            # Search through our files here
+            # $index is the file name, $index+1 is the size
+            if ($localupfiles =~ m#$hiddenbins[$index+1] (\S+)#) {
+                $procs{$pid}{'NOTES'} = $1;
+            }
+        }
+    }
+    &find_children;
+}
+
+sub padandcolor {
+    local($line,$color,$comment,$color2) = (@_);
+    my $len = $normedlength - length $comment;
+    my $spacers = " " x ($normedlength - length "$line(($comment))");
+    $spacers =~ s,  ,\._,g;
+    $color2=$COLOR_NORMAL;
+    return "$color$line$spacers($color2($comment)$color)$COLOR_NORMAL\n";
+}
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0 unless $calledviarequire;
+  $stoiccmd = "called as: -gs mypslist @ARGV";
+  if ($willautoport and $socket) {
+    $stoiccmd = "in $prog, called as: mypslist(@ARGV)";
+    dbg("via require automypslist ARGV=(
+".join("\n",@ARGV)."
+) prog=$prog");
+    #    progprint("$prog called -gs mypslist @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $prog = "-gs mypslist";
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $vertext = "$prog version $VER\n" ;
+  }
+  clearallopts();
+  $vertext = "$prog version $VER\n" ;
+  mydie("No user servicable parts inside.\n".
+        "(I.e., noclient calls $prog, not you.)\n".
+        "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+                            -e $nopen_mylog);
+
+  my $origoptions = "@ARGV";
+  mydie("bad option(s)") if (! Getopts( "hctpv:g:" ) ) ;
+  
+  ###########################################################################
+  # Set strings used in usage before calling it
+  ###########################################################################
+
+  # Set a BOLD red color
+  $COLOR_BADFAILURE="\033[31;07m";
+
+
+  (@scriptlist) = split(/\n/,`cd $opetc ; ls -1 auto* | sort`);
+  @scriptlist = grep ! /\.old/ , @scriptlist;
+  @scriptlist = grep ! /\.bak/ , @scriptlist;
+  @scriptlist = grep ! /^autoport\./ , @scriptlist;
+  @scriptlist = grep ! /\~/ , @scriptlist;
+  @scriptlist = grep ! /(bz2|[0-9])$/ , @scriptlist;
+  $scriptcount = @scriptlist;
+
+  my (@functionlist) = split(/\n/,`cd $opetc ; grep "^sub [a-z]" autoutils | sed "s, {,,g" | sort`);
+  $functioncount = @functionlist;
+  my $functionlist = "";
+  my $half = int(@functionlist/2);
+  for (my $i=0; $i < $half; $i++) {
+    $functionlist .= sprintf("     %-35s    %s\n",$functionlist[$i],$functionlist[$i+$half]);
+  }
+  $functionlist .= sprintf("     %-35s    %s\n","",$functionlist[$#functionlist])
+    unless ($#functionlist % 2);
+
+  ###########################################################################
+  # PROCESS ARGUMENTS
+  ###########################################################################
+
+  usage() if $opt_h;
+
+  # Connect to autoport, we need status and more interactively.
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+
+  ## ERROR CHECKING OF OPTS
+  #foreach (lookupnopenpids(1)) {
+   # $nopenpid{$_}++;
+ # }
+
+  #($clientver,$histfile,$cmdoutfile,$localcwd,$nhome,$localpid,$localppid,$serverver,$targetwdir,$targetos,$targetcwd,$targetpid,$targetppid,$targetport,)   =  parsestatus(force);
+
+
+}#myinit
+
+sub setusagetexts {
+  # Separate long usage strings as separate function
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session when \"$prog\" or
+\"-gs mypslist\" is used.
+
+";
+  
+  $gsusagetext="
+Usage:  $prog [OPTIONS]
+
+pscolor checks the process list looking for known good entries (blue), processes
+that are us (green), bad processes (red), and odd processes (yellow).  Processes
+in black do not match any of our current filters.  It verifies our processes by 
+checking the cwd of the process for our hidden or some other directory we can 
+expect.  Currently this only runs on Solaris and Linux.  It uses cd /proc && pwd
+on Solaris or ls -l on Linux targets.  It will also do a recursive ls of our 
+hidden looking for files with 7xx perms.  It checks these files against the 
+process list, and checks matches against file sizes in /current/up.
+Other Stoic modules (SBZ for example) may be identified as 'SuctionChar (old)?'.
+If Nopen was not uploaded/executed using -wBIN, it assumes it will be called
+sendmail.
+
+Binaries this script will run on target can be: ls, grep, ps, pwd, sed
+
+OPTIONS
+  -p              Popup results in separate window
+  -t              Sort by time.  Can not be used with -c
+  -c              Sort by color.  Can not be used with -t
+  -v <word(s)>    Grep out lines containing word(s).  Multiple words may be
+                  specified by separating with a comma (no spaces).  Each comma
+                  delimited phrase gets passed to a perl regex for filtering.
+                  Be sure to double escape (\\\\) any characters that would 
+                  otherwise be interpreted.
+  -g <word(s)>    Grep FOR lines contains word(s).  Multiple words may be
+                  specified by separating with a comma (no spaces).  Each comma
+                  delimited phrase gets passed to a perl regex for filtering
+
+EXAMPLES
+  -gs pscolor -c -v tty,\\\\[ -g root  --  Show processes run by root without 
+                                           'tty' or '[' anywhere in the line.
+
+";
+}#setusagetexts
+
+
+
+# If needed:
+###  PS OUTPUT SPACING ###
+# Linux:
+#    1  1           8               2         2    1      2     1           1     1               2              1            10                  1
+# F_S_UID________PID__PPID__C_PRI__NI_ADDR_SZ_WCHAN__STIME_TTY__________TIME_CMD
+# Solaris:
+#    5             3         2         2       4              1
+# _____UID___PID__PPID__C____STIME_TTY______TIME_CMD

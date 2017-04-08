@@ -1,0 +1,228 @@
+#!/bin/env perl
+$version = "1.0.1.2";
+myinit();
+$inone=0;
+$msgnumber = 0;
+$message = "";
+$destfile = "";
+%destfile = ();
+$onwritingline=0;
+while (<>) {
+  next unless ($inone or /^RETR (\d+)/);
+  if (($disconnectcheck and /^Connection closed by foreign host/)
+      or /^RETR (\d+)/) {
+    mywarn("End of $destfile determined by \"^Connection closed by foreign host\"")
+      if (/^Connection closed by foreign host/ and $disconnectcheck );
+    # process() returns only msgnumber, if any, so this clears other
+    # variables
+    ($msgnumber,$message,$destfile,$lastline,$ext,$dotext) = process();
+    next unless $msgnumber ;
+    $destfile = "${destdir}$destname.$msgnumber.eml$dotext";
+    if ($noclobber) {
+      my $origtry = $destfile;
+      until (! -e $destfile) {
+	$dotext = sprintf(".%03d",$ext++) ;
+        $destfile = "${destdir}$destname.$msgnumber.eml$dotext";
+	$origtry = $destfile unless $origtry;
+      }
+      unless ($origtry eq $destfile) {
+	myprint("$origtry existed, writing $destfile instead");
+	$instead=1;
+      }
+    }
+    if ( -e "$destfile") {
+      my $size = -s _;
+      if (!$noclobber and -e $destfile) {
+	myprint("$destfile already exists, size $size--clobbering");
+      }
+    } else {
+      myprint($destfile) unless $instead;
+    }
+    open(OUT,"> $destfile")
+      or die "cannot open $destfile for write";
+    $inone = 1;
+    $ok = <>;
+    next;
+  }
+  $message .= $lastline;
+  print OUT $lastline;
+  $lastline = $_;
+}#while
+mywarn("End of $destfile determined by EOF")
+  if ($msgnumber and $message and $destfile);
+process("EOF");
+myprint("\n\nDone");
+
+sub myinit {
+  use File::Basename qw(basename dirname);
+  require "getopts.pl";
+  $prog = basename $0 ;
+  $vertext = "$prog version $version\n" ;
+  mydie("bad option(s)") if (! Getopts( "hvcd:qAU" )) ;
+  usage() if ($opt_h or $opt_v or !@ARGV) ;
+  # options
+  $disconnectcheck = !$opt_A;
+  $destname = shift @ARGV;
+  $noclobber = !$opt_c;
+  $destdir = $opt_d;
+  $quiet = $opt_q;
+  $togglededupe = $opt_U;
+  $windowshost=$ENV{OS} =~ /windows/i;
+  # error checking
+  eval "use Digest::MD5 qw(md5_hex);"
+    unless $windowshost;
+  if ($@ or $windowshost) {
+    $dedupe=0;
+    $usemd5=0;
+    $sumtype="byte check";
+    my $why = "Cannot";
+    $why = "On Windows host--not trying to"
+      if $windowshost;
+    mywarn("$why find Digest::MD5 qw(md5_hex)");
+    if ($togglededupe) {
+      mywarn("You chose to use the less reliable simple sum--there is a \n".
+	     "non-zero chance you might lose data due to incorrectly removing\n".
+	     "what this simple sum detects as duplicate files.\n\n".
+	     "PROCEED AT YOUR OWN RISK!!\n\n");
+      $dedupe=1;
+      sleep 5;
+    }
+  } else {
+    $dedupe = $togglededupe ? 0 : 1 ;
+    $usemd5=1;
+    $sumtype="md5";
+  }
+  mywarn("NOT trying to eliminate duplicate messages")
+    unless $dedupe;
+  mydie("Do not use / as a destination directory, nimrod")
+    if $destdir eq "/";
+  $destdir = "./" unless $destdir;
+  $destdir =~ s,/*$,/, ;
+  mydie("Destination directory $destdir must exist")
+    if ($destdir and !-d $destdir);
+  mydie("Missing \"destname\" argument")
+    unless $destname;
+  mydie("Second argument \"$ARGV[0]\" must be a readable file")
+    unless ( -f $ARGV[0] and -r _ );
+}
+sub usage {
+  my $output = "";
+  $output .= "\nFATAL ERROR: @_\n" if ( @_ );
+  my $usagetext = usagestr();
+  $output .= $usagetext unless $opt_v;
+  $output .= $vertext ;
+  $output .= "\nFATAL ERROR: @_\n" if ( @_ );
+  #  progprint($output,$COLOR_NORMAL,STDOUT);
+  print STDOUT $output;
+  exit;
+}#usage
+
+sub mydie {
+  local ($what,$color,$color2,$what2) = (@_) ;
+  $color = $COLOR_FAILURE unless $color ;
+  $color2 = $color unless $color2 ;
+  $what2 = " $what2" if ($what2) ;
+  mywarn($what,$color,$color2,$what2);
+  exit 1;
+}#mydie
+sub mywarn {
+  local ($what,$color,$color2,$what2) = (@_) ;
+  $color = $COLOR_FAILURE unless $color ;
+  $what="${color2}${prog}[$$]$what2: ${color}$what$COLOR_NORMAL";
+  warn  "$what\n" ;
+}#mywarn
+
+sub myprint {
+  return if $quiet;
+  if ("@_" eq $destfile) {
+    print "\nwriting " unless $onwritingline++;
+    print "\t@_";
+  } else {
+    print "\n" if $onwritingline;
+    $onwritingline=0;
+    print "@_\n";
+  }
+}
+sub dbg {
+  mywarn(@_);
+}#dbg
+
+sub sloppychecksum {
+  local ($buf,$seed) = (@_);
+  for (my $i = 0 ; $i < length($buf) ; $i+=1) {
+    $seed += ord(substr($buf,$i,1));
+  }#for $i
+  return $seed;
+}#sloppychecksum
+
+sub mysum {
+  return md5_hex($message) if ($usemd5);
+  return sloppychecksum($message);
+}#mysum
+
+sub process {
+  close(OUT);
+  $instead=0;
+  $inone=0;
+  if ($msgnumber and $message and $destfile) {
+    if ($dedupe) {
+      my $newdigest = mysum($message) ;
+      dbg("$destfile sum is ".$newdigest) unless $quiet;
+      #    if ($digest{$msgnumber} == $newdigest) {
+      if ($destfile{$newdigest}) {
+	mywarn("Removing $destfile, duplicate of $destfile{$newdigest} (${sumtype}sum=$newdigest)");
+	close(OUT);
+	unlink($destfile);
+      } else {
+	$destfile{$newdigest} = $destfile;
+	$digest{$msgnumber} = $newdigest;
+      }
+    }
+  }
+  return (/^RETR (\d+)/) ;
+}
+sub usagestr {
+  return "
+Usage: $prog [options] destname sourcefile
+
+Parses through content of the sourcefile, finding each e-mail
+retrieved via a \"RETR ###\" POP3 command, writing each to the file:
+mail.destname.###, where ### is the number RETRieved.
+
+If identical messages are retrieved, a checksum may be used to
+eliminate duplicates. On non-Windows boxes where Digest::MD5 can be
+found, this is done automatically (unless -U is used).
+
+If Digest::MD5 cannot be found, or if $prog is run from a Windows
+host, a simple and slow checksum CAN BE used by adding the additional
+-U option. This simple checksum is not 100% reliable, and it may happen
+that different messages are mistakenly identified as duplicates.
+
+Unless the -c (clobber) option is used, if two RETR commands of the
+same ### result in different messages, both will be preserved, with
+each subsequent RETR of the same ### named \"mail.destname.###.MMM\",
+where MMM is the first, starting at 000, that does not yet exist. This
+may happen if two different users' mail are in the file being parsed,
+and both happen to have the same ### message with different content.
+
+OUTPUT: $prog will print to STDOUT one or more informational
+        messages per RETRieved mail found (unless -q is used).
+
+
+OPTIONS
+
+-d dir  Destination directory in which to write files. DEFAULT: ./
+-c      FORCE clobber of multiple RETR commands of the same message.
+        Only useful if multiple RETR of the same number WILL DEFINITELY
+        be from the same user AND resulted in different content (maybe
+        one was partial). MD5 sum will take care of identical RETRieved
+        messages nicely, so -c should seldom be needed.
+-q      Quiet--only show error output
+-A      DO NOT assume that \"^Connection closed by foreign host\" is the
+        end of a message. DEFAULT DOES.
+-U      Toggle de-dupe. (see above)
+
+Usage: $prog [options] destname sourcefile
+
+";
+}#usagestr

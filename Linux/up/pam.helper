@@ -1,0 +1,12 @@
+
+mkdir /tmp/icd10092; cd /tmp/icd10092
+
+-put 
+tar -xvf p.t;
+
+/usr/sbin/userhelper -w ../../..$PWD/_pamslam.conf
+
+rm p.t _*; ls -al
+
+
+

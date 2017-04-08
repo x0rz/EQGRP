@@ -1,0 +1,114 @@
+#!/usr/bin/env perl
+#
+# INPUT: $ARGV[] is several files to strings to screen and local file
+#
+$VER="1.2" ;
+$ext = $$ ; # limits likelihood of concurrent autogetstrings's colliding
+            # BUT: still possible.
+            # not too likely to happen.
+myinit() ;
+foreach (@ARGV) {
+    my $destfile = "$_.strings" ;
+    if (/^\s*\//) { # we got full path of remote file
+	my $remotedir = dirname($_) ;
+	my $localdir = "$opdown/$nopen_rhostname$remotedir" ;
+	`mkdir -p $localdir` ;
+	$destfile = "$localdir/".basename($_).".strings" ;
+    }
+    if (-e $destfile) {
+	my $ext = "000" ;
+	$ext++ while (-e "$destfile.$ext") ;
+	mywarn("$destfile: File exists, renaming to $destfile.$ext") ;
+	rename($destfile,"$destfile.$ext") ;
+    }
+    print OUT "-nohist -strings $_ > $dest:$destfile\n" ;
+    if ($popupoutput) {
+      $destfile =~ s/\/current\/down\/// ;
+      print OUT "-nohist -lsh 1x -title \"getstrings_$destfile\" -geometry 112x60+340+30 -e \"view $destfile\"\n" ;
+    }
+}
+close(OUT);
+rename("$opetc/gs.getstringsnext.$ext","$opetc/gs.getstringsnext");
+
+sub mywarn {
+  local ($what,$color,$color2,$what2) = (@_) ;
+  $color = $COLOR_FAILURE unless $color ;
+  $color2 = $color unless $color2 ;
+  $what2 = " $what2" if ($what2) ;
+#  local (@stuff) = (@_,$hopping) ;
+  warn  "${color2}${prog}[$$]$what2\a: ${color}$what$COLOR_NORMAL\n" ;
+#  warn "\n${COLOR_WARNING}\a@_$COLOR_NORMAL\n" ;
+}
+
+sub mydie {
+  unless ($opt_h or $opt_v) {
+    local ($what,$color,$color2,$what2) = (@_) ;
+    $color = $COLOR_FAILURE unless $color ;
+    $color2 = $color unless $color2 ;
+    $what2 = " $what2" if ($what2) ;
+#  local (@stuff) = (@_,$hopping) ;
+    usage(  "${color2}${prog}[$$]$what2\a: ${color}$what$COLOR_NORMAL\n") ;
+#"\n${COLOR_FAILURE}\a$what $hopping$COLOR_NORMAL\n" ;
+  }
+  exit 1;
+}
+
+sub myinit {
+  use File::Basename ;
+  require "getopts.pl";
+  $COLOR_SUCCESS="\033[1;32m";
+  $COLOR_FAILURE="\033[1;31m";
+  $COLOR_WARNING="\033[1;33m";
+  $COLOR_NORMAL="\033[0;39m";
+  $COLOR_NOTE="\033[0;34m";
+  $COLOR_WHITE="\033[4;97m" ;
+  $prog = basename $0 ;
+  $prog = "-gs getstrings" ;
+  $vertext = "$prog version $VER\n" ;
+  $opdir = "/current" ;
+  $opetc = "$opdir/etc" ;
+  $opdown = "$opdir/down" ;
+  $opmail = "$opdown/mailpull/$nopen_rhostname" ;
+  $usagetext="
+Usage: $prog [-h]                  (prints this usage statement)
+       $prog [-p] file1 [ file2 ... ]
+
+  -p   pop up output in separate window
+
+Run from within a NOPEN session, $prog calls autogetstrings which
+builds a NOGS to use -strings on one or more files, putting output
+both to the screen and to a local file with a \".strings\" extension
+(unless -p is used).
+
+The alias \"-getstrings\" is the same as \"-gs getstrings\", and
+\"-vgetstrings\" is the same as \"-gs getstrings -p\".
+
+";
+  unlink("$opetc/gs.getstringsnext.$ext","$opetc/gs.getstringsnext") ;
+  mydie("bad option(s)") if (! Getopts( "hvp" ) ) ;
+  $popupoutput = $opt_p ;
+  $dest = "T" ;
+  $dest = "L" if $popupoutput ;
+  open(OUT,"> $opetc/gs.getstringsnext.$ext") || 
+      mydie("cannot open $opetc/gs.getstringsnext.$ext");
+  print OUT "#NOGS\n";
+  usage() if ($opt_h or $opt_v or !@ARGV) ;
+  $| = 1;
+  $nopen_mypid = $ENV{NOPEN_MYPID} ;
+  $nopen_mylog = $ENV{NOPEN_MYLOG} ;
+  $nopen_rhostname = $ENV{NOPEN_RHOSTNAME} ;
+  $comment = "\#" ;
+  mydie("Call $prog from within noclient, not command line.\n".
+	"E.g., \"-lsh autogetstrings -b\"\n".
+	"$vertext") unless $nopen_rhostname;
+}
+
+sub usage {
+  close(OUT);
+  rename("$opetc/gs.getstringsnext.$ext","$opetc/gs.getstringsnext");
+  print "\nFATAL ERROR: @_\n" if ( @_ and !$opt_h );
+  print $usagetext unless $opt_v ;
+  print $vertext ;
+  print "\nFATAL ERROR: @_\n" if ( @_ and !$opt_h );
+  exit;
+} # end sub usage

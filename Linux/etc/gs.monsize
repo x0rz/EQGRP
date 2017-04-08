@@ -1,0 +1,43 @@
+#NOGS
+
+-lsetenv M_TIMEOUT=10
+-lsetenv M_DIRECTORY="/tmp/testing/"
+
+# get a listing of the directory
+
+ls -l /tmp/testing >L:/tmp/current.list
+-lsh cat /tmp/current.list | gawk ' { print $5,"  ","/tmp/testing/"$9 }' >/tmp/old.file.name ; rm /tmp/current.list
+-lsh  printf "\\n\\nPlease delete any files in /tmp/old.file.name that you want\\n\\n-lsh\\n vi /tmp/old.file.name\\n"
+
+-pause
+
+
+-lsh echo "#NOGS" >/tmp/gs.mon
+-lsh echo "ls -l $M_DIRECTORY >L:/tmp/current.list" >>/tmp/gs.mon
+
+
+#ls -l /tmp/testing >L:/tmp/current.list
+
+# take the listing and print out the sizes and names
+#-lsh echo "-lsh cat /tmp/current.list | gawk ' { print $5,\"  \",\"/tmp/testing/\"$9 }' >/tmp/current.file.name" >>/tmp/gs.mon
+-lsh echo "-lsh cat /tmp/current.list | gawk ' { print \\$5,\\"  \\",\\"$M_DIRECTORY\\"\\$9 }' >/tmp/current.file.name" >>/tmp/gs.mon
+#-lsh cat /tmp/current.list | gawk ' { print $5,"  ","/tmp/testing/"$9 }' >/tmp/current.file.name
+
+# What was different from last time
+-lsh echo "-lsh diff --ignore-all-space /tmp/current.file.name /tmp/old.file.name | grep \\"<\\" | grep -v \\"\\/$\\" |cut -d\\" \\" -f 2- >/tmp/dif" >>/tmp/gs.mon
+#-lsh diff --ignore-all-space /tmp/current.file.name /tmp/old.file.name | grep "<" | grep -v "\/$" |cut -d" " -f 2- >/tmp/dif
+
+-lsh echo "-lsh cat /tmp/dif |awk '{print \\$2}' >/tmp/getting" >>/tmp/gs.mon
+#-lsh cat /tmp/dif |awk '{print $2}' >/tmp/getting
+-lsh echo "-fget /tmp/getting" >>/tmp/gs.mon
+
+#-fget /tmp/getting
+-lsh echo "-lsh rm /tmp/old.file.name ; mv /tmp/current.file.name /tmp/old.file.name; rm /tmp/current.list" >>/tmp/gs.mon
+-lsh echo " sleep $M_TIMEOUT" >>/tmp/gs.mon
+-lsh echo " -gs /tmp/gs.mon " >>/tmp/gs.mon
+
+#-lsh rm /tmp/old.file.name ; mv /tmp/current.file.name /tmp/old.file.name; rm /tmp/current.list
+
+
+
+

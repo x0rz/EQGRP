@@ -1,0 +1,5 @@
+PITCHIMPAIR___splash-atm.upc.es___147.83.2.116___20020214-223010() {
+    ## INCISION Version:4.8.2 OS:sparc-sun-solaris2.6 
+    export TARG_AYT="5350ff15 689693ae ec1946b9"
+    [ "$UTC_OFFSET" ] || export UTC_OFFSET=-60
+}

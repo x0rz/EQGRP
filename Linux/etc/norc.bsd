@@ -1,0 +1,21 @@
+
+# Linux
+
+:PATH=/bin:/usr/bin:/sbin:/usr/sbin
+
+alias -pacct=-ls -t /var/log/*acct* /var/*acc* /var/log/account/*acct*
+
+alias =ps=ps -aux
+alias =psg=ps -aux | grep
+alias =nsg=netstat -an | grep 
+alias =arp=arp -an
+alias =ping=ping -c 1
+alias =df=df 
+alias =procinfo=cat /proc/cpuinfo
+alias =locale=
+alias =alwaysdothis=
+alias -elevate=-lsh echo -n Please insert another token..... 1>&2 ; sleep 6 ; echo .
+alias =autorpc=-scan rpc 127.0.0.1 one
+
+alias =pse=ps -aux | egrep
+alias =psgv=ps -aux | egrep -v 

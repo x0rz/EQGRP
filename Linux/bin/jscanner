@@ -1,0 +1,193 @@
+#!/usr/bin/perl
+
+use Socket;
+use IO::Select;
+my $list;
+my $scanth = "";
+#$jscanpath = $ENV{JSCANPATH};
+$nopen = $ENV{NOPEN_MYPID};
+$rhost = $ENV{NOPEN_RHOSTNAME};
+$scandir = "/current/down/cmdout/jscans";
+if($nopen ne "" ){print"*$nopen*\n";}
+$jscanpath = "/current/bin/jscanner_pkg";
+
+#// Parsing for some key options in the command line given to jscan to spawn jscanner
+#   This was eliminated on 04/12/2005 due to the fact that a fix in jscanner made
+#   this unneccessary 
+$ARGC = scalar(@ARGV);
+#print "ARGC: $ARGC\n";
+#for($i = $ARGC; $i > 0; $i--){
+#    #print "@ARGV[$i]\n";
+#    if(@ARGV[$i] =~ /\d+\.\d+\.\d+\.\d+/){
+#	$i--;
+#	$scantype = @ARGV[$i];
+#	#print "$scantype\n";
+#	$grep = `grep protocol $jscanpath/scantypes/$scantype.xml`;
+#	if($grep =~ /<protocol>(.*)<\/protocol>/){
+#	    #print "PROT: $1\n";
+#	    $protocol = $1;
+#	    if($protocol =~ /tcp/i){
+#		$timeout = 35000;
+#	    }
+#	}
+#    }
+#}
+
+# Added 04/12/2005
+# This section is meant to accomidate the possibility of using the word
+# one at the end of a command line to signify that you expect only one
+# UDP response from this connection, therefore making the scan quicker.
+my $last = $ARGV[$ARGC-1];
+#print "last: $last\n";
+if($last =~ /one/){
+    $scanth = $scanth . " -u 1";
+    $ARGV[$ARGC-1] = "";
+}
+
+# This section will look for redirection and storage location information before pasing to nopen.
+while (@ARGV){
+    $ARGV = shift @ARGV;
+#	print $ARGV;
+#	print "\n";
+    if($ARGV eq "-ri"){
+# check if redirection address given
+	$list = $list . " " . $ARGV;
+	$raddress = shift @ARGV;
+	$list = $list . " " . $raddress;
+#      print "raddress: ";
+#      print $raddress;
+#      print "\n";
+    }
+    elsif($ARGV eq "-rc"){ # check if redirection control port given
+	$list = $list . " " . $ARGV;
+	$rcontrol = shift @ARGV;
+	$list = $list . " " . $rcontrol;
+	`echo "$rcontrol" > $optbin/.tunnelport`;
+#		print "rcontrol: ";
+#		print $rcontrol;
+#		print "\n";
+    }
+    elsif($ARGV eq "-rp"){
+# check if redirection port given
+	$list = $list . " " . $ARGV;
+	$rport = shift @ARGV;
+	$list = $list . " " . $rport;
+#		print "rport: ";
+#		print $rport;
+#		print "\n";
+    }
+    elsif($ARGV eq "-s"){
+# check if number of Max Scan Threads is set
+	$scanthreads = shift @ARGV;
+#      print "scanthreads: ";
+#      print $scanthreads;
+#      print "\n";
+    }
+    elsif($ARGV eq "-o"){
+# check if scan output directory is changed
+	$output = shift @ARGV;
+#      print "scanthreads: ";
+#      print $scanthreads;
+#      print "\n";
+    }
+    elsif($ARGV eq "-t"){
+	$timeo = shift @ARGV;
+	if ($timeo > $timeout){
+	    $timeout = $timeo;
+	}
+    }
+    else{
+	$list = $list . " " . $ARGV;
+    } 
+}
+# if redirecting set max scan threads to 1
+if(($raddress) && ($rcontrol)){
+	$scanth = $scanth . " -s 1 ";
+}
+elsif($scanthreads){# otherwise set max scan threads if set on command line
+	$scanth = $scanth . " -s " . $scanthreads;
+}
+# if running through nopen set scan output directory to shown below
+if($nopen ne "" ){
+	if($rhost ne ""){
+		$scanth = $scanth . " -p $scandir.$rhost";
+	}
+	else{
+		$scanth = $scanth . " -p $scandir";
+	}
+}
+elsif($output){
+# otherwise set  scan output directory if set on command line
+    $scanth = $scanth . " -p " . $output;
+}
+if($timeout){
+    $scanth .= " -t $timeout";
+}
+ 
+#print "$list\n";
+sleep 1;
+chdir "$jscanpath";
+if (-e "jscanner.jar")
+{
+    print "java -jar jscanner.jar$scanth$list\n";
+    print "\n";
+    print `java -jar jscanner.jar$scanth$list`;
+    print "\n";
+}
+else
+{
+    print "./jscan.pl$scanth$list\n";
+    print "\n";
+    print `./jscan.pl$scanth$list`;
+    print "\n";
+}
+#print "*$rhost*\n";
+if($rhost ne ""){
+	#print "cp -R $scandir.$rhost/* $scandir/\n";
+	if (! -d $scandir)
+	{
+		`mkdir -p $scandir`;
+	}
+	print `cp -R $scandir.$rhost/* $scandir/`;
+}
+#if redirecting close out control channel
+if(($raddress) && ($rcontrol)){
+	socket($sock, AF_INET, SOCK_DGRAM, getprotobyname("udp"))
+		or die "socket: $!\n";
+	$destaddr = sockaddr_in($rcontrol, inet_aton($raddress));
+	$resp = "";
+	my $select;
+        
+	$count = send($sock, "q\n", 0, $destaddr)
+                or die "send: $!\n";
+                $count = recv($sock, $resp, 4, 0)
+                or die "recv: $!\n";
+                # print "$resp\n";
+            $select=new IO::Select();
+        $select->add($sock);
+        while (@canRead=$select->can_read(1)) {
+                        recv($sock, $resp, 1000, 0);
+	}
+    if(! ($resp =~ /^\[q\]/ )){
+        $count = send($sock, "c 1 2 3 4 5 6 7 8 9\n", 0, $destaddr)
+                or die "send: $!\n";
+    }
+	$s = 5;
+    while (! ($resp =~ /^\[q\]/ ))
+    {
+	sleep($s);
+    	$count = send($sock, "q\n", 0, $destaddr)
+        	or die "send: $!\n";
+		$count = recv($sock, $resp, 4, 0)
+        	or die "recv: $!\n";
+		# print "$resp\n";
+	    $select=new IO::Select();
+    	$select->add($sock);
+    	while (@canRead=$select->can_read(1)) {
+			recv($sock, $resp, 1000, 0);
+    	}
+	$s = $s * 2;
+     }
+	#print "$count \n";
+	close($sock);
+}

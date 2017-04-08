@@ -1,0 +1,63 @@
+#!/usr/bin/env perl
+
+# Take args and make them a string for egrep to use
+my $tailfile = "/current/down/cdrtail";
+my $nextfile = "/current/etc/gs.autocdrloopnext";
+my $argsfile = "/current/.cdrargs";
+my $donefile = "/current/down/cdrdone";
+my $outfile = "/current/down/cdroutput";
+my $prettyfile = "/current/down/cdrpretty";
+$targs = "@ARGV";
+$oldtargs = $targs;
+$targs =~ s/ /\|/g;
+
+# Usage
+if ($#ARGV == -1 || $targs eq "-h")
+{
+  die "\nusage: -gs cdrloop PHONESTR [PHONESTR...]\n\n";
+}
+
+# Store the target numbers in a file to be used by cdrprint
+open(ARGSFILE, ">$argsfile") || die "Error opening $argsfile";
+print ARGSFILE "$oldtargs\n";
+close(ARGSFILE);
+
+# Read the already processed files into memory
+if (-e "$donefile")
+{
+  open(DONEFILE, "$donefile") || die "Error opening $donefile";
+  while (<DONEFILE>)
+  {
+    chomp;
+    $filelist{$_} = 1;
+  }
+  close(DONEFILE);
+}
+
+# Open the tailed file, create the parser command line for each candidate file
+open(INFILE, "$tailfile") || die "$tailfile does not exist";
+open(NOGSFILE, ">$nextfile") || die "Error opening $nextfile";
+open(DONEFILE, ">>$donefile") || die "Error opening $donefile";
+print NOGSFILE "#NOGS\n";
+while (<INFILE>)
+{
+  chomp;
+  $theline = $_;
+  @parsedfiles = split(" ", $theline);
+  $cdrfile = $parsedfiles[9];
+  if (exists $filelist{$cdrfile})
+  {
+    print "Already processed $cdrfile, skipping...\n";
+    next;
+  }
+  print DONEFILE "$cdrfile\n";
+  print "processing $cdrfile\n";
+  print NOGSFILE "-nohist -lsh echo entries from $cdrfile >> L:$outfile\n";
+  print NOGSFILE "-nohist ./lvmkd $cdrfile | egrep \"$targs\" >> L:$outfile\n";
+}
+close(INFILE);
+close(DONEFILE);
+print NOGSFILE "-nohist -lsh /current/etc/cdrprint -a $argsfile -f $outfile > T:$prettyfile\n";
+close(NOGSFILE);
+chmod 0700, $nextfile;
+

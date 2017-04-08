@@ -1,0 +1,8 @@
+#!/bin/bash
+/root/Change-IP-MAC-Add-routes
+
+
+setnumlock
+#rm -F /root/.bash_login
+
+sed -i "s/\/root\/.bash_login*/""/g" /root/.bash_profile

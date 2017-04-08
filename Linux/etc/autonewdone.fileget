@@ -1,0 +1,238 @@
+#!/usr/bin/env perl
+#
+# 20130416 - This portion of autonewdone implements all of the file gets
+# that need to be performed when first connecting to a UNIX target.
+#
+$VER="3.0.0.1";
+$ext = $$ ;			# limits likelihood of concurrent autodone's colliding
+				# BUT: still possible.
+				# not too likely to happen.
+
+$| = 1;
+myinit() ;
+
+sub dofileget() {
+  # Symantec Critical System Protection (SCSP)
+  # On Windows/AIX/Linux/Solaris
+  # cxs: Config Exploit Scanner (see also autopscheck)
+  # lfd: linux firewall daemon
+  # csf: ConfigServer firewall
+  #
+  # NOTE: Other collects in autonewdone done this way with a recursive
+  # listing of /etc/ will reuse this listing, saving a bit of target time.
+  # But be sure you use "/etc/" and not "/etc", which will be re-listed.
+  my ($sec,$min,$hr,$mday,$mon,$year,$wday,$yday,$isdst) = gmtime();
+  $year += 1900 unless $year > 1900;
+  # $mon is zero based, $mon-1 is 60 days worth
+  my $xmtime = sprintf("%02d-%02d-%02d",$mon-2,$mday,$year);
+  nopenlss("-RG${nopenlssreget}YUFM102400",
+           "-btail",
+           "-gsisips,,grub.conf,,lfd,,csf,,cxs,,hostname,,nsswitch.conf,,hosts",
+           #"-gsisips,,grub.conf,,lfd,,csf,,cxs,,hostname,,nsswitch.conf,,hosts,,motd,,syslog.*conf,,inetd.conf,,resolv.conf",
+           "-xm",$xmtime,
+           "/etc",
+           "/private/etc", # MacOS
+           "/var/log",
+           "/var/adm",
+          );
+  doit("-lsh grep -v \\\"^#\\\" $opdown/$nopen_rhostname/etc/syslog.conf > L:$optmp/.syslog.$nopen_rhostname");
+                
+  tickleifneedbe($builtinsonly);
+    
+  # More gets, grepping same listing returned in above (no -U here, so not re-listed)
+  nopenlss("-RG${nopenlssreget}YFM102400",
+           "-btail",
+           "-gshadow,,passwd,,hosts,,motd,,syslog.*conf,,inetd.conf,,resolv,conf,,selinux/config,,release,,redhat,,debian,,issue,,slack.*version,,spwd.db,,sudoers,,/ssh,,lfd.log,,security/audit_control",
+           "/etc",
+           "/private/etc", # MacOS
+           "/var/log",
+           "/var/adm",
+          );
+          
+  nopenlss("-RG${nopenlssreget}YFM307200",
+           "-ghttpd.conf",
+           "/usr/local/apache/conf",
+           "/etc/apache/conf",
+          );          
+   
+  tickleifneedbe($builtinsonly);
+  
+  nopenlss("-RG${nopenlssreget}YFM102400",
+           "-btail",
+           "-gsulog",
+           "/var/log",
+           "/var/adm",
+          );
+            
+  nopenlss("-G${nopenlssreget}YUFM102400",
+           "/usr/local/cpanel/version",
+           "/.*history",
+           "/root/.*history",
+           "/export/.*history*",
+          );
+          
+  # Check for and alert on the use of certain filesystem debugging tools.
+  ($output) = doit("egrep \"(fsdb|debugfs|scrub|dd)\" /.*history /root/.*history /export/.*history*");
+  if ($output) {
+    mymywarn("Potential bad activity found in command histories!\n\n$output\n\n");
+  }
+    
+  # MALDETECT: running as lmd or maldet
+  ($output) = doit("-ls -d /usr/local/maldetect* /usr/local/maldetect/VERSION*");
+  ($output) = doit("-ls -d /opt/maldetect* /opt/maldetect/VERSION*") unless $output;
+  if ($output) {
+    nopenlss("-RG${nopenlssreget}YUFM102400",
+             "-gignore,,conf,,event_log,,VERSION",
+             "/usr/local/maldetect*",
+             "/opt/maldetect*",
+            );
+  }
+  
+  tickleifneedbe($builtinsonly);
+  
+  if ($solaristarget) {
+    # Solaris-specific.
+    nopenlss("-RG${nopenlssreget}YFM102400",
+             "-btail",
+             "-g/etc/ipf,,/etc/*/ipf,,/etc/zones,,/etc/system,,/etc/logadm.conf",
+             "/etc",
+             "/private/etc", # this is here so that nopenlss() reuses the previous dirlisting
+             "/var/log",
+             "/var/adm",
+            );
+            
+    # Open the autodothis file here.
+    open(CMDOUT,">$statsfile");
+    my $justgot = `cd $opdown/$nopen_rhostname ; ls -alrtR etc/system* etc/logadm.conf* etc/ipf* etc/zones* 2>/dev/null`;
+    print CMDOUT "\n\nJust downloaded the following:\n\n$justgot\n"
+      if ($justgot);
+    close(CMDOUT);
+            
+  } elsif ($linuxtarget) {
+    nopenlss("-G${nopenlssreget}YUFM150000","/etc/selinux/config");
+    `grep -v "^\#" $opdown/$nopen_rhostname/etc/selinux/config > $optargetcommands/${nopen_rhostname}_selinux 2>/dev/null`;
+    unlink("$optargetcommands/${nopen_rhostname}_selinux")
+      unless -s("$optargetcommands/${nopen_rhostname}_selinux");
+
+  } elsif ($freebsdtarget) {
+    # FreeBSD-specific.
+    nopenlss("-G${nopenlssreget}YUFM102400",
+             "/var/etc/hosts",
+            );
+  } elsif ($junostarget) {
+    nopenlss("-G${nopenlssreget}YUFM1048576",
+             "/var/etc/hosts",
+             "/config/juniper.conf*",
+             "/var/log/inventory*",
+             "/usr/libdata/fru.models",
+            );
+  } elsif ($darwintarget) {
+    # MacOS/Darwin-specific.
+    nopenlss("-G${nopenlssreget}YUFM102400",
+             "/Users/*/.*history*",
+             "/var/root/.*history*",
+             "/private/var/db/shadow/*",
+             "/var/db/shadow/*",
+            );
+  } elsif ($hpuxtarget) {
+    # HP-UX specific.
+    nopenlss("-G${nopenlssreget}YUFM10240",
+             "/tcb/files/auth",
+            );
+  }
+
+  # This is worth alerting on: SCALDWED
+  # Auto -ls, then pull, 384 byte files matching this in /var/tmp:
+  if ($solaristarget or $linuxtarget or $junostarget) {
+    ($newdoneoutput,$nopenlines,@newdoneoutput) =
+      nopenlss("-rGYLNOSEND/var/tmp",
+               "-Um384",
+               "-M384",
+               "-g/var/tmp/\\.......\$",
+               "/var/tmp");
+    if ($newdoneoutput) {
+      $newdoneoutput =~ s,\033\[[0-9]+;[0-9]+m,,g;
+      writefile("$optmp/getscaldwedfile.$$",$newdoneoutput);
+      nopenlss("-LNOSEND/var/tmp","-rGYl$optmp/getscaldwedfile.$$");
+      mydo("autoproblem","-TDEV",
+           "\n\nThis may be a SCALDWED Monitor file:\n\n".
+           $newdoneoutput."\n\n".
+           "It has been pulled and put in the NOSEND directory for this target:\n\n".
+           `find $opdown/NOSEND/$nopen_rhostname/var/tmp -type f -ls`);
+      my ($ans) = mygetinput
+        (
+        "\n .\n .\n .\n .\n .\n .\n .\n .\n .\n .\n .\n .".$COLOR_NORMAL.
+        "\n\n\n$COLOR_FAILURE   ALERT   ALERT   ALERT   ALERT   ALERT   ALERT   ALERT   ALERT\n".
+        "$COLOR_NORMAL\n\n".
+        "This may be a SCALDWED Monitor file:\n\n".
+        $newdoneoutput."\n\n".
+        "It has been pulled and put in the NOSEND directory for this target:\n\n".
+        `find $opdown/NOSEND/$nopen_rhostname/var/tmp -type f -ls`.
+        "\n\n\nFurther, the problem has already been logged here, no need to do anything else:\n\n".
+        `ls -arlt $opdown/DEV-problems.log`.
+        "\n\n\n$COLOR_FAILURE   ALERT   ALERT   ALERT   ALERT   ALERT   ALERT   ALERT   ALERT\n".
+        "$COLOR_NORMAL\n\n".
+        "\n .\n .\n .\n .\n .\n .\n .\n .\n .\n .\n .\n .".
+        "Hit return to continue with autonewdone.".
+        "");
+    }
+  }
+    
+  # Run this only on suitable targets.
+  if ($linuxtarget or $solaristarget or $freebsdtarget) {
+    mydo("autogetnewsuc");
+  }
+    
+  return 1;
+}
+
+dofileget ();
+
+sub mymywarn {
+  local ($what,$color,$color2,$what2) = (@_) ;
+  $color = $COLOR_FAILURE unless $color ;
+  $color2 = $COLOR_FAILURE unless $color2 ;
+
+  progprint($what,$color,$color2,$what2);
+  sleep 5;
+  $printlater .= $what;
+  $badcontent++ unless $what =~ /unable to sort by /i ;
+  if ($autodone) {
+    open(MYOUT,">> $opdir/latewarnings.$nopen_rhostname") || return ;
+    print MYOUT "$what\n" ;
+    close MYOUT;
+  } else {
+    dbg("NOT Logging to latewarnings in mymywarn(@_)");
+  }
+}
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs newdone.fileget @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog = "-gs newdone.fileget";
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+
+  # Setting $autodone allows any mydo() called functions to know
+  # we are in this mode to populate $opdir/latewarnings*
+  $autodone=1;
+
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+}#myinit

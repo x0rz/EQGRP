@@ -1,0 +1,5 @@
+#!/bin/sh
+MORE=""
+[ "$1" ] && MORE="+/$1"
+[ "`basename $0`" = "ugs" ] && MORE="+/ssh.*MASQTUNNEL_PORT"
+vi /current/doc/user.mission.generic* $MORE

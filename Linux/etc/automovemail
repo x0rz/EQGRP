@@ -1,0 +1,153 @@
+#!/usr/bin/env perl
+#
+# INPUT: $GSOPTIONS and $NOPEN_* env vars
+#
+# This script moves mail from ../down/$NOPEN_RHOSTNAME/some/dir into
+# ../down/mailpull/$NOPEN_RHOSTNAME/some_dir_path_to_file, ensuring each
+# new filename is unique and identifiable even if the final filename for all
+# of them is the same.
+#
+
+$VER="1.1" ;
+myinit() ;
+$| = 1 ;
+@sourcefiles = split(/\n/,`find $sourcedir -type f 2>/dev/null`) ;
+mydie("No files found in $sourcedir") unless @sourcefiles ;
+if ($debug) {
+  myprint("${COLOR_FAILURE}\n\nFollowing commands WOULD be done without debug mode (note you can paste these):\n\n");
+} else {
+  select OUT ;
+}
+foreach (@sourcefiles) {
+  my $not = "NOT " if $debug ;
+  if (-s == 0) {
+    myprint("${COLOR_FAILURE}${not}removing empty file: $_") ;
+    unlink $_ unless $debug;
+    next ;
+  }
+  if ($checkdupes) {
+    chomp(my $sum = `sum $_`) ;
+    if ($sums{$sum}++) {
+      my $dest = $_ ;
+      $dest =~ s/.*$nopen_rhostname/$opdir\/removed\/$nopen_rhostname/ ;
+      myprint("${COLOR_FAILURE}${not}moving duplicate: $_ -> $dest") ;
+      unless ($debug) {
+	mkdir dirname($dest) ;
+	rename ($_,$dest) ;
+      }
+      next ;
+    }
+  }
+  $dest{$_} = $_ ;
+  $dest{$_} =~ s/$opdown\/$nopen_rhostname// ;
+  $dest{$_} =~ s/\//_/g ;
+  $dest{$_} =~ s/^_// ;
+  $dest{$_} =  "$maildir/$dest{$_}" ;
+  print "-lsh mv $_ $dest{$_} -nohist\n";
+}
+foreach (split(/\n/,`find $sourcedir -type d 2>/dev/null`)) {
+  print "-lsh rmdir $_ 2>/dev/null -nohist\n" ;
+}
+close(OUT) ;
+select STDOUT ;
+rename("$opetc/gs.movemailnext.$ext","$opetc/gs.movemailnext");
+
+
+sub mydie {
+#  myprint("\a${COLOR_FAILURE}@_") if ($nopen_mypid) ;
+#  sleep 1 ;
+  rename("$opetc/gs.movemailnext.$ext","$opetc/gs.movemailnext") ;
+  die("\a${COLOR_FAILURE}@_${COLOR_NORMAL}\n") ;
+}#mydie
+
+sub mywarn {
+  ($str,$color,$beep) = (@_) ;
+  unless ($color) {
+    $beep = "\a" ;
+    $color = $COLOR_FAILURE ;
+  }
+  $beep = "\a" if $beep ;
+  warn "${color}${beep}$str$COLOR_NORMAL\n" ;
+}#mywarn
+
+sub myprint {
+  print STDERR "$date @_$COLOR_NORMAL\n";
+}#myprint
+
+sub myinit {
+  require "getopts.pl";
+  use File::Basename ;
+  $nopen_mypid = $ENV{NOPEN_MYPID} ;
+  $nopen_mypid = $$ unless $nopen_mypid ;
+  $nopen_mylog = $ENV{NOPEN_MYLOG} ;
+  $nopen_rhostname = $ENV{NOPEN_RHOSTNAME} ;
+  ($nopen_hostonly) = $nopen_rhostname =~ /(.*)\.\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/ ;
+  $calledfromnopen = ($nopen_mypid and $nopen_mylog and $nopen_rhostname) ;
+  $gsoptions = $ENV{GSOPTIONS} ;
+  $COLOR_SUCCESS="\033[1;32m";
+  $COLOR_FAILURE="\033[1;31m";
+  $COLOR_WARNING="\033[1;33m";
+  $COLOR_NORMAL="\033[0;39m";
+  $COLOR_NOTE="\033[0;34m";
+  $opdir = "/current" ;
+  $tmpdir = $opdir ;
+  $opetc = "$opdir/etc" ;
+  $opdown = "$opdir/down" ;
+  $opbin = "$opdir/bin" ;
+  $maildir = "$opdown/mailpull/$nopen_rhostname" ;
+  $dupedir = "$opdir/removed/mailpull/$nopen_rhostname" ;
+  mkdir $maildir ;
+  mkdir $dupedir ;
+  $prog = "-gs movemail" ;
+  $vertext = "$prog version $VER\n" ;
+  $ext = "$$" ;
+  usage("bad option(s)") if (! Getopts( "hvdU" ) ) ;
+  $checkdupes = ! $opt_U ;
+  $debug = $opt_d ;
+  $usagetext="
+Usage: $prog $opdown/$nopen_rhostname/source/dir
+
+OPTIONS
+
+  -d     Debug mode--do not move any files only show what would be moved.
+  -U     Allow duplicate files to all be moved. Default moves one unique
+         copy and removes the rest.
+
+$prog moves unique non-empty files from:
+
+   $opdown/$nopen_rhostname/source/dir/path/to/file
+
+to:
+
+   $maildir/source_dir_path_to_file
+
+There is no default source directory, and the source directory given
+must be a subdirectory of $opdown/$nopen_rhostname.
+
+Empty and duplicate files in the source directory are eliminated.
+
+" ;
+  unlink("$opetc/gs.movemailnext") ;# clean slate
+  if (open(OUT,"> $opetc/gs.movemailnext.$ext")) {
+    print OUT ("#NOGS\n") ;
+  } else {
+    usage() if ($opt_h or $opt_v) ;
+    mydie("Unable to open >> $opetc/gs.movemailnext.$ext");
+  }
+  usage() if ($opt_v or $opt_h );
+  $sourcedir = "@ARGV" ;
+  mydie("No local directory provided") unless $sourcedir ;
+  mydie("No such local directory $sourcedir") unless
+    (-d $sourcedir) ;
+}#myinit
+
+sub usage {
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+#  $usagetext = $gsusagetext if ($nopen_mypid) ;
+  print $usagetext unless $opt_v ;
+  print $vertext ;
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  rename("$opetc/gs.movemailnext.$ext","$opetc/gs.movemailnext") unless (@_) ;
+  exit;
+} #usage
+

@@ -1,0 +1,130 @@
+#!/usr/bin/env perl
+
+use Getopt::Long;
+my $version = "1.1.1.1";
+
+GetOptions("a=s" => \$opt_a,
+           "f=s" => \$opt_f,
+           "h" => \$opt_h,
+           "v" => \$opt_v);
+
+# If usage needed
+if ($opt_h)
+{
+  print STDERR "cdrprint -f inputfile -a argsfile\n\n";
+  print STDERR "-f inputfile: comma-delimited CDR records (1 per line)\n";
+  print STDERR "-a argsfile: space-delimited target numbers (1 or more lines)\n\n";
+  print STDERR "This script takes comma-separated CDR records and pretty\n";
+  print STDERR "prints them.  Output goes to stdout.\n";
+  print STDERR "\ncdrprint version $version\n";
+  exit;
+}
+
+# If version number needed
+if ($opt_v)
+{
+  print STDERR "cdrprint version $version\n";
+  exit;
+}
+
+# Check for required arguments
+$opt_a || die "Must supply argument filename with -a switch";
+$opt_f || die "Must supply input filename with -f switch";
+$argsfile = $opt_a;
+$filename = $opt_f;
+
+# Read in targets from file, store in a hash table
+my $argscount = 0;
+open(ARGSFILE, "$argsfile") || die "Error opening $argsfile";
+while ($argsline = <ARGSFILE>)
+{
+  chomp $argsline;
+  @argsarray = split(" ", $argsline);
+  foreach $arg (@argsarray)
+  {
+    $argshash{$arg} = 1;
+    $argscount++;
+  }
+}
+
+# Open the cdroutput file given on the command line, loop thru entries
+open(CDRFILE, $filename);
+while (<CDRFILE>)
+{
+  # Change the current filename's entries if needed
+  if (/entries from (.*)/)
+  {
+    $cdrfile = $1;
+    next;
+  }
+
+  # Parse the cdr record
+  @parsedstring = split(",");
+  $phone1 = $parsedstring[3];
+  $phone2 = $parsedstring[5];
+  $imei = $parsedstring[2];
+
+  # If neither phone number matches a target number (i.e. we have a match 
+  # based on timestamp), skip it
+  $match1 = 0;
+  $match2 = 0;
+  $match3 = 0;
+  foreach $arg (keys %argshash)
+  {
+    $match1 = 1 if ($phone1 =~ /$arg/);
+    $match2 = 1 if ($phone2 =~ /$arg/);
+    $match3 = 1 if ($imei =~ /$arg/);
+  }
+  next if ($match1 == 0 && $match2 == 0 && $match3 == 0);
+
+  # Pretty print the record
+  # A * next to a number indicates exact match to a target
+  # A ! next to a number indicates partial match to a target
+  # No symbol next to a number indicates no match
+  print "---- BEGIN ENTRY FROM $cdrfile ----\n";
+
+  # Print phone 1 entry
+  if (exists $argshash{$phone1})
+  {
+    print "Party 1:\t\t$phone1*\n";
+  }
+  else
+  {
+    if ($match1 == 1)
+    {
+      print "Party 1:\t\t$phone1!\n";
+    }
+    else
+    {
+      print "Party 1:\t\t$phone1\n";
+    }
+  }
+
+  # Print phone 2 entry
+  if (exists $argshash{$phone2})
+  {
+    print "Party 2:\t\t$phone2*\n";
+  }
+  else
+  {
+    if ($match2 == 1)
+    {
+      print "Party 2:\t\t$phone2!\n";
+    }
+    else
+    {
+      print "Party 2:\t\t$phone2\n";
+    }
+  }
+
+  # Print rest of information about the cdr record
+  print "IMEI (Party 1):\t\t$imei\n";
+  print "Cell-id (Party 1):\t$parsedstring[9] / $parsedstring[8]\n";
+  print "IMSI (Party 1):\t\t$parsedstring[4]\n";
+  print "Event time:\t\t$parsedstring[0]\n";
+  print "Duration:\t\t$parsedstring[1]\n";
+  print "---- END ENTRY FROM $cdrfile ----\n";
+}
+close(CDRFILE);
+
+

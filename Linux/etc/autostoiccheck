@@ -1,0 +1,331 @@
+#!/usr/bin/env perl
+##
+$VER="1.0.0.5" ;
+# nopen seems happier with stderr in lsh runs
+# or does it? Took it out now...
+#select STDERR ;
+$| = 1 ;
+
+my $stoic_sums_file = "/current/up/stoicversions.sums";
+my $stoic_levels_file = "/current/up/stoicversions.levels";
+my $boot_path = "/boot";
+
+myinit() ;
+
+mydie("Only used for Linux or Solaris.")
+    if(!($solaristarget or $linuxtarget));
+populatestoicdetails();  # Populate %stoicdetails from $opup/stoicctrls/
+
+dolinux() if ($linuxtarget);
+dosolaris() if ($solaristarget);
+
+
+sub populatestoicdetails {
+    %stoicdetails = ();
+    return unless opendir(STOICDIR,"$opup/stoicctrls");
+    foreach (readdir(STOICDIR)) {
+	s/stoicsurgeon_ctrl__v__//;
+	s/sparc-sun-/sparc-/g;
+	my ($stoicver,$hw,$os,$osver) = ();
+	if (($osver) = /\D([\d\.]+)$/) {
+	    s/[-_]*$osver$//;
+	}
+	($stoicver,$hw) = /(\d+\.\d+\.\d+\.\d+)_(.*)/;
+	if ($hw and $stoicver) {
+	    ($hw,$os) = $hw =~ /^([^-]*)-(.*)/;
+	    #dbg("osver=$osver= stoicver=$stoicver= hw=$hw= os=$os=");
+	    $stoicdetails{$stoicver} = "$hw $os";
+	    $stoicdetails{$stoicver} .= " $osver" if ($osver);
+	}
+    }
+    closedir(STOICDIR);
+}
+#populatestoicdetails
+
+sub levelval {
+  local ($str) = (@_);
+  my ($big,undef,$little) = $str =~ /(\d+)(-(\d+)){0,1}/;
+  #dbg("levelval($str) returning ".(100*$big + $little));
+  return 100*$big + $little;
+}
+
+sub dosolaris {
+  my ($hostosver,$mylevel) = ();
+  if ($solaristarget) {
+      ($hostosver,$mylevel) = $nopen_serverinfo =~ /(\d+\.\d+)[^0-9-]*([0-9-]+)/;
+      if (length($mylevel) < 5) {
+	  $mylevel = "000000-00";
+      }
+  }
+#$mylevel = "148888-54";# DBG ONLY
+
+  my $ver_max = "";
+  my $stoicver_max = "";
+  # Make $ver 2.x not 5.x
+  $hostosver =~ s/^5\./2\./  if ($hostosver >= 5);
+
+  mydie("Cannot open: $stoic_levels_file:$!")
+    unless open(LEVELFILEIN, "<$stoic_levels_file");
+
+  ($asof) = `stat --format=%y $stoic_levels_file` =~ /\s*(\S+)/;
+
+  %level_max = ();
+
+
+#  my $matching = sprintf(" %-13s %10s\n", "VERSION", "LEVEL");
+  my $matching = sprintf(" %-13s %10s %-7s\n", "VERSION", "LEVEL", "SOLARIS VER");
+    $matching .=   " ------------------------------------\n";
+  my %donealready;
+  my $matchcount = 0;
+  while (<LEVELFILEIN>) {
+#mywarn("DBG: $_") if (/sparc/i and ($inteltarget or $intel64target));#if (/1.4.3.9/);
+    next if (/sparc/i and ($inteltarget or $intel64target));
+    next if ((/[3x]86/i or /86-PC/i) and ($sparctarget or $sparc64target));
+    s/solaris\-*/ /gi;
+    s/\s+/ /g;
+    my ($stoicver, $level, $name, $osver,@releasedate) = split;
+    if ($osver =~ /(Mon|Tue|Wed|Thu|Fri|Sat|Sun)/) {
+	$osver = "";
+    } else {
+	# Throw away the day
+	shift @releasedate;
+    }
+    my $releasedate = "@releasedate";
+    if ($osver == "") {
+	if ($stoicdetails{$stoicver} =~ / ([\d\.]+)$/) {
+	    $osver = $1;
+	} else {
+	    $osver = "???";
+	}
+    }
+    $osver = "???" unless $osver;
+    next if ($donealready{"$stoicver, $level, $name, $osver"}++);
+    next unless ($osver == "???" or $hostosver == $osver or $showall);
+#offerabort("Checking:  ($stoicver, $level, $name, $osver,@releasedate) stoic_levels_file=$stoic_levels_file=".`ls -al $stoic_levels_file`."
+#
+#    next if (levelval($level) < levelval($mylevel));
+#    next if (".levelval($level)." < ".levelval($mylevel).");
+#");
+    next if (levelval($level) < levelval($mylevel));
+
+    $level_max{$osver} = "0-0" unless $level_max{$osver};
+    if (#levelval($level) > levelval($level_max{$osver}) and
+	#levelval($level) >= levelval($mylevel)
+	((verval($stoicver))[1] > (verval($stoicver_max))[1] ) and 
+	($osver == "???" or $hostosver == $osver)
+	) {
+	    $level_max{$osver} = $level;
+	    $ver_max = sprintf(" %-13s %10s\n", $stoicver, $level);
+	    $stoicver_max = $stoicver;
+	#dbg("ON: stoicver=$stoicver osver=$osver level=$level name=$name WITH:hostosver=$hostosver= mylevel=$mylevel= AND levelval($level)==".	levelval($level)." >=? levelval($mylevel)==".levelval($mylevel)." AND level_max{$osver}=$level_max{$osver}= ver_max=$ver_max=");
+#mywarn("DBG:
+#
+#ON: 	stoicver=$stoicver
+#	stoicver_max=$stoicver_max=
+#	osver=$osver
+#	level=$level
+#	name=$name
+#	WITH:hostosver=$hostosver=
+#	mylevel=$mylevel=
+#	AND
+#	levelval($level)==".	levelval($level)."
+#	>=?
+#	levelval($mylevel)==".levelval($mylevel)."
+#	AND level_max{$osver}=$level_max{$osver}= ver_max=$ver_max=
+#
+#level=$level=
+#levelval($level)=".levelval($level)."
+#levelval($mylevel)=".levelval($mylevel)."
+#inteltarget=$inteltarget=
+#intel64target=$intel64target=
+#solaristarget=$solaristarget=");
+    }
+    $matching .= sprintf(" %-13s %10s %7s\n", $stoicver, $level, $osver);
+  }
+  close(LEVELFILEIN);
+
+  my $more = "You are on Solaris $hostosver $mylevel, so the highest version you can install is:\n\n$ver_max\n";
+  if ($ver_max and $iffy{$ver_max}) {
+      $more = "$COLOR_FAILURE\n".
+	  "You are on Solaris $hostosver $mylevel, and the highest STOIC version\n".
+	  "that may work is older than 1.5, so the platform version (2.6-10) is not\n".
+	  "available.
+the pote
+so you CANNOT install any of the above\n".
+	  "here, your patch level is too new.";
+  } elsif ($ver_max) {
+      $more = 
+	  "You are on Solaris $hostosver $mylevel, the newest STOIC you can install is:\n\n".
+	  $COLOR_FAILURE.
+	  $ver_max;
+  } else {
+      $more = "$COLOR_FAILURE\n".
+	  "You are on Solaris $hostosver $mylevel, so you CANNOT install any of the above\n".
+	  "here, your patch level is too new.";
+  }
+  
+  $more = "" if ($linuxtarget);
+  progprint("_
+
+As of $asof, current STOIC builds for Solaris $hostosver:$COLOR_NORMAL
+
+$matching
+
+$more");
+}#dosolaris
+
+sub dolinux {
+  my ($output,$nopenlines,@output) = nopenlss("-PQ", "cat","md5sum","uname","tr");
+  mydie("Can't find md5sum command.")
+    if (@output < 4);
+  my $list = "";
+  foreach (@output) {
+    my $file = "";
+    $file = $2 if
+      (m,(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+[^/]+\s+(/.*), or
+       m,(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+[^/]+\s+(\./.*), or
+       m,(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d+\s+\d+:\d+\s+\d{4}\s+(.*),);
+    $list .= " $file" if $file;
+  }
+  my ($output,$nopenlines,@touchlines) = doit("-ls -n$list");
+
+  # get the hash of /proc/version
+  ($output) = doit("cat /proc/version | tr -d \"\\\\n\" | md5sum");
+  if ($output =~ /^(\p{IsXDigit}{32})/) {
+    $ver_sum = $1; 
+    newhostvar("host_version_md5sum",$ver_sum);
+  }
+
+  # get the hash of vmlinuz
+  my ($unr) = doit("uname -r");
+  my %vmz_sum_not_running = ();
+  chomp($unr);
+  (undef,undef,@output) = doit("md5sum $boot_path/vm*");
+  foreach my $output (@output) {
+      if ($output =~ m,^(\p{IsXDigit}{32})\s+$boot_path/vmlinuz-.*$unr$,) {
+	  $vmz_sum = $1;
+      } elsif ($output =~ m,^(\p{IsXDigit}{32})\s+(/.*)$,) {
+	  $vmz_sum_not_running{$1} .= "\n" if $vmz_sum_not_running{$1};
+	  $vmz_sum_not_running{$1} .= $2;
+      }
+  }
+  newhostvar("host_vmlinuz_md5sum",$vmz_sum) if $vmz_sum;
+
+  mydie("Cannot open: $stoic_sums_file:$!")
+    unless open(VERFILEIN, "<$stoic_sums_file");
+
+  %ver_max = { $ver_sum => "0.0.0.0" };
+  %vmz_max = { $vmz_sum => "0.0.0.0" };
+
+  while (<VERFILEIN>) {
+    next if (/sparc/i and ($inteltarget or $intel64target));
+    ($ver, $sum, $type, $name) = split;
+    if ($type eq "version" && $sum eq $ver_sum) {
+      if ((verval($ver))[1] > (verval($ver_max{$sum}))[1] ) {
+	$ver_max{$sum} = $ver;
+	$ver_res = sprintf("%-13s %s", $ver, $name);
+      }
+    } elsif ($type eq "vmlinuz") {
+	if ($sum eq $vmz_sum) {
+	    if ((verval($ver))[1] > (verval($vmz_max{$sum}))[1] ) {
+		$vmz_max{$sum} = $ver;
+		$vmz_res = sprintf("%-13s %s", $ver, $name);
+	    } else {
+	    }
+	}
+    }
+  }
+  close(VERFILEIN);
+
+#  doit(@touchlines) if (@touchlines > 0);
+
+  my (undef,undef,@bootdir) = doit("-ls /boot/");
+  my $bootcount = scalar grep /[^\.]$/ , @bootdir;
+  my $bootmore = "";
+
+  $ver_res = "No STOIC available." if(!$ver_res);
+  $vmz_res = "No STOIC available." if(!$vmz_res);
+  if (!$vmz_sum) {
+      $vmz_sum = sprintf "%-32s","(No vm* kernels in /boot AT ALL)";
+      $vmz_sum = "$COLOR_FAILURE$vmz_sum$COLOR_NORMAL";
+  }
+  progprint(" 
+
+md5sum matches for current STOIC builds:$COLOR_NORMAL
+
+ $ver_sum /proc/version:  $ver_res
+ $vmz_sum /boot/vmlinuz:  $vmz_res");
+}
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs stoiccheck @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }  
+    require $autoutils;
+    $prog = "-gs stoiccheck";
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+
+"
+nopen_rhostname=$nopen_rhostname=
+nopen_mylog=$nopen_mylog=
+
+
+".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"$prog\" is used.
+
+";
+  $origparms = " @ARGV";
+  mydie("bad option(s)") if (! Getopts( "hb:A" ) ) ;
+  mydie("Syntax error: $prog takes only options no arguments")
+    if (@ARGV);
+
+  $gsusagetext="
+Usage: $prog [OPTIONS]
+
+On Solaris or Linux, $prog gives you an idea whether or not there is
+a STOICSURGEON version for this target. STOICSURGEON versioning information
+is gleaned from these files, which came from stoicctrls.tar.bz2:\n\n".
+`ls -al $opup/stoicversions.sums $opup/stoicversions.levels`."
+ON LINUX:
+
+  Shows your kernel and /proc/version hashes, and finds any matches.
+
+ON SOLARIS:
+
+  Shows your patch level and finds the highest version at that or
+  higher patch levels.
+
+OPTIONS
+    -h           prints this usage statement
+    -b path      location of vmlinuz (default /boot)
+    -A           Show all versions of STOICSURGEON for Solaris
+
+";
+  usage() if ($opt_h) ;
+  $boot_path = $opt_b if ($opt_b);
+  $showall = $opt_A;
+
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+}#myinit

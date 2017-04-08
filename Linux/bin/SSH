@@ -1,0 +1,134 @@
+#!/usr/bin/env perl
+$VER="1.0.0.3" ;
+
+myinit();
+if (-s "/root/.ssh/known_hosts") {
+  mywarn("Wiping /root/.ssh/known_hosts\n\n");
+  unlink "/root/.ssh/known_hosts";
+  $wiped = "\nJust wiped /root/.ssh/known_hosts\n\n";
+  sleep 2;
+}
+
+# Took this out from print below as we wipe it now in script.
+# Clear known_hosts
+#[ -e /root/.ssh/known_hosts ] && cat /dev/null > /root/.ssh/known_hosts
+print <<EOF;
+$wiped
+# Here are your pastables for NOPEN redirected ssh onto $targetip:
+
+
+# Tunnel stuff$netcatstart
+$closetunnels
+$tunnelcmd$netcatend
+
+# scriptcheck ensures we run this only in scripted window
+scriptcheck && $realssh$verbose -p $lport $user\@$redirip $binsh
+
+
+yes
+
+$password
+
+EOF
+
+
+sub myinit {
+  if (-s "/current/etc/autoutils") {
+    require "/current/etc/autoutils" or
+      die "/current/etc/autoutils must exist\n";
+  }
+  $targetip = $ENV{TARGETIP} unless $targetip;
+  $targetip = $ENV{TARGET_IP} unless $targetip;
+  if ("@ARGV" =~ /^-([hv])$/i) {
+    if (lc $1 eq "v") {
+      print("$0 v.$VER\n");
+      die "\n";
+    }
+    $usageonly = 1;
+  }
+  $redirip = "127.0.0.1";
+  $closetunnels = "c 1 2";
+  $windowsmode = 0;
+  while (@ARGV) {
+    my $arg = shift(@ARGV);
+    if ($arg eq "/") {
+      $password = shift @ARGV;
+   }
+    if ($arg =~ /-(v+)/) {
+      $verbose = " -$1";
+    }
+    if ($arg =~ /([^@]+)@(.+)/ and !$user) {
+      # First @ only. Later @ might be in password after slash
+      $user = $1;
+      $arg =~ s/$user\@//;
+    }
+    next if $arg eq "127.1";
+    if ($arg=~ /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/) {
+      next if $1 eq "127.0.0.1";
+      $targetip = $1;
+    }
+    if ($arg eq "-W") {
+      $windowsmode = 1;
+      $redirip = "192.168.254.72";
+    }
+    if ($arg eq "-p") {
+      $lport = shift(@ARGV);
+    }
+    $lport = 2202 unless $lport =~ /^\d+$/;
+    $binsh = $arg  if ($arg eq "/bin/sh");
+  }
+
+  $redirip = $ENV{REDIRIP} if ipcheck($ENV{REDIRIP});
+  $timestamp = timestamp();
+  $realssh = "/usr/bin/ssh";
+  $realssh = "/bin/ssh" unless -x $realssh;
+  mydie("The real ssh is not in /usr/bin/ or in /bin/.")
+    unless -x $realssh;
+  if ($windowsmode) {
+    $netcatstart = "\n#THERE: D:\\opsdisk\\resources\\tools\\nc.exe 192.168.254.71 9998\n".
+      "echo -e \"\n";
+    $netcatend   = "\n\n\" | nc -l -p 9998\n\n";
+
+    $closetunnels = "stop redirect";
+    $tunnelcmd = "monitor redirect -tcp -target $targetip 22 -bind $redirip -lplisten $lport";
+  } else {
+    $tunnelcmd = "l $lport $targetip 22";
+  }
+
+  print <<EOF;
+
+
+# $timestamp
+# $0 v.$VER
+#
+# This is $0, a script meant to
+# intercept calls to ssh to re-format them into pastables for
+# NOPEN redirection of ssh. Use the full path for $realssh if
+# you need that and not this.
+#
+# Usage:  $0 [-W] [-v[v[v]]] [userid\@remotehostip] [/ password]
+#
+# You are prompted for the userid and remotehostip if you do
+# not provide them. The optional -v* will be given to $realssh,
+# which can be helpful in troubleshooting failures.
+#
+# The optional -W option changes your redirector IP from 127.0.0.1
+# to 192.168.254.72. With or without -W, though, $REDIRIP is used if
+#  it is set.
+#
+
+EOF
+  die "\n" if $usageonly;
+
+  while ($targetip !~ /\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/) {
+    ($tar,$targetip) = mygetinput
+      ("Target IP:","ABORT");
+    mydie("User aborted") if $tar eq "a";
+  }
+  while (length $user <= 0) {
+    ($tar,$user) = mygetinput
+      ("Username:","root");
+  }
+
+  $lport = 2202 unless $lport > 0;
+}

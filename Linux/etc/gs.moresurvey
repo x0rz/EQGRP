@@ -1,0 +1,4 @@
+#NOGS
+# Look in -strings output below for Engine directory -nohist
+-strings /platform -nohist
+# Look in -strings output above for Engine directory -nohist

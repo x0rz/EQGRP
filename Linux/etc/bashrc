@@ -1,0 +1,62 @@
+# /etc/bashrc
+
+PATH=/opt/ActivePerl-5.10/site/bin:/opt/ActivePerl-5.10/bin:/usr/local/bin:/usr/src/firefox:/current/bin:/current/op2/bin:/current/op3/bin:/sbin:/usr/sbin:/bin:/usr/bin:/usr/X11R6/bin:/usr/games
+export PATH
+BASHRCVER=2.1.0.2
+
+# System wide functions and aliases
+# Environment stuff goes in /etc/profile
+
+# by default, we want this to get set.
+# Even for non-interactive, non-login shells.
+if [ `id -gn` = `id -un` -a `id -u` -gt 99 ]; then
+	umask 007
+else
+	umask 027
+fi
+
+# are we an interactive shell?
+if [ "$PS1" ]; then
+    case $TERM in
+	xterm*)
+	    PROMPT_COMMAND='echo -ne "\033]0;${TERMTITLE}${USER}@${HOSTNAME}: ${PWD}\007"'
+	    ;;
+	*)
+	    ;;
+    esac
+    [ "$PS1" = "\\s-\\v\\\$ " ] && PS1="[\u@\h \W]\\$ "
+    
+    if [ "x$SHLVL" != "x1" ]; then # We're not a login shell
+        for i in /etc/profile.d/*.sh; do
+	    if [ -x $i ]; then
+	        . $i
+	    fi
+	done
+    fi
+    PS1="\[\\033[0;34m\]\t [\w]\\$ \[\\033[0;39m\]"
+fi
+#unalias ls 2>/dev/null
+alias ls='ls --color=auto -F'
+alias lt='ls -arltF'
+alias ltt='lt | tail'
+#alias uz='cd ; umount /dev/zip || umount /dev/zip'
+#alias mz='uz ; mount /dev/zip ; cd /mnt/zip && ls -arlt'
+#alias uz='(sync &) ; pwd | grep -i mnt\/zip && cd /current/bin && pwd ; umount /mnt/zip'
+alias uz='(sync &) ; pwd | grep -i mnt\/zip && cd /current/bin && pwd ; unfindzip || unfindzip'
+alias mz='findzip'
+alias ej='uz ; eject zip'
+alias h='history | tail -50'
+alias j='jobs -l'
+alias l="ls -alF"
+alias ll="ls -alF"
+alias cdp="cd ~-"
+alias zap="killall -v"
+alias nslookup="nslookup -silent"
+alias xt='xterm +cm +cn -ls -sk -sb -sl 10000 -ls -bg gray80 -fg black &'
+
+tset -e^?
+
+MANPATH=/opt/ActivePerl-5.10/site/man:/opt/ActivePerl-5.10/man:$MANPATH
+export MANPATH
+
+xset m 2/1

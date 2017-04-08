@@ -1,0 +1,20 @@
+INTONATION___mail.bangla.net___203.188.252.3___20011023-135858 {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.6 
+    #
+    set host mail.bangla.net
+    set ip 203.188.252.3
+    set hostType "Solaris26"
+    set len 476
+    set cv0 d635075e
+    set cv1 af570d4a
+    set cv2 0d1407ae
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

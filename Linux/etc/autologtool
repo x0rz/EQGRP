@@ -1,0 +1,192 @@
+#!/usr/bin/env perl
+##
+use File::Basename ;
+$VER="1.1.0.2"; 
+
+my $toolfile = "";
+
+my $toolname = "";
+my $toolversion = "";
+my $toolcomment = "";
+my $toolusage = "";
+my $toolsuccess = "";
+
+my $newhostinfocontent = "";
+
+# These are the valid tool usage strings.
+my @toolusages = ("ACCESSED","EXERCISED","DEPLOYED","CHECKED","REMOVED");
+my @toolsuccesses = ("SUCCESSFUL","FAILED");
+
+# The -f argument is required for these:
+my @filerequired = ("DONOT",
+		    "COTTONAXE",
+		    "COTTONCHAINSAW",
+		    "COTTONSCYTHE",
+		    "FUNNELOUT",
+		    "SUCTIONCHAR-CONF",
+		    );
+my %filerequired = ();
+my $filerequired = "";
+my $column = 0;
+foreach my $key (@filerequired) {
+    next unless ((length $key) > 0);
+    $filerequired{uc $key}++;
+    $filerequired .= sprintf("      %-25s",$key);
+    $filerequired .= "\n      " if ($column++ % 2);
+}
+myinit();
+
+
+logtool($toolname, $toolversion, $toolsuccess, $toolusage, $toolcomment,$opt_T,$toolfile,@ARGV);
+
+# End with true value as we may someday require this script elsewhere.
+1;
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  # $calleddirect is set if 
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs logtool @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    $autoutils = dirname($0)."/autoutils"  unless (-e $autoutils);
+    $autoutils = "autoutils"  unless (-e $autoutils);
+    if (-e $autoutils) {
+      require $autoutils;
+    } else {
+      use IO::Socket ;
+      use File::Basename ;
+      #use File::Basename qw(basename dirname);
+      require "getopts.pl"; # This is the old method, function is Getopts().
+      use Getopt::Std qw(getopts getopt);
+    }
+    $prog = "-gs logtool" ;
+    $vertext = "$prog version $VER\n" ;
+  }
+
+  $optmp = "." unless (-d $optmp);
+  $opdown = "." unless (-d $opdown);
+
+  clearallopts();
+  mydie("bad option(s)") if (! Getopts( "hvf:n:V:s:c:u:T:" ) ) ;
+#  $usagetext="
+#Usage: $prog [-h]                       (prints this usage statement)
+
+#NOT CALLED DIRECTLY
+
+#$prog is run from within a NOPEN session via when \"$prog\" is used.
+
+#";
+  $gsusagetext="
+  
+  Usage: $prog [OPTIONS] [NAME=VALUE [NAME2=VALUE2]]
+
+$prog can be run while on a NOPEN target, or autologtool can be run at
+the command line (as long as autoutils is accessible to autologtool). If run at
+the command line, and /current/down does not exist, both the UsedTools
+directory and the hostinfo.* file are created in the current working directory.
+
+$prog allows an installed tool to be logged to the
+
+   $opdown/UsedTools.\$nopen_rhostname
+
+directory and to the hostinfo.\$nopen_rhostname file for later perusal.
+
+The tool name, version, a comment associated with the tool and the tool usage
+string are all gathered and entered into the appropriate locations for later
+storage. If these values are not passed directly to the program using the
+command line, the user is prompted to enter them. The only optional value is
+the tool comment; all other entries are required.
+
+The autologtool script can also be called from any local command line, not
+just at a NOPEN prompt (manually or by other scripts) to log tool usage.
+
+The -f FNAME option is required for these tools
+
+      $filerequired
+When the -f FNAME option is used, that local file is placed (read-only) in
+
+   $opdown/UsedTools.\$nopen_rhostname/TOOLNAME/
+
+with the suffix YYYYMMDD-HHMMSS_TOOLNAME_VER_STATSTR_USAGE.
+
+Valid USAGE strings are: @toolusages
+
+The success STATSTR and USAGE string can be entered lowercase, one letter
+is sufficient.
+
+If the optional NAME=VALUE pairs appear on the command line, those are
+added to that section in the format:
+
+Name: VALUE
+
+Be sure the NAME has no whitespace and the VALUE is in double quotes if
+it has any whitespace.
+
+  OPTIONS
+
+  -h/-v         show usage statement / version
+  -f FNAME      Local file associated with the deployment--can be a binary,
+                script, config file, opscript....anything.
+  -n TOOLNAME   the name of the tool
+  -V VER        the tool version (usually in #.#.#.# format)
+  -s STATSTR    whether or not the tool was successfully installed [$toolsuccesses[0]]
+  -c CMNT       a comment associated with the tool
+  -u USAGE      the usage string for the tool, case insensitive
+  -T HOST.IP    the hostname.IP of the target. Defaults to the NOPEN target
+                $prog is called from (\$nopen_rhostname).
+
+";
+  usage() if ($opt_h or $opt_v) ;
+  # No need for pilotstart, not doing anything on target
+  # Put -gs /port line back in gs.logtool if we ever do turn the socket back on.
+  # $socket = pilotstart(quiet) unless ($calledviacommandline or $socket);
+  
+  $toolname = uc $opt_n;
+
+  if ($toolname eq "SUCTIONCHAR") {
+      #TODO: Ask them if they really mean SUCTIONCHAR-CONF, for now just warn
+      ($ans) = mygetinput
+	  ("The SUCTIONCHAR tool is normally automatically logged via -gs install.\n\n".
+	   "Did you really mean to log the use of SUCTIONCHAR-CONF?","Y"
+	   );
+      $toolname = "SUCTIONCHAR-CONF" if ($ans eq "y");
+  }
+
+  $toolversion = $opt_V;
+
+  if ($toolfile = $opt_f) {
+      mydie("-f $toolfile does not exist or is empty")
+	  unless (-f $toolfile and -s _);
+  } else {
+      mydie("-f FNAME is required for $toolname")
+	  if ($filerequired{$toolname});
+  }
+
+  $toolsuccess = $opt_s;
+  foreach (@toolsuccesses) {
+    $toolsuccess = $_ if (/^$toolsuccess/i);
+  }
+  $toolsuccess = $toolusages[0] unless $toolsuccess;
+
+  $toolcomment = $opt_c;
+  $toolusage = $opt_u;
+  foreach (@toolusages) {
+    $toolusage = $_ if (/^$toolusage/i);
+  }
+
+  # The logtool() subroutine will take care of setting it back from $opt_T
+  undef $nopen_rhostname if $opt_T;
+
+dbg("in autologtool myinit, toolname =$toolname=,",
+    "toolversion =$toolversion=, toolsuccess =$toolsuccess=,",
+    "toolcomment =$toolcomment=, toolusage =$toolusage=");
+} #myinit
+

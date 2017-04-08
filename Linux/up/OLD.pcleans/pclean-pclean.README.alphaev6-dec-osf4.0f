@@ -1,0 +1,29 @@
+
+
+See usage statement for options and general usage (pclean -help).
+
+Known to compile and runs on:
+	- OSF1 V4.0
+	- Solaris 2.5.1 - 2.8 (sparc & x86)
+	- HP-UX 10.20, 11.00 (compiled on 10.20 but ran on 11.00)
+	- Linux 2.2.x (Red Hat ?)
+
+Bugs/warnings:
+==============
+- pclean itself WILL show up in pacct file, so you should rename it 
+  to something that'll blend in 
+
+- pclean MAY append null entries at the end of the pacct file.
+  This problem may occur on systems where lots of processes are 
+  getting written to the pacct file.
+  (When you delete entries, pclean will tell you how to make sure
+   there are no null entries.)
+
+- Occasional problems with large pacct files ( > 3500000 entries):
+	- numerical listing may cause lseek() errors
+	- sometimes deletes the wrong entries 
+
+- HP-UX:  pread/pwrite replaced with lseek and read/write.
+	  (lseek was used in an older version, but it caused problems
+	   on OSF/1 targets - but not in the lab)
+

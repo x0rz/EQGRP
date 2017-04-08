@@ -1,0 +1,347 @@
+#!/usr/bin/env perl
+#use strict;
+use File::Basename;
+use XML::DOM;
+
+require "getopts.pl";
+$inputdir = "/current/down/cmdout/jscans";
+$prog = basename ${0} ;
+$version = "1.9.1.2";
+$returntime = "0";
+
+$usagetext = "
+Usage:  $prog [-f directory] -p prognum [-V ver] [-t proto] -i IPadr
+        $prog [-f directory] -n|r|a|x|o|g|b IP-address
+        $prog [-f directory]         (shows unique IPs scanned thus far)
+        $prog -h                (shows this usage statement)
+
+-p prg     gives the port number found for the -V/t/i arguments given
+-n IP      gives the IP's hostname (from program 100###).
+-r IP      gives the destination IP of the returned packet.
+-a IP      gives brpc-endianness architecture guess: \"i386.pc.solaris\" or \"sparc\"
+-x IP      gives \"hostname:# users:load ...\" if positive xwin scan
+-o IP      gives guess at Solaris version from brpc scan
+-g IP      gives Solaris version and platform from snmp[12] scan(s)
+-b IP      gives udp port RPC program 100232 is listening on (sadmind)
+-B IP      gives udp6 port for 100232/sadmind if available (i.e., if
+                 sadmind is available on two ports, this also works)
+
+-L    will NOT ignore scans against 127.0.0.1 (default does)
+-A    will output all matching entries, not just the last one.
+
+     -  $prog is usually used by other programs, not directly.
+     -  \"directory\" defaults to $inputdir.
+     -  The final matching entry found in scanfile is used.
+     -  The null string is returned on failure.
+
+NOTE: $prog requires that one or more scans have already been done.
+";
+foreach (split (/\n/, $defaultcommands) ) {
+    $usagetext .= "\t$_\n";
+}
+$vertext = "\n$prog version $version\n";
+
+die("bad option(s)") if (! &Getopts( "vhp:V:t:i:n:f:r:a:x:g:Lo:b:B:A" ) ) ;
+
+$getlocal = $opt_L ;
+$getall = $opt_A ;
+&usage if ($opt_h or $opt_v );
+$inputdir = $opt_f if ($opt_f and -s $opt_f) ;
+#exit unless (-s $scanfile) ;
+$prognum = int $opt_p ;
+die("Invalid program number $opt_p") if
+    ( ($opt_p != $prognum) or ($prognum < 0) ) ;
+$vernum = int $opt_V ;
+die("Invalid version number $opt_V") if
+    ( ($opt_V != $vernum) or ($vernum < 0) ) ;
+if ($opt_i) {
+#  die("-i, -r and -n must not be used together") if ($opt_n or $opt_r) ;
+    die("-i requires -p") unless ($opt_p) ;
+    $ipaddr = $opt_i ;
+} elsif ($opt_n or $opt_r or $opt_a or $opt_g or $opt_x or $opt_o or $opt_b or $opt_B) {
+    die("-[nra] cannot be used with -p, -V or -t") if ($opt_p or $opt_V or $opt_t) ;
+    my $c = -1 ;
+    $c++ if $opt_n ;
+    $c++ if $opt_r ;
+    $c++ if $opt_a ;
+    $c++ if $opt_g ;
+    $c++ if $opt_x ;
+    $c++ if $opt_o ;
+    $c++ if $opt_b ;
+    $c++ if $opt_B ;
+    die("use only one of -[nraxog] at a time") if ($c) ;
+    $ipaddr = "$opt_n$opt_r$opt_a$opt_x$opt_g$opt_o$opt_b$opt_B" ;
+    $wantname = $opt_n ;
+    $wantreturnip = $opt_r ;
+    $wantarch = $opt_a ;
+    $wantxwin = $opt_x ;
+    $wantgs = $opt_g ;
+    $wantbs = ($opt_b or $opt_B) ;
+    $wantsunos = $opt_o ;
+} else {
+    # default is to dump out all scanned hosts found
+    $findips++ ;
+}
+if ($ipaddr) {
+    die("Bad IP $ipaddr") if ( ! &ipcheck($ipaddr)) ;
+} else {
+    #$ipaddr = "\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}" ;
+}
+$proto = lc $opt_t ;
+$vernum = "\\d+" if ! $vernum ;
+$proto = "\\w+" if ! $proto ;
+$rpc = "\\.\[a-z\]+";
+
+die ("$prog takes only \"-\" delimited arguments") if ($#ARGV >= 0) ;
+
+#lets Parse through our Scan files looking for the scan results we want
+$parser = new XML::DOM::Parser;
+chdir("$inputdir");
+opendir($scandir, "$inputdir");
+#print "$ipaddr\n";
+if($ipaddr){
+    #print "1$inputdir\n";
+    @dir = grep /$ipaddr/, readdir($scandir);
+}
+else { #print "2$inputdir\n"; 
+    @dir = readdir($scandir);
+}
+
+my $returnValue;
+my $returntime;
+
+foreach $file (@dir){
+    if($file=~ /^.*\.xml/){
+	#print "$file\n";
+	$doc = $parser->parsefile($file);
+	$nodelist = $doc->getElementsByTagName(scanResult);
+	$nodecount= $nodelist->getLength();
+	
+	for($i = 0; $i < $nodecount; $i++){
+	    $node = $nodelist->item($i);
+	    $attrs = $node->getAttributes();
+	    $type = $attrs->getNamedItem(type);
+	    $typeName= $type->getNodeValue();
+	    #print "Type Name: $typeName\n";
+	    $targetlist = $node->getElementsByTagName(target);
+	    $targetlistlen = $targetlist->getLength();
+	    $responselist = $node->getElementsByTagName(responseAddress);
+	    $responselistlen = $responselist->getLength();
+	    $resultlist = $node->getElementsByTagName(parsedText);
+	    $resultlistlen = $resultlist->getLength();
+	    $sourcelist = $node->getElementsByTagName(source);
+	    $sourcelistlen = $sourcelist->getLength();
+	    $timelist = $node->getElementsByTagName(timestamp);
+	    $timelistlen = $timelist->getLength();
+	    
+	    #print "$targetlistlen\n";
+	    if($targetlistlen > 0){
+		$targetnode = $targetlist->item(0);
+		$target = $targetnode->getFirstChild();
+		$targetValue = $target->getNodeValue();
+		$targetValue =~ /(\d\d?\d?\.\d\d?\d?\.\d\d?\d?\.\d\d?\d?)/;
+		$targetValue = $1;
+		#print "Target: $1\n";
+	    }
+	    if($responselistlen > 0){
+		$responsenode = $responselist->item(0);
+		$response = $responsenode->getFirstChild();
+		$responseValue = $response->getNodeValue();
+		$responseValue =~ /(\d\d?\d?\.\d\d?\d?\.\d\d?\d?\.\d\d?\d?)/;
+		$responseValue = $1;
+		#print "Response Address: $1\n";
+		
+	    }
+	
+	    if($sourcelistlen > 0){
+		$sourcenode = $sourcelist->item(0);
+		$source = $sourcenode->getFirstChild();
+		$sourceValue = $source->getNodeValue();
+		$sourceValue =~ /(\d\d?\d?\.\d\d?\d?\.\d\d?\d?\.\d\d?\d?)/;
+		$sourceValue = $1;
+		#print "Source Address: $1\n";
+		
+	    }
+	    if($timelistlen > 0){
+		$timenode = $timelist->item(0);
+		$time = $timenode->getFirstChild();
+		$timeValue = $time->getNodeValue();
+		$timeValue =~ /\s*(.*)\s*/;
+		$timeValue = $1;
+		#print "Time: $timeValue\n";
+		
+	    }
+	    if($resultlistlen > 0){
+		$resultnode = $resultlist->item(0);
+		$result = $resultnode->getFirstChild();
+		$resultValue = $result->getNodeValue();
+		#print "Result: \n$resultValue\n";
+	    }
+	
+	    if ($findips){
+		if($targetValue){
+		    $scanlist{"$targetValue"}++;
+		    #push(@scanlist, @scan);
+		}
+		if($responseValue){
+		    $scanlist{"$responseValue"}++;
+		}
+	    }
+	    elsif ((($prognum) ||($wantbs))&& (($typeName eq "brpc") || ($typeName eq "rpc"))){
+		if (($targetValue eq "$ipaddr") || ($responseValue eq "$ipaddr")){
+		    if(($returntime lt $timeValue)){
+			if ($wantbs){
+			    $prognum = "100232";
+			}
+			$returntime = $timeValue;
+			#print "$resultValue\n";
+			@lines = split /\n/, $resultValue;
+		#	print "$prognum, $vernum, $proto\n";
+			foreach $line (@lines){
+			    $tmp = $1 if ($line =~ /^\s*$prognum\s+$vernum\s+$proto\s+(\S+)/);
+			    $returnvalue = $tmp;
+			    if (my ($oct1,$oct2) = $tmp =~ /^::\.(\d+)\.(\d+)/) {
+				#print "$1, $2\n";
+				$tmp = 256*$oct1 + $oct2 ;
+				$altbs = $tmp ;
+			    }
+			    $returnvalue = $altbs if ($opt_B);
+			}
+		    }
+		}
+	    }
+	    elsif (($wantname) && ($typeName eq "brpc")){
+		if (($targetValue eq "$ipaddr") || ($responseValue eq "$ipaddr")){
+		    if(($returntime lt $timeValue)){
+			$prognum = "100\\d\\d\\d";
+			$returntime = $timeValue;
+			#print "$resultValue\n";
+			@lines = split /\n/, $resultValue;
+			#print "$prognum, $vernum, $proto, $rpc\n";
+			foreach $line (@lines){
+			    
+			    $tmp = $1 if ($line =~ /^\s*$prognum\s+$vernum\s+$proto\s+([\S]+)$rpc/);
+			    #print "$1\n" if $1;
+			}
+		    }
+		    #print "*$tmp\n";
+		    $returnvalue = $tmp;
+		}
+	    }
+	    elsif ($wantreturnip){
+		if (($targetValue eq "$ipaddr") || ($responseValue eq "$ipaddr")){
+		    if(($returntime lt $timeValue)){
+			$returntime = $timeValue;
+			$returnvalue = $sourceValue;
+		    }
+		}
+	    }
+	    elsif (($wantarch) && ($typeName eq "brpc")){
+		if (($targetValue eq "$ipaddr") || ($responseValue eq "$ipaddr")){
+		    if(($returntime lt $timeValue)){
+			$prognum = "100\\d\\d\\d";
+			$returntime = $timeValue;
+			@lines = split /\n/, $resultValue;
+			#print "$prognum, $vernum, $proto\n";
+			foreach $line (@lines){
+			    $line =~ /^\s*$prognum\s+$vernum\s+$proto\s+([\S]+)/;
+			    $tmp = $1 if $1;
+			    $returnvalue = "i386.pc.solaris" if ($tmp =~ /\\000\\000$/);
+			    $returnvalue = "sparc" if ($tmp =~ /\\000\\000/);
+			}
+		    }
+		}
+	    }
+	    elsif (($wantxwin) && ($typeName eq "xwin")){
+		if (($targetValue eq "$ipaddr") || ($responseValue eq "$ipaddr")){
+		    if(($returntime lt $timeValue)){
+			$returntime = $timeValue;
+			#print "$resultValue\n";
+			$resultValue =~ /\s+(\S+)\s+(\d+).*\s+load:\s+(.*)/;
+			chomp($hostname = $1);
+			chomp($userson = $2); 
+			chomp($load = $3); 
+			$load =~ s/ //g ;
+			$returnvalue = "" if (! $returnvalue);
+			$returnvalue = "$hostname" if (length $hostname) ;
+			$returnvalue .= "+$userson users" if (length $userson) ;
+			$returnvalue .= "+load=$load" if (length $load) ;
+		    }
+		}
+	    }
+	    elsif (($wantgs) && (($typeName eq "snmp1") || ($typeName eq "snmp2") || ($typeName eq "mibiisa"))){
+		if (($targetValue eq "$ipaddr") || ($responseValue eq "$ipaddr")){
+		    if(($returntime lt $timeValue)){
+			$returntime = $timeValue;
+			@lines = split /\n/, $resultValue;
+			foreach $line (@lines){
+			    #print "$line\n";
+			    $bool = "yes" if ($line =~ /\/.*(snmpd|mibiisa)/i) ;
+			    $bool .= " -r " if (/mibiisa.* -r/);
+			    $ver = "SunOS $1" if ($line =~ /SunOS\s+(\S+)\s/i) ;
+			    chomp($platform = $1) if ($line =~ /Sun SNMP Agent,\s+(.*)/i) ;
+			    $returnvalue = "" ;
+			    $returnvalue .= "$bool " if (length $bool) ;
+			    $returnvalue .= "$ver" if (length $ver) ;
+			    $returnvalue .= "$ver2" if (length $ver2) ;
+			    $returnvalue .= " $platform" if (length $platform) ;
+			}
+		    }
+		}
+	    }
+	    elsif (($wantsunos) && (($typeName eq "snmp1") || ($typeName eq "snmp2") || ($typeName eq "brpc"))){
+		if (($targetValue eq "$ipaddr") || ($responseValue eq "$ipaddr")){
+		    if(($returntime lt $timeValue)){
+			$returntime = $timeValue;
+			@lines = split /\n/, $resultValue;
+			foreach $line (@lines){
+			    $gotsunos = ($line =~ /program version netid     address             service         owner/ );
+			    chomp($ver = $1) if ($line =~ /Sun SNMP Agent,\s+(.*)/i) ;
+			    chomp($ver = $1) if ($line =~ /SunOS\s+(\S+)\s/i) ;
+			    if (line =~ /\d+\s+\d+\s+\w+\s+\S+\s+\S*(sol)[ \-]{0,1}(\d+)/i) {
+				($ver,$rev) = (lc $1,$2);
+				$returnvalue = "${ver}2.$rev+" if $rev > $maxrev ;
+				$maxrev = $rev if $rev >= $maxrev ;
+			    }
+			    $returnvalue = $ver unless $returnvalue ;
+			    $returnvalue = "Sol2.4+" if ($gotsunos and ! $returnvalue) ;
+			}
+		    }
+		}
+	    }
+	}
+	print "$returnvalue\n" if(($getall)&& ($returnvalue));
+    }
+}
+
+if(($findips)){
+    foreach $item (keys %scanlist){
+	print "$item\n";
+    }
+    exit;
+}
+if(($returnvalue)&&(! $getall)){
+    print "$returnvalue\n";
+}
+sub usage {
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  print $usagetext unless $opt_v ;
+  print $vertext ;
+  print "\nFATAL ERROR: @_\n" if ( @_ );
+  exit;
+} # end sub usage
+
+sub ipcheck() {
+  # returns 1 iff $ipstr is in dotted decimal notation with each 
+  # octet between 0 and 255 inclusive (i.e. 0.0.0.0 and 255.255.255.255 are valid)
+  local($ipstr,@junk) = @_;
+  # need -1 in following split to keep null trailing fields (to reject "1.2.3.4.")
+  my @octets=split(/\./,$ipstr,-1);
+  return 0 if ($#octets != 3);
+  foreach (@octets) {
+    # return 0 if (empty or nondigits or <0 or >255)
+    return 0 if ($_ eq "" || ( /\D/ ) || $_ < 0 || $_ > 255);
+  }
+  return 1;
+} # end sub ipcheck
+

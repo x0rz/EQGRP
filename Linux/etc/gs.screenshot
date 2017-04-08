@@ -1,0 +1,4 @@
+#NOGS
+-nohist -lsh /current/etc/autoscreenshot $GSOPTIONS
+-nohist -gs /port
+

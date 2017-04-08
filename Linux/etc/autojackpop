@@ -1,0 +1,95 @@
+#!/usr/bin/env perl 
+##
+$VER="1.0.0.3";
+
+$| = 1 ;
+($scriptcount, $functioncount) = ();
+myinit() ;
+
+$ipt = "/sbin/iptables";
+$fwrules = "/current/bin/fwrules.py";
+$rules_file = "$optmp/local_iptable_rules_jackpop_from_${nopen_rhostname}_$starttime";
+
+doit("-lsh $fwrules -S $rules_file -F");
+doit("\\-jackpop $target_ip $target_port $source_ip $source_port");
+doit("-lsh $fwrules -R $rules_file");
+
+
+# Called via do so must end with 1;
+1;
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0 unless $calledviarequire;
+  $stoiccmd = "called as: -gs jackpop @ARGV";
+  if ($willautoport and $socket) {
+    $stoiccmd = "in $prog, called as: jackpop(@ARGV)";
+    dbg("via require autojackpop ARGV=(
+".join("\n",@ARGV)."
+) prog=$prog");
+#    progprint("$prog called -gs jackpop @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $prog = "-gs jackpop";
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $vertext = "$prog version $VER\n" ;
+  }
+  clearallopts();
+  $vertext = "$prog version $VER\n" ;
+  mydie("No user servicable parts inside.\n".
+	"(I.e., noclient calls $prog, not you.)\n".
+	"$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			    -e $nopen_mylog);
+
+  my $origoptions = "@ARGV";
+  mydie("bad option(s)") if (! Getopts( "hv" ) ) ;
+  
+  usage() if ($opt_h or $opt_v or (scalar(@ARGV) != 4));
+
+  # Connect to autoport, we need status and more interactively.
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+
+  ## ERROR CHECKING OF OPTS
+
+  $target_ip = $ARGV[0];
+  $target_port = $ARGV[1];
+  $source_ip = $ARGV[2];
+  $source_port = $ARGV[3];
+
+  mydie("bad target_ip") if (!ipcheck($target_ip));
+  mydie("bad target_port") if ($target_port !~ /\d{1,5}/);
+  mydie("bad source_ip") if (!ipcheck($source_ip));
+  mydie("bad source_port") if ($source_port !~ /\d{1,5}/);
+}
+
+sub setusagetexts {
+  # Separate long usage strings as separate function
+  $usagetext="
+Usage: $prog [-h]                       (prints this usage statement)
+
+NOT CALLED DIRECTLY
+
+$prog is run from within a NOPEN session when \"$prog\" or
+\"=jackpop\" is used.
+
+";
+
+  $gsusagetext="
+Usage:  $prog target_ip target_port source_ip source_port
+
+$prog is a wrapper for -jackpop. Before running the usual -jackpop
+builtin, $prog saves off your local iptables rules. Then after -jackpop
+finishes, $prog resets iptables back to its original state.
+
+Usage:  $prog target_ip target_port source_ip source_port
+
+";
+}#setusagetexts

