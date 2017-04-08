@@ -1,0 +1,20 @@
+PITCHIMPAIR___mail.jccs.com.sa___212.70.32.100___20031016-185322() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.7 
+    #
+    set host mail.jccs.com.sa
+    set ip 212.70.32.100
+    set hostType "Solaris27"
+    set len 476
+    set cv0 ad66a492
+    set cv1 3cdbe4a5
+    set cv2 93fdfff6
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

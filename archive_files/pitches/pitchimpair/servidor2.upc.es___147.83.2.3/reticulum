@@ -1,0 +1,20 @@
+INTONATION___servidor2.upc.es___147.83.2.3___20020214-203036() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.7 
+    #
+    set host servidor2.upc.es
+    set ip 147.83.2.3
+    set hostType "Solaris27"
+    set len 476
+    set cv0 de575c18
+    set cv1 f2036ceb
+    set cv2 7cfd6483
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

@@ -1,0 +1,5 @@
+INTONATION___ndl1mx1-a-fixed.sancharnet.in___61.0.0.46___20031204-134957() {
+    ## INCISION Version:4.9.1 OS:sparc-sun-solaris2.8 
+    export TARG_AYT="c401fa75 f7e66e09 4b8c6f9d"
+    [ "$UTC_OFFSET" ] || export UTC_OFFSET=60
+}

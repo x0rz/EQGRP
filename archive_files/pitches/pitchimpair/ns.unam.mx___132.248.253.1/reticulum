@@ -1,0 +1,20 @@
+PITCHIMPAIR___132.248.253.1.ns___unam.mx___20021202-144848() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.7 
+    #
+    set host 132.248.253.1.ns
+    set ip unam.mx
+    set hostType "Solaris27"
+    set len 476
+    set cv0 32c71323
+    set cv1 7c23cf8b
+    set cv2 37c6e72b
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

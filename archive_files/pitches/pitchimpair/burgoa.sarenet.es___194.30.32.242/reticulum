@@ -1,0 +1,20 @@
+PITCHIMPAIR___burgoa.sarenet.es___194.30.32.242___20010919-094002() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.7 Options:I,O 
+    #
+    set host burgoa.sarenet.es
+    set ip 194.30.32.242
+    set hostType "Solaris27"
+    set len 476
+    set cv0 d99e53b1
+    set cv1 f7acbb1d
+    set cv2 5c0fe296
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

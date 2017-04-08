@@ -1,0 +1,4 @@
+INTONATION___webserv.mos.ru___10.30.10.2___20061102-153710() {
+    ## PATCHICILLIN Version:1.1.2.1 OS:sparc-sun-solaris2.6 
+    export CV="b83cb2a4 5edcdedb 23bb7d94"
+}

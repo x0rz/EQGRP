@@ -1,0 +1,20 @@
+GRAPEUNIQUE___war.rkts.com.tr___195.142.144.125___20011101-171614() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.7 
+    #
+    set host war.rkts.com.tr
+    set ip 195.142.144.125
+    set hostType "Solaris27"
+    set len 476
+    set cv0 b18aedc2
+    set cv1 33ca08ea
+    set cv2 c9af0874
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

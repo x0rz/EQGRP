@@ -1,0 +1,46 @@
+<?xml version="1.0"?>
+<RDF xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:em="http://www.mozilla.org/2004/em-rdf#">
+	<Description about="urn:mozilla:install-manifest">
+
+		<em:id>chineseperakun@gmail.com</em:id>
+		<em:name>Chinese Pera-kun</em:name>
+		<em:version>1.02</em:version>
+		<em:description>Popup Chinese dictionary. Licensed under GNU GPL.</em:description>
+		<em:creator>Justin Kovalchuk</em:creator>
+		<em:contributor>Jonathan Zarate</em:contributor>
+		<em:contributor>Based on rikaiXUL by Todd Rudick</em:contributor>
+		<em:contributor>JMDICT, ENAMDICT, KANJDIC2 by James William Breen and Electronic Dictionary Research &amp; Development Group</em:contributor>
+		<em:contributor>RADKFILE by Michael Raine and James William Breen</em:contributor>
+		<em:contributor>Thunderbird port by Josh Glover</em:contributor>
+		<em:homepageURL>http://perapera.wordpress.com/</em:homepageURL>
+		<em:iconURL>chrome://cperakun/skin/smile.png</em:iconURL>
+		<em:optionsURL>chrome://cperakun/content/prefs.xul</em:optionsURL>
+
+		<em:file>
+			<Description about="urn:mozilla:extension:file:cperakun.jar">
+				<em:package>content/</em:package>
+				<em:skin>skin/classic/</em:skin>
+				<em:locale>locale/en-US/</em:locale>
+			</Description>
+		</em:file>
+
+		<!-- Firefox -->
+		<em:targetApplication>
+			<Description>
+				<em:id>{ec8030f7-c20a-464f-9b0e-13a3a9e97384}</em:id>
+				<em:minVersion>2.0</em:minVersion>
+				<em:maxVersion>3.0.*</em:maxVersion>
+			</Description>
+		</em:targetApplication>
+
+		<!-- Thunderbird -->
+		<em:targetApplication>
+			<Description>
+				<em:id>{3550f703-e582-4d05-9a08-453d09bdfdc6}</em:id>
+				<em:minVersion>2.0</em:minVersion>
+				<em:maxVersion>3.0a2pre</em:maxVersion>
+			</Description>
+		</em:targetApplication>
+
+	</Description>
+</RDF>

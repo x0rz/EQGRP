@@ -1,0 +1,20 @@
+DIABLO___noya.bupt.edu.cn___202.112.96.2___20011022-132036 {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.7 
+    #
+    set host noya.bupt.edu.cn
+    set ip 202.112.96.2
+    set hostType "Solaris27"
+    set len 476
+    set cv0 18444f44
+    set cv1 f06545b9
+    set cv2 4c3f9237
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

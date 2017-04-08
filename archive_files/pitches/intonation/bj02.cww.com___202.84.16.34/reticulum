@@ -1,0 +1,20 @@
+INTONATION___bj02.cww.com___202.84.16.34___20020808-173544() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.6 
+    #
+    set host bj02.cww.com
+    set ip 202.84.16.34
+    set hostType "Solaris26"
+    set len 476
+    set cv0 1ec7534a
+    set cv1 139c5180
+    set cv2 a36c9614
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

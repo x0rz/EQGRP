@@ -1,0 +1,38 @@
+Generated File. Do not edit.
+
+[HEADER]
+Version:0.11:$
+
+[PLUGINS]
+libnullplugin.so:$
+/usr/lib/firefox-3.6/plugins/libnullplugin.so:$
+1.0.0.15:$
+1328066088000:1:5:$
+The default plugin handles plugin data for mimetypes and extensions that are not specified and facilitates downloading of new plugins.:$
+Default Plugin:$
+1
+0:*:All types:.*:$
+nppdf.so:$
+/usr/lib/mozilla/plugins/nppdf.so:$
+:$
+1263414905000:1:5:$
+The Adobe Reader plugin is used to enable viewing of PDF and FDF files from within the browser.:$
+Adobe Reader 8.0:$
+5
+0:application/pdf:Portable Document Format:pdf:$
+1:application/vnd.fdf:Acrobat Forms Data Format:fdf:$
+2:application/vnd.adobe.xfdf:XML Version of Acrobat Forms Data Format:xfdf:$
+3:application/vnd.adobe.xdp+xml:Acrobat XML Data Package:xdp:$
+4:application/vnd.adobe.xfd+xml:Adobe FormFlow99 Data File:xfd:$
+nppdf.so:$
+/root/.mozilla/plugins/nppdf.so:$
+:$
+1263414905000:1:13:$
+The Adobe Reader plugin is used to enable viewing of PDF and FDF files from within the browser.:$
+Adobe Reader 8.0:$
+5
+0:application/pdf:Portable Document Format:pdf:$
+1:application/vnd.fdf:Acrobat Forms Data Format:fdf:$
+2:application/vnd.adobe.xfdf:XML Version of Acrobat Forms Data Format:xfdf:$
+3:application/vnd.adobe.xdp+xml:Acrobat XML Data Package:xdp:$
+4:application/vnd.adobe.xfd+xml:Adobe FormFlow99 Data File:xfd:$

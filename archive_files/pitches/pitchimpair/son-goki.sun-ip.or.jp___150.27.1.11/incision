@@ -1,0 +1,5 @@
+PITCHIMPAIR___son-goki.sun-ip.or.jp___150.27.1.11___20020503-112843() {
+    ## INCISION Version:4.8.2 OS:sparc-sun-solaris2.6 
+    export TARG_AYT="c7ec86d5 483191b8 968549a2"
+    [ "$UTC_OFFSET" ] || export UTC_OFFSET=0
+}

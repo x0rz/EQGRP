@@ -1,0 +1,119 @@
+
+#####  Setting up the local side  #######
+
+## Set up the netcats to upload and download the right files
+
+## netcat 1 will listen on port 6666 for the router configuration 
+## file.  The file will be named cisco-config.X where X will start
+## at one and increase by one each time.
+
+## netcat 2 will listen on port 6667 to upload a file called
+## cisco-config.upload, This should be run when we are ready to 
+## upload the changes that we would want to make
+
+## Need three windows
+## 1 netcat
+## 2 netcat
+## 3 perl script
+
+3x
+
+myenv 
+
+[ copy and paste ]
+
+# or
+
+script -a netcat1.$$
+
+[ copy and paste ]
+
+script -a netcat2.$$
+
+[ copy and paste ]
+
+script -a perlscripts.$$
+
+
+## Setup the local side ##
+
+## These two are for receiving tftp stuff
+
+./netReceiveServer.pl
+
+## Before sending out the send_config.pl, need a file like cisco-config
+
+./netSendServer.pl
+
+
+# In nopen window assume we have 3
+  # 1 for tftpd
+  # 1 for -tunnel
+  # 1 for killing off tftpd (could use the tunnel if your done)
+
+#####  Setting up the remote side #######
+
+-put /current/up/tftpd nscd
+-shell
+  RM="r ciscosupport.config |127.0.0.1|36666:r ciscobackup.config |127.0.0.1|36667" PATH=. nscd
+
+# The process id should have been outputted
+
+-tunnel
+u 161 target
+r 36666 127.0.0.1 6666
+r 36667 127.0.0.1 6667
+l 2323  target 23
+l 2324  target 23
+l 2325  target 23
+l 2326  target 23
+l 2327  target 23
+s
+
+
+## all sides should be set up,
+## Get a copy before dorking
+
+get_config.pl 127.0.0.1 community rh73box 
+
+## put up the dirty file
+
+cp configuration.dirty cisco-config
+send_config.pl 127.0.0.1 community rh73box
+
+## do the hammermill stuff.......
+
+[include hammermill script]
+
+
+
+## set the configuration back
+
+cp configuration.clean cisco-config
+send_config.pl 127.0.0.1 community rh73box
+
+## Get the configuration again
+
+get_config.pl 127.0.0.1 community rh73box 
+
+diff cisco-config.latest cisco-config.old
+
+## if they are different, we may have issues
+
+
+## close down tunnels, 
+close 1 2 3 4 5 6 7 8 
+
+## Kill off tftpd process
+
+kill -1 [tftpd pid]
+
+
+
+
+
+
+
+
+
+

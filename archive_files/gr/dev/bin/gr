@@ -1,0 +1,21 @@
+#!/bin/sh
+
+prev=`date`
+perl -pi.bak -e '$time=`date +"%s"`;chop ($time); s#lastime="(\d+)"#lastime="$time"#' ../log/redmin.log
+
+if [ -f /tmp/tmpwatch ] ; then
+  echo "/tmp/tmpwatch exists"
+  echo "bailing. try a different name"
+  exit
+else
+  cp tmpwatch /tmp
+fi
+
+cat post | ./now
+
+sleep 5
+rm /tmp/tmpwatch
+echo Started at: $prev
+echo Now: `date`
+
+exec ./gsh

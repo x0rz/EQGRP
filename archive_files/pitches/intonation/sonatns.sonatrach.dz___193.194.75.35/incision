@@ -1,0 +1,5 @@
+INTONATION___sonatns.sonatrach.dz___193.194.75.35___20020418-113439() {
+    ## INCISION Version:4.8.2 OS:sparc-sun-solaris2.6 
+    export TARG_AYT="e7a5aeec 422041ec 00a32f82"
+    [ "$UTC_OFFSET" ] || export UTC_OFFSET=120
+}

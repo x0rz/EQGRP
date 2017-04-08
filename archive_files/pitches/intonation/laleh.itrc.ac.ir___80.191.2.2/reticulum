@@ -1,0 +1,20 @@
+INTONATION___laleh.itrc.ac.ru___80.191.2.2___20030411-160713() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.7 
+    #
+    set host laleh.itrc.ac.ir
+    set ip 80.191.2.2
+    set hostType "Solaris27"
+    set len 476
+    set cv0 59b0bb81
+    set cv1 7fcf82df
+    set cv2 c422e4a4
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

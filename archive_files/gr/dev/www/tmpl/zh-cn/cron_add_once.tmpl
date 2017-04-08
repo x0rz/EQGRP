@@ -1,0 +1,107 @@
+<html>
+
+<head>
+<title>红旗Linux 系统管理工具</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link href="/styles/html.css" rel="stylesheet" type="text/css" />
+<link href="/styles/redcron.css" rel="stylesheet" type="text/css" />
+<script language="JavaScript" src="/scripts/redcron.js" type="text/JavaScript">/**/</script>
+<script language="JavaScript" type="text/JavaScript">
+/* The definition of the unicode strings */
+var cronCommandAlertString = '请设定任务命令！';
+var cronDateTimeAlertString = '请设定任务未来的执行时间！';
+</script>
+<map name="MapCronYear">
+  <area shape="rect" coords="0,2,15,9" href="javascript:void(0);" onMouseOver="window.status=''; return true;" onMouseDown="plus ( 'cronYear', 2003, 9999 );" />
+  <area shape="rect" coords="0,9,15,16" href="javascript:void(0);" onMouseOver="window.status=''; return true;" onMouseDown="minus ( 'cronYear', 2003, 9999 );" />
+</map>
+<map name="MapCronMonth">
+  <area shape="rect" coords="0,2,15,9" href="javascript:void(0);" onMouseOver="window.status=''; return true;" onMouseDown="plus ( 'cronMonth', 1, 12 );" />
+  <area shape="rect" coords="0,9,15,16" href="javascript:void(0);" onMouseOver="window.status=''; return true;" onMouseDown="minus ( 'cronMonth', 1, 12 );" />
+</map>
+<map name="MapCronDay">
+  <area shape="rect" coords="0,2,15,9" href="javascript:void(0);" onMouseOver="window.status=''; return true;" onMouseDown="plus ( 'cronDay', 1, 31 );" />
+  <area shape="rect" coords="0,9,15,16" href="javascript:void(0);" onMouseOver="window.status=''; return true;" onMouseDown="minus ( 'cronDay', 1, 31 );" />
+</map>
+<map name="MapCronHour">
+  <area shape="rect" coords="0,2,15,9" href="javascript:void(0);" onMouseOver="window.status=''; return true;" onMouseDown="plus ( 'cronHour', 0, 23 );" />
+  <area shape="rect" coords="0,9,15,16" href="javascript:void(0);" onMouseOver="window.status=''; return true;" onMouseDown="minus ( 'cronHour', 0, 23 );" />
+</map>
+<map name="MapCronMinute">
+  <area shape="rect" coords="0,2,15,9" href="javascript:void(0);" onMouseOver="window.status=''; return true;" onMouseDown="plus ( 'cronMinute', 0, 59 );" />
+  <area shape="rect" coords="0,9,15,16" href="javascript:void(0);" onMouseOver="window.status=''; return true;" onMouseDown="minus ( 'cronMinute', 0, 59 );" />
+</map>
+</head>
+
+<body class="app">
+  <table class="margin5">
+    <tr>
+      <td>
+      <table class="padding6">
+        <tr> 
+          <td width="20"><fieldset class="cronPropertyCommand">
+            <table class="margin5">
+              <tr> 
+                <td><table height="18" border="0" cellpadding="0" cellspacing="0">
+                    <tr>
+                      <td class="center" width="62">日期</td>
+                      <td><input onKeyUp="checkBox ( this, 2003, 9999 );" class="level" style="width: 38px;" name="cronYear" type="text" value="2003" maxlength="4" /></td>
+                      <td class="level"><img class="level" src="/images/winMenuButton.png" usemap="#MapCronYear" /></td>
+                      <td class="left">年</td>
+                      <td width="6">&nbsp;</td>
+                      <td><input onKeyUp="checkBox ( this, 1, 12 );" class="level" style="width: 24px;" name="cronMonth" type="text" value="0" maxlength="2" /></td>
+                      <td class="level"><img class="level" src="/images/winMenuButton.png" usemap="#MapCronMonth" /></td>
+                      <td class="left">月</td>
+                      <td width="6">&nbsp;</td>
+                      <td><input onKeyUp="checkBox ( this, 1, 31 );" class="level" style="width: 24px;" name="cronDay" type="text" value="0" maxlength="2" /></td>
+                      <td class="level"><img class="level" src="/images/winMenuButton.png" usemap="#MapCronDay" /></td>
+                      <td class="left">日</td>
+                    </tr>
+                    </table></td>
+              </tr>
+              <tr><td>&nbsp;</td></tr>
+              <tr> 
+                <td><table height="18" border="0" cellpadding="0" cellspacing="0">
+                    <tr>
+                      <td class="center" width="62">小时</td>
+                      <td width="86">&nbsp;</td>
+                      <td><input onKeyUp="checkBox ( this, 0, 23 );" class="level" style="width: 76px;" name="cronHour" type="text" value="0" maxlength="2" /></td>
+                      <td class="level"><img class="level" src="/images/winMenuButton.png" usemap="#MapCronHour" /></td>
+                    </tr>
+
+                    </table></td>
+              </tr>
+              <tr> 
+                <td><table height="18" border="0" cellpadding="0" cellspacing="0">
+                    <tr>
+                      <td class="center" width="62">分钟</td>
+                      <td width="86">&nbsp;</td>
+                      <td><input onKeyUp="checkBox ( this, 0, 59 );" class="level" style="width: 76px;" name="cronMinute" type="text" value="0" maxlength="2" /></td>
+                      <td class="level"><img class="level" src="/images/winMenuButton.png" usemap="#MapCronMinute" /></td>
+                    </tr>
+                    </table></td>
+              </tr>
+              <tr><td class="left">&nbsp;请输入命令：</td></tr>
+              <tr><td class="center"><textarea name="cronCommand" style="width: 96%;"><redmin /></textarea></td></tr>
+            </table>
+                  </fieldset></td>
+        </tr>
+      </table>
+      <table class="padding6">
+        <tr>
+          <td align="right"><input onClick="self.submitCronOnce ();" class="buttonFunc" name="ok" type="button" value="确定" style="background: url(/images/winButtonBG.png) repeat-x;" onMouseOver="this.style.background='#FFFFFF';" onMouseOut="this.style.background='url(/images/winButtonBG.png) repeat-x';" />
+            <input onClick="parent.cancel ( 'cronOnceFrame' );" class="buttonFunc" name="cancel" type="button" value="取消" style="background: url(/images/winButtonBG.png) repeat-x;" onMouseOver="this.style.background='#FFFFFF';" onMouseOut="this.style.background='url(/images/winButtonBG.png) repeat-x';" /></td>
+        </tr>
+      </table>
+      </td>
+    </tr>
+  </table>
+<form id="addCron" name="addCron" method="post" action="/cgi/redmin">
+<input type="hidden" name="op" value="cron" />
+<input type="hidden" name="action" value="once" />
+<input type="hidden" name="frame" value="cronOnceFrame" />
+<input type="hidden" name="cronK" value="cronV" />
+</form>
+</body>
+
+</html>

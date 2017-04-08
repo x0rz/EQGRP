@@ -1,0 +1,52 @@
+rm core
+
+IF mail.log_current EXISTS, REMOVE LINES POINTING AT YOU
+IF connection.log_current EXISTS, REMOVE LINES POINTING AT YOU
+
+cd ../..
+export IPLANET=`pwd`
+export CONFIGROOT=${IPLANET}/config
+
+strings imta/db/aliasesdb.db
+> admin+*@ims-ms-daemon
+> store.administrator@jetson.net00000000
+> root+*@ims-ms-daemon
+> root@jetson.net00000000
+> postmaster@jetson.net
+> postmast@jetson.net00000000
+> </usr/iplanet/ims5.2hf1.25/msg-thing/imta/dl//058/postmaster.jetson.net.member,*,*,*,*,*t
+> postmaster@jetson.net00000000
+> </usr/iplanet/ims5.2hf1.25/msg-thing/imta/dl//058/postmaster.jetson.net.member,*,*,*,*,*
+> postmaster00000000
+> ServiceAdmin+*@ims-ms-daemon
+> svcadmin@jetson.net00000000
+> ServiceAdmin+*@ims-ms-daemon
+> service.administrator@jetson.net00000000
+
+LOOK FOR YOUR RECIPIENT IN THE STRINGS.  IF IT IS THERE, THE RECIPIENT IS AN
+ALIAS FOR THE LINE ABOVE IT (E.G., svcadmin IS AN ALIAS FOR ServiceAdmin).
+
+${IPLANET}/../bin/msg/admin/bin/hashdir ServiceAdmin
+> a3/31/
+
+cd ${IPLANET}/store/partition/primary/=user/
+cd a3/31/
+ls
+> =+Service+Admin
+cd =+Service+Admin
+
+grep "Content-language:" `find . -name "*.msg"` | grep -v ": " | cut -d: -f1 > list
+for FILE in `cat list`; do
+   rm $FILE
+done
+for DIR in `cut -d/ -f1-2 list | sort | uniq`; do
+   rmdir $DIR
+done
+rm list
+cd ${IPLANET}
+${IPLANET}/../bin/msg/admin/bin/reconstruct -r user/ServiceAdmin
+
+cd log/default
+REMOVE THE LINE CONTAINING "reconstruct[...]: " FROM THE END OF default
+
+GO ABOUT YOUR DAY

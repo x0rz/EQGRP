@@ -1,0 +1,20 @@
+INTONATION___orange.npix.net___211.43.194.48___20020123-115853() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.7 
+    #
+    set host orange.npix.net
+    set ip 211.43.194.48
+    set hostType "Solaris27"
+    set len 476
+    set cv0 d4c6b153
+    set cv1 ea484d4f
+    set cv2 6822ab37
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

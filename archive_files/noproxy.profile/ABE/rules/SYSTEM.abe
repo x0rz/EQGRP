@@ -1,0 +1,4 @@
+# Prevent Internet sites from requesting LAN resources.
+Site LOCAL
+Accept from LOCAL
+Deny

@@ -1,0 +1,20 @@
+INTONATION___dcproxy1.thrunet.com___210.117.65.44___20011107-121854() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.7 
+    #
+    set host dcproxy1.thrunet.com
+    set ip 210.117.65.44
+    set hostType "Solaris27"
+    set len 476
+    set cv0 35236fe1
+    set cv1 852ac8ad
+    set cv2 6eb96908
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

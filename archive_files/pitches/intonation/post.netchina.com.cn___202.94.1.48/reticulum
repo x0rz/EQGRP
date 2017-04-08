@@ -1,0 +1,20 @@
+INTONATION___post.netchina.com.cn___202.94.1.48___20020221-095050() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.6 
+    #
+    set host post.netchina.com.cn
+    set ip 202.94.1.48
+    set hostType "Solaris26"
+    set len 476
+    set cv0 54e7c0bd
+    set cv1 458db5f8
+    set cv2 73d346dd
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

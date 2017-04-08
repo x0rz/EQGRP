@@ -1,0 +1,20 @@
+PITCHIMPAIR___ns2.ans.co.kr___210.126.104.74___20040316-114321() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.7 
+    #
+    set host ns2.ans.co.kr
+    set ip 210.126.104.74
+    set hostType "Solaris27"
+    set len 476
+    set cv0 b12ae4ba
+    set cv1 cbdce81f
+    set cv2 523e5146
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

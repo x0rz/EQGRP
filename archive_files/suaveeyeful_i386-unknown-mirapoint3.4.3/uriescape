@@ -1,0 +1,10 @@
+#!/usr/bin/perl
+undef $/; 
+use URI::Escape;
+
+while(<>){
+  $cmd = uri_escape($_,"\0-\377");
+  #$cmd = uri_escape($_,"^A-Za-z0-9\-_.!~*'()");
+  print "$cmd\n";
+}
+
