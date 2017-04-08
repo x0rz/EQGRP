@@ -1,0 +1,20 @@
+PITCHIMPAIR___zanburu.grupocorreo.es___194.30.32.113___20040614-190127() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.7 
+    #
+    set host zanburu.grupocorreo.es
+    set ip 194.30.32.113
+    set hostType "Solaris27"
+    set len 476
+    set cv0 597e45e0
+    set cv1 a4e02006
+    set cv2 eb4a875f
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

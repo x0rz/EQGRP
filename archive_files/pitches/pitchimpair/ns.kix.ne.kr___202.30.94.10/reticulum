@@ -1,0 +1,20 @@
+PITCHIMPAIR___ns.kix.ne.kr___202.30.94.10___20020607-104147() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.6 
+    #
+    set host ns.kix.ne.kr
+    set ip 202.30.94.10
+    set hostType "Solaris26"
+    set len 476
+    set cv0 ad6d4e30
+    set cv1 4777dfa7
+    set cv2 fb77a35b
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

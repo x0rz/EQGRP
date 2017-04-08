@@ -1,0 +1,22 @@
+INTONATION___ns1.bangla.net___203.188.252.2___20011026-140000 {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.6 
+    #
+    set host ns1.bangla.net
+    set ip 203.188.252.2
+    set hostType "Solaris26"
+    set len 476
+    set cv0 93ec39f8
+    set cv1 9bb3d364
+    set cv2 b1d7f8b4
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay
+ $baduids $timeout $retries ]
+}
+

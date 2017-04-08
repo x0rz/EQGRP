@@ -1,0 +1,32 @@
+
+### NOTE THIS FROM THE MAN PAGE: man /current/etc/tftpd.8
+###
+###
+       -c     Allow new files to be created.  By  default,  tftpd  will  only
+              allow  upload  of  files that already exist.  Files are created
+              with default permissions allowing anyone to read or write them,
+              unless the -p or -U options are specified.
+
+###
+###
+###
+
+mkdir /tmp/.scsi
+chmod 777 /tmp/.scsi
+
+-cd /tmp/.scsi
+-put ../up/tftpd_clean sched
+
+
+#Example ./sched -c -l -a 10.0.0.14 -s /tmp/.scsi
+
+-put image image.name
+
+./sched -c -l -a [address_tftp_is_connecting_to] -s /tmp/.scsi
+DONE
+
+-rm image.name sched
+
+-cd /tmp
+
+-rm /tmp/.scsi

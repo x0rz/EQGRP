@@ -1,0 +1,6 @@
+// <!-- <mdb:mork:z v="1.4"/> -->
+< <(a=c)> // (f=iso-8859-1)
+  (80=ns:formhistory:db:row:scope:formhistory:all)
+  (81=ns:formhistory:db:table:kind:formhistory)(82=Value)(83=Name)
+  (84=ByteOrder)>
+{1:^80 {(k^81:c)(s=9u)[1]} }

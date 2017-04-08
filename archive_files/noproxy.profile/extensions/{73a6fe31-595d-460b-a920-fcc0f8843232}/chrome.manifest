@@ -1,0 +1,76 @@
+overlay	chrome://navigator/content/navigatorOverlay.xul	chrome://noscript/content/noscriptOverlay.xul
+overlay chrome://emusic/content/startup.xul chrome://noscript/content/noscriptOverlay.xul
+overlay	chrome://browser/content/browser.xul chrome://noscript/content/noscriptOverlay.xul
+overlay chrome://songbird/content/xul/mainScriptsOverlay.xul	chrome://noscript/content/noscriptOverlay.xul
+
+overlay	chrome://browser/content/pref/pref-features.xul	chrome://noscript/content/prefContent.xul
+
+overlay chrome://browser/content/bookmarks/bookmarksManager.xul chrome://noscript/content/noscriptBMOverlay.xul
+overlay chrome://browser/content/bookmarks/bookmarksPanel.xul chrome://noscript/content/noscriptBMOverlay.xul
+
+overlay chrome://communicator/content/bookmarks/bookmarksManager.xul chrome://noscript/content/noscriptBMOverlay.xul
+overlay chrome://communicator/content/bookmarks/bm-panel.xul chrome://noscript/content/noscriptBMOverlay.xul
+
+overlay chrome://browser/content/places/places.xul chrome://noscript/content/noscriptBMOverlay.xul
+
+content	noscript	jar:chrome/noscript.jar!/content/noscript/
+
+skin	noscript	classic/1.0	jar:chrome/noscript.jar!/skin/classic/noscript/
+style	chrome://global/content/customizeToolbar.xul	chrome://noscript/skin/browser.css
+
+# Work around for breakages caused by the .NET Framework Assistant
+override chrome://dotnetassistant/content/bootstrap.xul data:text/xml,<lame/>
+
+locale	noscript	en-US	jar:chrome/noscript.jar!/content/noscript/en-US/
+locale	noscript	de-DE	jar:chrome/noscript.jar!/locale/de-DE/noscript/
+locale	noscript	de-AT	jar:chrome/noscript.jar!/locale/de-AT/noscript/
+locale	noscript	es-CL	jar:chrome/noscript.jar!/locale/es-CL/noscript/
+locale	noscript	eu-ES	jar:chrome/noscript.jar!/locale/eu-ES/noscript/
+locale	noscript	fr-FR	jar:chrome/noscript.jar!/locale/fr-FR/noscript/
+locale	noscript	ar	jar:chrome/noscript.jar!/locale/ar/noscript/
+locale	noscript	fi-FI	jar:chrome/noscript.jar!/locale/fi-FI/noscript/
+locale	noscript	ko-KR	jar:chrome/noscript.jar!/locale/ko-KR/noscript/
+locale	noscript	id-ID	jar:chrome/noscript.jar!/locale/id-ID/noscript/
+locale	noscript	it-IT	jar:chrome/noscript.jar!/locale/it-IT/noscript/
+locale	noscript	nl-NL	jar:chrome/noscript.jar!/locale/nl-NL/noscript/
+locale	noscript	pt-PT	jar:chrome/noscript.jar!/locale/pt-PT/noscript/
+locale	noscript	pt-BR	jar:chrome/noscript.jar!/locale/pt-BR/noscript/
+locale	noscript	ca-AD	jar:chrome/noscript.jar!/locale/ca-AD/noscript/
+locale	noscript	ja-JP	jar:chrome/noscript.jar!/locale/ja-JP/noscript/
+locale	noscript	pl-PL	jar:chrome/noscript.jar!/locale/pl-PL/noscript/
+locale	noscript	cs-CZ	jar:chrome/noscript.jar!/locale/cs-CZ/noscript/
+locale	noscript	tr-TR	jar:chrome/noscript.jar!/locale/tr-TR/noscript/
+locale	noscript	ru-RU	jar:chrome/noscript.jar!/locale/ru-RU/noscript/
+locale	noscript	zh-CN	jar:chrome/noscript.jar!/locale/zh-CN/noscript/
+locale	noscript	zh-TW	jar:chrome/noscript.jar!/locale/zh-TW/noscript/
+locale	noscript	nb-NO	jar:chrome/noscript.jar!/locale/nb-NO/noscript/
+locale	noscript	bg-BG	jar:chrome/noscript.jar!/locale/bg-BG/noscript/
+locale	noscript	ro-RO	jar:chrome/noscript.jar!/locale/ro-RO/noscript/
+locale	noscript	sk-SK	jar:chrome/noscript.jar!/locale/sk-SK/noscript/
+locale	noscript	sl-SI	jar:chrome/noscript.jar!/locale/sl-SI/noscript/
+locale	noscript	hu-HU	jar:chrome/noscript.jar!/locale/hu-HU/noscript/
+locale	noscript	mk-MK	jar:chrome/noscript.jar!/locale/mk-MK/noscript/
+locale	noscript	da-DK	jar:chrome/noscript.jar!/locale/da-DK/noscript/
+locale	noscript	sv-SE	jar:chrome/noscript.jar!/locale/sv-SE/noscript/
+locale	noscript	he-IL	jar:chrome/noscript.jar!/locale/he-IL/noscript/
+locale	noscript	uk-UA	jar:chrome/noscript.jar!/locale/uk-UA/noscript/
+locale	noscript	th-TH	jar:chrome/noscript.jar!/locale/th-TH/noscript/
+locale	noscript	fa-IR	jar:chrome/noscript.jar!/locale/fa-IR/noscript/
+locale	noscript	el-GR	jar:chrome/noscript.jar!/locale/el-GR/noscript/
+locale	noscript	en-GB	jar:chrome/noscript.jar!/locale/en-GB/noscript/
+locale	noscript	hr-HR	jar:chrome/noscript.jar!/locale/hr-HR/noscript/
+locale	noscript	be-BY	jar:chrome/noscript.jar!/locale/be-BY/noscript/
+locale	noscript	vi-VN	jar:chrome/noscript.jar!/locale/vi-VN/noscript/
+locale	noscript	gl-ES	jar:chrome/noscript.jar!/locale/gl-ES/noscript/
+locale	noscript	km-KH	jar:chrome/noscript.jar!/locale/km-KH/noscript/
+locale	noscript	lt-LT	jar:chrome/noscript.jar!/locale/lt-LT/noscript/
+locale	noscript	es-ES	jar:chrome/noscript.jar!/locale/es-ES/noscript/
+locale	noscript	es-AR	jar:chrome/noscript.jar!/locale/es-AR/noscript/
+locale	noscript	et-EE	jar:chrome/noscript.jar!/locale/et-EE/noscript/
+locale	noscript	cy-GB	jar:chrome/noscript.jar!/locale/cy-GB/noscript/
+locale	noscript	sr-RS	jar:chrome/noscript.jar!/locale/sr-RS/noscript/
+locale	noscript	ms-MY jar:chrome/noscript.jar!/locale/ms-MY/noscript/
+locale	noscript	kk-KZ jar:chrome/noscript.jar!/locale/kk-KZ/noscript/
+locale	noscript	bn-IN jar:chrome/noscript.jar!/locale/bn-IN/noscript/
+locale	noscript	te-IN jar:chrome/noscript.jar!/locale/te-IN/noscript/
+locale	noscript	ur-PK jar:chrome/noscript.jar!/locale/ur-PK/noscript/

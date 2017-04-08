@@ -1,0 +1,5 @@
+PITCHIMPAIR___anie.sarenet.es___192.148.167.2___20010919-094131() {
+    ## INCISION Version:4.6 OS:sparc-sun-solaris2.6 
+    export TARG_AYT="ebfd82cd afbc1fe0 6a2fbcd5"
+#    [ "$UTC_OFFSET" ] || export UTC_OFFSET=60
+}

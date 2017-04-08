@@ -1,0 +1,20 @@
+INTONATION___gambero3.cs.tin.it___194.243.154.62___20011101-224414() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.6 
+    #
+    set host gambero3.cs.tin.it
+    set ip 194.243.154.62
+    set hostType "Solaris26"
+    set len 476
+    set cv0 67991ffe
+    set cv1 5ca7432f
+    set cv2 d3fa4b27
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

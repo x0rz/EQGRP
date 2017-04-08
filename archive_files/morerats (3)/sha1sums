@@ -1,0 +1,17 @@
+392fbcab34f6e3b46d04a9ac85cd1ab1f1ff4418  noclient-3.1.0.5-i686.pc.linux.gnu.redhat-ES
+0edd78c61541bd461e4d6d1762bdde466741d4da  noserver-3.1.0.5-hppa2.0w.hp.hpux-11.00
+0e73651aaa15849fb73f1c592d7e913d03a43134  noserver-3.1.0.5-i386.apple.darwin-10.4
+30b07175e42e9e8dd384a5328e3e95a559a17240  noserver-3.1.0.5-i386.pc.solaris-2.6
+6e4eb7626fcd8e1700c323fed3c1c6d0fd620487  noserver-3.1.0.5-i386.pc.solaris-2.8
+345ea4115eee87daebbdfac1d667f4705d3d9d69  noserver-3.1.0.5-i386.unknown.freebsd-4.7
+d514c701b4dde060c3c94b778d8bf17f0e3a3423  noserver-3.1.0.5-i386.unknown.freebsd-4.7-static
+6b1948677e93537a8bf8c7eda66cb14dcc3dfe62  noserver-3.1.0.5-i386.unknown.freebsd-5.1
+a9a375840f64630171469ca897b1cc3d02e7b444  noserver-3.1.0.5-i386.unknown.freebsd-6.1
+30ad471d8d2bf8681db38470d34384b081ae58a4  noserver-3.1.0.5-i386.unknown.freebsd-7.0
+9925c95239197b35e8e3e3579672505f260cf7ed  noserver-3.1.0.5-i686.pc.linux.gnu.redhat-5.0
+d0f9582a7e64b771739541b04b2b28f3404fae77  noserver-3.1.0.5-i686.pc.linux.gnu.redhat-5.0-static
+fde0b34026005c8ed677e6bc00449a200866e5ce  noserver-3.1.0.5-i686.pc.linux.gnu.redhat-6.0
+9cc58679c3b68bbe26554881c2d7d4fbeb62c64c  noserver-3.1.0.5-i686.pc.linux.gnu.redhat-ES
+5c91c0cbace2999dd64eaad9919c8b4e38f9aa1f  noserver-3.1.0.5-powerpc.ibm.aix-5.1
+6bd3d86fd9a3b0b9d54197269b5c935cf97bb1ed  noserver-3.1.0.5-sparc.sun.solaris-2.6
+fedc5144c3dabab8c7a028ab39b067d3f0b2b6c3  noserver-3.1.0.5-sparc.sun.solaris-2.8

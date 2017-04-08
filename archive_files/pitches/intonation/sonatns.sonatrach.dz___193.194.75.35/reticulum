@@ -1,0 +1,20 @@
+INTONATION___sonatns.sonatrach.dz___193.194.75.35___20020418-113439() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.6 
+    #
+    set host sonatns.sonatrach.dz
+    set ip 193.194.75.35
+    set hostType "Solaris26"
+    set len 476
+    set cv0 67528db8
+    set cv1 d525889d
+    set cv2 d2d4b6cf
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

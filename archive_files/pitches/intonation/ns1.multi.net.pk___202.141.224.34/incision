@@ -1,0 +1,5 @@
+INTONATION___ns1.multi.net.pk___202.141.224.34___20020826-161236() {
+    ## INCISION Version:4.9 OS:sparc-sun-solaris2.8 
+    export TARG_AYT="0fec50bf 8aea8798 feb3d724"
+    [ "$UTC_OFFSET" ] || export UTC_OFFSET=660
+}

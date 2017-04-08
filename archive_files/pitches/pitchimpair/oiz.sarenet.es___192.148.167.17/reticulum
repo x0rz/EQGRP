@@ -1,0 +1,20 @@
+PITCHIMPAIR___oiz.sarenet.es___192.148.167.17___20010907-085900() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.7 Options:I,O 
+    #
+    set host oiz.sarenet.es
+    set ip 192.148.167.17
+    set hostType "Solaris27"
+    set len 476
+    set cv0 6c0608ff
+    set cv1 5a134b3b
+    set cv2 9e085c7b
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

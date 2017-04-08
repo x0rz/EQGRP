@@ -1,0 +1,20 @@
+INTONATION___outweb.nudt.edu.cn___202.197.0.185___20031113-142441() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.7 
+    #
+    set host outweb.nudt.edu.cn
+    set ip 202.197.0.185
+    set hostType "Solaris27"
+    set len 476
+    set cv0 bbb1d3d4
+    set cv1 6278cafc
+    set cv2 06b48634
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

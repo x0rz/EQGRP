@@ -1,0 +1,9 @@
+<redmin>
+ <session isingle="1" name="SessionID" >
+  <id lastquery="https://127.0.0.1:6655/cgi/redmin?op=cron&amp;action=once" style="cookie" value="127.0.0.1-99555691" >
+   <administrator root="127.0.0.1" />
+   <language iset="1" lang="zh-cn" />
+   <lifecycle lastime="1107150507" interval="900000" />
+  </id>
+ </session>
+</redmin>

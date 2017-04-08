@@ -1,0 +1,20 @@
+INTONATION___sussi.cressoft.com.pk___202.125.140.194___20011101-145536() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.7 
+    #
+    set host sussi.cressoft.com.pk
+    set ip 202.125.140.194
+    set hostType "Solaris27"
+    set len 476
+    set cv0 477aba2b
+    set cv1 0c083e29
+    set cv2 6dc30316
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

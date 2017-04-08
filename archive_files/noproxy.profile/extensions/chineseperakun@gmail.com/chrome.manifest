@@ -1,0 +1,16 @@
+content	cperakun	jar:chrome/cperakun.jar!/content/
+content	cperakun	jar:chrome/cperakun.jar!/content/ contentaccessible=yes
+locale	cperakun	en-US	jar:chrome/cperakun.jar!/locale/en-US/
+skin	cperakun	classic/1.0	jar:chrome/cperakun.jar!/skin/classic/
+
+overlay	chrome://browser/content/browser.xul	chrome://cperakun/content/ff-overlay.xul
+style	chrome://global/content/customizeToolbar.xul	chrome://cperakun/skin/cperakun.css
+
+overlay	chrome://messenger/content/messenger.xul	chrome://cperakun/content/tb-overlay.xul
+style	chrome://messenger/content/messenger.xul	chrome://cperakun/skin/cperakun.css
+
+overlay	chrome://messenger/content/messageWindow.xul	chrome://cperakun/content/tb-overlay.xul
+style	chrome://messenger/content/messageWindow.xul	chrome://cperakun/skin/cperakun.css
+
+overlay	chrome://messenger/content/messengercompose/messengercompose.xul	chrome://cperakun/content/tb-compose-overlay.xul
+style	chrome://messenger/content/messengercompose/messengercompose.xul	chrome://cperakun/skin/cperakun.css

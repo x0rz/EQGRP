@@ -1,0 +1,262 @@
+<!-- rgASN1.pl revision: 1.18 -->
+<!-- ID: sf -->
+<!-- $Revision: 1.4 $ -->
+<DEF vendor="SIEMENS" type="GSM" version="4">
+<Config blockSize="8192" />
+<CTTMN>
+		<Transaction name="CFATT" cttmn="0x5D" std_name="128" dir="1" />
+	<Transaction name="CFWD" cttmn="0x1D" std_name="5" dir="1" />
+	<Transaction name="ECT" cttmn="0x20" std_name="129" dir="1" />
+	<Transaction name="EMY" cttmn="0x03" std_name="4" dir="1" />
+	<Transaction name="EMYATT" cttmn="0x43" std_name="130" dir="1" />
+	<Transaction name="INCALLMODMOC" cttmn="0x08" std_name="131" dir="1" />
+	<Transaction name="INCALLMODMTC" cttmn="0x09" std_name="132" dir="2" />
+	<Transaction name="MOC" cttmn="0x01" std_name="0" dir="1" />
+	<Transaction name="MOCATT" cttmn="0x41" std_name="133"  dir="1" />
+	<Transaction name="MOCOACSU" cttmn="0x06" std_name="134" dir="1" />
+	<Transaction name="MODPAD" cttmn="0x13" std_name="135" dir="1" />
+	<Transaction name="MOMOBOX" cttmn="0x11" std_name="136" dir="1" />
+	<Transaction name="MTC" cttmn="0x02" std_name="1" dir="2" />
+	<Transaction name="MTCATT" cttmn="0x42" std_name="137" dir="2" />
+	<Transaction name="MTCOACSU" cttmn="0x07" std_name="138"  dir="2" />
+	<Transaction name="MTMOBOX" cttmn="0x12" std_name="139" dir="2" />
+	<Transaction name="PABXIC" cttmn="0x92" std_name="9" dir="2" />
+	<Transaction name="PABXOG" cttmn="0x91" std_name="8" dir="1" />
+	<Transaction name="PBXSSERASE" cttmn="0x93" std_name="140" dir="1" />
+	<Transaction name="PBXSSREG" cttmn="0x9A" std_name="141" dir="1" />
+	<Transaction name="ROA" cttmn="0x1A" std_name="2" dir="2" />
+	<Transaction name="ROAATT" cttmn="0x22" std_name="142" dir="2" />
+	<Transaction name="SMSMO" cttmn="0x1F" std_name="6" dir="1" />
+	<Transaction name="SMSMT" cttmn="0x1E" std_name="7" dir="2" />
+	<Transaction name="SSACTIVATION" cttmn="0x0C" std_name="143" dir="1" />
+	<Transaction name="SSDEACTIVATION" cttmn="0x0D" std_name="144" dir="1" />
+	<Transaction name="SSERASURE" cttmn="0x0B" std_name="145" dir="1" />
+	<Transaction name="SSINTERROGATION" cttmn="0x0E" std_name="146" dir="1" />
+	<Transaction name="SSINVOC" cttmn="0x21" std_name="147" dir="1" />
+	<Transaction name="SSREGISTRATION" cttmn="0x0A" std_name="148" dir="1" />
+	<Transaction name="SSUNSTRUCPH1" cttmn="0x0F" std_name="149" dir="1" />
+	<Transaction name="SUBIC" cttmn="0x82" std_name="150" dir="2" />
+	<Transaction name="SUBOG" cttmn="0x81" std_name="151" dir="1" />
+	<Transaction name="TIR" cttmn="0x2B" std_name="152" dir="2" />
+	<Transaction name="TIRATTEMPT" cttmn="0x2D" std_name="153" dir="2" />
+	<Transaction name="TRANSIT" cttmn="0x1B" std_name="3" dir="1" />
+	<Transaction name="USSNOTIFYNI" cttmn="0x3D" std_name="154" dir="2" />
+	<Transaction name="USSREQUESTMO" cttmn="0x3B" std_name="155" dir="1" />
+	<Transaction name="USSREQUESTNI" cttmn="0x3C" std_name="156" dir="2" />
+	<Transaction name="VGSAMSC" cttmn="0x2C" std_name="157" dir="0" />
+	<Transaction name="VGSRMSC" cttmn="0x2E" std_name="158" dir="0" />
+</CTTMN>
+<ASN1>
+	<RecordDef name="CFWD" cttmn="0x1D">
+		<FieldDef fieldName="CALLDUR" tag="1.13.17" />
+		<FieldDef fieldName="CI" tag="1.22" />
+		<FieldDef fieldName="CTTMN" tag="1.3" />
+		<FieldDef fieldName="DESTNO" tag="1.99.100.107" />
+		<FieldDef fieldName="IMSI" tag="1.39.6" />
+		<FieldDef fieldName="MSCADDR" tag="1.88" />
+		<FieldDef fieldName="MSISDN" tag="1.39.7" />
+		<FieldDef fieldName="OTHERDIA" tag="1.9" />
+		<FieldDef fieldName="SDATE" tag="1.13.19" />
+		<FieldDef fieldName="STIME" tag="1.13.20.28" />
+		<FieldDef fieldName="TELE" tag="1.12" />
+		<FieldDef fieldName="TGNOIC" tag="1.33.22" />
+		<FieldDef fieldName="TGNOOG" tag="1.27.22" />
+		<FieldDef fieldName="THIRDP" tag="1.32" />
+	</RecordDef>
+	<RecordDef name="DEFAULT" cttmn="0x00">
+		<FieldDef fieldName="CALLDUR" tag="1.13.17" />
+		<FieldDef fieldName="CI" tag="1.22" />
+		<FieldDef fieldName="CTTMN" tag="1.3" />
+		<FieldDef fieldName="DESNOSMS" tag="1.99.100.108" />
+		<FieldDef fieldName="DESTNO" tag="1.99.100.107" />
+		<FieldDef fieldName="IMEI" tag="1.39.8" />
+		<FieldDef fieldName="IMSI" tag="1.39.6" />
+		<FieldDef fieldName="MSCADDR" tag="1.88" />
+		<FieldDef fieldName="MSISDN" tag="1.39.7" />
+		<FieldDef fieldName="OTHERDIA" tag="1.9" />
+		<FieldDef fieldName="OTHERPD1" tag="1.9" />
+		<FieldDef fieldName="OTHERSMS" tag="1.52" />
+		<FieldDef fieldName="SDATE" tag="1.13.19" />
+		<FieldDef fieldName="STIME" tag="1.13.20.28" />
+		<FieldDef fieldName="TELE" tag="1.12" />
+		<FieldDef fieldName="TGNOIC" tag="1.33.22" />
+		<FieldDef fieldName="TGNOOG" tag="1.27.22" />
+		<FieldDef fieldName="THIRDP" tag="1.32" />
+	</RecordDef>
+	<RecordDef name="ECT" cttmn="0x20">
+		<FieldDef fieldName="CI" tag="1.22" />
+		<FieldDef fieldName="CTTMN" tag="1.3" />
+		<FieldDef fieldName="IMEI" tag="1.39.8" />
+		<FieldDef fieldName="IMSI" tag="1.39.6" />
+		<FieldDef fieldName="MSISDN" tag="1.39.7" />
+		<FieldDef fieldName="OTHERPD1" tag="1.9" />
+		<FieldDef fieldName="SDATE" tag="1.13.19" />
+		<FieldDef fieldName="STIME" tag="1.13.20.28" />
+		<FieldDef fieldName="TELE" tag="1.12" />
+	</RecordDef>
+	<RecordDef name="EMY" cttmn="0x03">
+		<FieldDef fieldName="CALLDUR" tag="1.13.17" />
+		<FieldDef fieldName="CI" tag="1.22" />
+		<FieldDef fieldName="CTTMN" tag="1.3" />
+		<FieldDef fieldName="IMEI" tag="1.39.8" />
+		<FieldDef fieldName="IMSI" tag="1.39.6" />
+		<FieldDef fieldName="MSCADDR" tag="1.88" />
+		<FieldDef fieldName="MSISDN" tag="1.39.7" />
+		<FieldDef fieldName="OTHERPD1" tag="1.9" />
+		<FieldDef fieldName="SDATE" tag="1.13.19" />
+		<FieldDef fieldName="STIME" tag="1.13.20.28" />
+		<FieldDef fieldName="TELE" tag="1.12" />
+		<FieldDef fieldName="TGNOIC" tag="1.33.22" />
+		<FieldDef fieldName="TGNOOG" tag="1.27.22" />
+	</RecordDef>
+	<RecordDef name="MOC" cttmn="0x01">
+		<FieldDef fieldName="CALLDUR" tag="1.13.17" />
+		<FieldDef fieldName="CI" tag="1.22" />
+		<FieldDef fieldName="CTTMN" tag="1.3" />
+		<FieldDef fieldName="DESTNO" tag="1.99.100.107" />
+		<FieldDef fieldName="IMEI" tag="1.39.8" />
+		<FieldDef fieldName="IMSI" tag="1.39.6" />
+		<FieldDef fieldName="MSCADDR" tag="1.88" />
+		<FieldDef fieldName="MSISDN" tag="1.39.7" />
+		<FieldDef fieldName="OTHERPD1" tag="1.9" />
+		<FieldDef fieldName="SDATE" tag="1.13.19" />
+		<FieldDef fieldName="STIME" tag="1.13.20.28" />
+		<FieldDef fieldName="TELE" tag="1.12" />
+		<FieldDef fieldName="TGNOIC" tag="1.33.22" />
+		<FieldDef fieldName="TGNOOG" tag="1.27.22" />
+	</RecordDef>
+	<RecordDef name="MOCOACSU" cttmn="0x06">
+		<FieldDef fieldName="CALLDUR" tag="1.13.17" />
+		<FieldDef fieldName="CI" tag="1.22" />
+		<FieldDef fieldName="CTTMN" tag="1.3" />
+		<FieldDef fieldName="DESTNO" tag="1.99.100.107" />
+		<FieldDef fieldName="IMEI" tag="1.39.8" />
+		<FieldDef fieldName="IMSI" tag="1.39.6" />
+		<FieldDef fieldName="MSCADDR" tag="1.88" />
+		<FieldDef fieldName="MSISDN" tag="1.39.7" />
+		<FieldDef fieldName="OTHERPD1" tag="1.9" />
+		<FieldDef fieldName="SDATE" tag="1.13.19" />
+		<FieldDef fieldName="STIME" tag="1.13.20.28" />
+		<FieldDef fieldName="TELE" tag="1.12" />
+		<FieldDef fieldName="TGNOIC" tag="1.33.22" />
+		<FieldDef fieldName="TGNOOG" tag="1.27.22" />
+	</RecordDef>
+	<RecordDef name="MTC" cttmn="0x02">
+		<FieldDef fieldName="CALLDUR" tag="1.13.17" />
+		<FieldDef fieldName="CI" tag="1.22" />
+		<FieldDef fieldName="CTTMN" tag="1.3" />
+		<FieldDef fieldName="IMEI" tag="1.39.8" />
+		<FieldDef fieldName="IMSI" tag="1.39.6" />
+		<FieldDef fieldName="MSISDN" tag="1.39.7" />
+		<FieldDef fieldName="OTHERPD1" tag="1.9" />
+		<FieldDef fieldName="SDATE" tag="1.13.19" />
+		<FieldDef fieldName="STIME" tag="1.13.20.28" />
+		<FieldDef fieldName="TELE" tag="1.12" />
+		<FieldDef fieldName="TGNOIC" tag="1.33.22" />
+		<FieldDef fieldName="TGNOOG" tag="1.27.22" />
+	</RecordDef>
+	<RecordDef name="ROA" cttmn="0x1A">
+		<FieldDef fieldName="CALLDUR" tag="1.13.17" />
+		<FieldDef fieldName="CI" tag="1.22" />
+		<FieldDef fieldName="CTTMN" tag="1.3" />
+		<FieldDef fieldName="DESTNO" tag="1.99.100.107" />
+		<FieldDef fieldName="IMSI" tag="1.39.6" />
+		<FieldDef fieldName="MSCADDR" tag="1.88" />
+		<FieldDef fieldName="MSISDN" tag="1.39.7" />
+		<FieldDef fieldName="OTHERPD1" tag="1.9" />
+		<FieldDef fieldName="SDATE" tag="1.13.19" />
+		<FieldDef fieldName="STIME" tag="1.13.20.28" />
+		<FieldDef fieldName="TGNOIC" tag="1.33.22" />
+		<FieldDef fieldName="TGNOOG" tag="1.27.22" />
+	</RecordDef>
+	<RecordDef name="SMSMO" cttmn="0x1F">
+		<FieldDef fieldName="CI" tag="1.22" />
+		<FieldDef fieldName="CTTMN" tag="1.3" />
+		<FieldDef fieldName="DESNOSMS" tag="1.99.100.108" />
+		<FieldDef fieldName="IMSI" tag="1.39.6" />
+		<FieldDef fieldName="MSCADDR" tag="1.88" />
+		<FieldDef fieldName="MSISDN" tag="1.39.7" />
+		<FieldDef fieldName="OTHERSMS" tag="1.52" />
+		<FieldDef fieldName="SDATE" tag="1.13.19" />
+		<FieldDef fieldName="STIME" tag="1.13.20.28" />
+		<FieldDef fieldName="TELE" tag="1.12" />
+	</RecordDef>
+	<RecordDef name="SMSMT" cttmn="0x1E">
+		<FieldDef fieldName="CI" tag="1.22" />
+		<FieldDef fieldName="CTTMN" tag="1.3" />
+		<FieldDef fieldName="IMSI" tag="1.39.6" />
+		<FieldDef fieldName="MSISDN" tag="1.39.7" />
+		<FieldDef fieldName="OTHERSMS" tag="1.52" />
+		<FieldDef fieldName="SDATE" tag="1.13.19" />
+		<FieldDef fieldName="STIME" tag="1.13.20.28" />
+		<FieldDef fieldName="TELE" tag="1.12" />
+	</RecordDef>
+	<RecordDef name="TRANSIT" cttmn="0x1B">
+		<FieldDef fieldName="ANUMBER" tag="1.40" />
+		<FieldDef fieldName="CALLDUR" tag="1.13.17" />
+		<FieldDef fieldName="CTTMN" tag="1.3" />
+		<FieldDef fieldName="DESTNO" tag="1.99.100.107" />
+		<FieldDef fieldName="MSCADDR" tag="1.88" />
+		<FieldDef fieldName="OTHERPD1" tag="1.9" />
+		<FieldDef fieldName="SDATE" tag="1.13.19" />
+		<FieldDef fieldName="STIME" tag="1.13.20.28" />
+		<FieldDef fieldName="TGNOIC" tag="1.33.22" />
+		<FieldDef fieldName="TGNOOG" tag="1.27.22" />
+	</RecordDef>
+</ASN1>
+<PriorityList>
+	<RecordDef name="CFWD" cttmn="0x1D">
+		<OutputField name="OTHER_MSISDN">
+			<FieldPriority fieldName="DESTNO" />
+			<FieldPriority fieldName="OTHERDIA" />
+		</OutputField>
+	</RecordDef>
+	<RecordDef name="DEFAULT" cttmn="0x00">
+		<OutputField name="OTHER_MSISDN">
+			<FieldPriority fieldName="DESNOSMS" />
+			<FieldPriority fieldName="OTHERSMS" />
+			<FieldPriority fieldName="OTHERDIA" />
+			<FieldPriority fieldName="OTHERPD1" />
+			<FieldPriority fieldName="DESTNO" />
+		</OutputField>
+		<OutputField name="OTHER_PARTY_SMS">
+			<FieldPriority fieldName="DESNOSMS" />
+			<FieldPriority fieldName="OTHERSMS" />
+		</OutputField>
+	</RecordDef>
+	<RecordDef name="MOC" cttmn="0x01">
+		<OutputField name="OTHER_MSISDN">
+			<FieldPriority fieldName="OTHERPD1" />
+			<FieldPriority fieldName="DESTNO" />
+		</OutputField>
+	</RecordDef>
+	<RecordDef name="MOCOACSU" cttmn="0x06">
+		<OutputField name="OTHER_MSISDN">
+			<FieldPriority fieldName="OTHERPD1" />
+			<FieldPriority fieldName="DESTNO" />
+		</OutputField>
+	</RecordDef>
+	<RecordDef name="ROA" cttmn="0x1A">
+		<OutputField name="OTHER_MSISDN">
+			<FieldPriority fieldName="OTHERPD1" />
+			<FieldPriority fieldName="DESTNO" />
+		</OutputField>
+	</RecordDef>
+	<RecordDef name="SMSMO" cttmn="0x1F">
+		<OutputField name="OTHER_MSISDN">
+			<FieldPriority fieldName="DESNOSMS" />
+			<FieldPriority fieldName="OTHERSMS" />
+		</OutputField>
+		<OutputField name="OTHER_PARTY_SMS">
+			<FieldPriority fieldName="DESNOSMS" />
+			<FieldPriority fieldName="OTHERSMS" />
+		</OutputField>
+	</RecordDef>
+	<RecordDef name="TRANSIT" cttmn="0x1B">
+		<OutputField name="OTHER_MSISDN">
+			<FieldPriority fieldName="OTHERPD1" />
+			<FieldPriority fieldName="DESTNO" />
+		</OutputField>
+	</RecordDef>
+</PriorityList>
+</DEF>

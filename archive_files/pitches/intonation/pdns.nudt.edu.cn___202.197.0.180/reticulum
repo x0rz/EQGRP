@@ -1,0 +1,20 @@
+INTONATION___pdns.nudt.edu.cn___202.197.0.180___20011207-143507() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.6 
+    #
+    set host pdns.nudt.edu.cn
+    set ip 202.197.0.180
+    set hostType "Solaris26"
+    set len 476
+    set cv0 3f3d6551
+    set cv1 bc84af22
+    set cv2 db08d26c
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

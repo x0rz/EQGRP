@@ -1,0 +1,5 @@
+INTONATION___mpkhi-bk.multi.net.pk___202.141.224.40___20020826-172332() {
+    ## INCISION Version:4.9 OS:sparc-sun-solaris2.8 
+    export TARG_AYT="37b1ec88 7961dbac 4dbf0daf"
+    [ "$UTC_OFFSET" ] || export UTC_OFFSET=660
+}

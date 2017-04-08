@@ -1,0 +1,239 @@
+<!-- ID: sga_a -->
+<!-- $Revision: 1.4 $ -->
+<DEF vendor="ALCATEL" type="GSM" version="4">
+<CTTMN>
+	<Transaction name="CFATT" cttmn="0x5D" std_name="128" dir="1" />
+	<Transaction name="CFWD" cttmn="0x1D" std_name="5" dir="1" />
+	<Transaction name="EMY" cttmn="0x03" std_name="4" dir="1" />
+	<Transaction name="INCALLMODMOC" cttmn="0x08" std_name="131" dir="1" />
+	<Transaction name="INCALLMODMTC" cttmn="0x09" std_name="132" dir="2" />
+	<Transaction name="MOC" cttmn="0x01" std_name="0" dir="1" />
+	<Transaction name="MOCOACSU" cttmn="0x06" std_name="134" dir="1" />
+	<Transaction name="MODPAD" cttmn="0x27" std_name="135" dir="1" />
+	<Transaction name="MTC" cttmn="0x02" std_name="1" dir="2" />
+	<Transaction name="MTCOACSU" cttmn="0x07" std_name="138" dir="2" />
+	<Transaction name="PABXIC" cttmn="0x05" std_name="9" dir="2" />
+	<Transaction name="PABXOG" cttmn="0x04" std_name="8" dir="1" />
+	<Transaction name="ROA" cttmn="0x1A" std_name="2" dir="2" />
+	<Transaction name="SMSMO" cttmn="0x10" std_name="6" dir="1" />
+	<Transaction name="SMSMT" cttmn="0x11" std_name="7" dir="2" />
+	<Transaction name="SSACTIVATION" cttmn="0x0C" std_name="143" dir="1" />
+	<Transaction name="SSDEACTIVATION" cttmn="0x0D" std_name="144" dir="1" />
+	<Transaction name="SSERASURE" cttmn="0x0B" std_name="145" dir="1" />
+	<Transaction name="SSINTERROGATION" cttmn="0x0E" std_name="146" dir="1" />
+	<Transaction name="SSINVOC" cttmn="0x0F" std_name="147" dir="1" />
+	<Transaction name="SSREGISTRATION" cttmn="0x0A" std_name="148" dir="1" />
+	<Transaction name="TIR" cttmn="0x2B" std_name="152" dir="2" />
+	<Transaction name="TRANSIT" cttmn="0x1B" std_name="3" dir="1" />
+</CTTMN>
+<ASN1>
+	<RecordDef name="DEFAULT" cttmn="0x00">
+		<FieldDef fieldName="CALLDUR" tag="1.14.17" />
+		<FieldDef fieldName="CELL_ID" tag="1.15" />
+		<FieldDef fieldName="CTTMN" tag="1.2" />
+		<FieldDef fieldName="IMEI" tag="1.8" />
+		<FieldDef fieldName="IMSI" tag="1.6" />
+		<FieldDef fieldName="LAC" tag="1.12" />
+		<FieldDef fieldName="MSCADDR" tag="1.96" />
+		<FieldDef fieldName="MSISDN" tag="1.7" />
+		<FieldDef fieldName="OTHERDIA" tag="1.9" />
+		<FieldDef fieldName="SDATE" tag="1.14.19" />
+		<FieldDef fieldName="STIME" tag="1.14.20.4" />
+		<FieldDef fieldName="TELE" tag="1.21" />
+		<FieldDef fieldName="TGNOIC" tag="1.50" />
+		<FieldDef fieldName="TGNOOG" tag="1.53" />
+	</RecordDef>
+	<RecordDef name="MOC" cttmn="0x01">
+		<FieldDef fieldName="CALLDUR" tag="1.14.17" />
+		<FieldDef fieldName="CELL_ID" tag="1.15" />
+		<FieldDef fieldName="CTTMN" tag="1.2" />
+		<FieldDef fieldName="IMEI" tag="1.8" />
+		<FieldDef fieldName="IMSI" tag="1.6" />
+		<FieldDef fieldName="LAC" tag="1.12" />
+		<FieldDef fieldName="MSCADDR_3A" tag="1.96" />
+		<FieldDef fieldName="MSISDN" tag="1.7" />
+		<FieldDef fieldName="OTHERDIA" tag="1.9" />
+		<FieldDef fieldName="SDATE" tag="1.14.19" />
+		<FieldDef fieldName="STIME" tag="1.14.20.4" />
+		<FieldDef fieldName="TELE" tag="1.21" />
+		<FieldDef fieldName="TGNOIC" tag="1.50" />
+		<FieldDef fieldName="TGNOOG" tag="1.53" />
+	</RecordDef>
+	<RecordDef name="MTC" cttmn="0x02">
+		<FieldDef fieldName="CALLDUR" tag="1.14.17" />
+		<FieldDef fieldName="CELL_ID" tag="1.15" />
+		<FieldDef fieldName="CTTMN" tag="1.2" />
+		<FieldDef fieldName="IMEI" tag="1.8" />
+		<FieldDef fieldName="IMSI" tag="1.6" />
+		<FieldDef fieldName="LAC" tag="1.12" />
+		<FieldDef fieldName="MSISDN" tag="1.7" />
+		<FieldDef fieldName="OTHERDIA" tag="1.9" />
+		<FieldDef fieldName="SDATE" tag="1.14.19" />
+		<FieldDef fieldName="STIME" tag="1.14.20.4" />
+		<FieldDef fieldName="TELE" tag="1.21" />
+		<FieldDef fieldName="TGNOIC" tag="1.50" />
+		<FieldDef fieldName="TGNOOG" tag="1.53" />
+	</RecordDef>
+	<RecordDef name="SMSMO" cttmn="0x10">
+		<FieldDef fieldName="CALLDUR" tag="1.14.17" />
+		<FieldDef fieldName="CELL_ID" tag="1.15" />
+		<FieldDef fieldName="CTTMN" tag="1.2" />
+		<FieldDef fieldName="IMEI" tag="1.8" />
+		<FieldDef fieldName="IMSI" tag="1.6" />
+		<FieldDef fieldName="LAC" tag="1.12" />
+		<FieldDef fieldName="MSISDN" tag="1.7" />
+		<FieldDef fieldName="SDATE" tag="1.14.19" />
+		<FieldDef fieldName="SMSCADDR" tag="1.9" />
+		<FieldDef fieldName="STIME" tag="1.14.20.4" />
+		<FieldDef fieldName="TELE" tag="1.21" />
+	</RecordDef>
+	<RecordDef name="SMSMT" cttmn="0x11">
+		<FieldDef fieldName="CALLDUR" tag="1.14.17" />
+		<FieldDef fieldName="CELL_ID" tag="1.15" />
+		<FieldDef fieldName="CTTMN" tag="1.2" />
+		<FieldDef fieldName="IMEI" tag="1.8" />
+		<FieldDef fieldName="IMSI" tag="1.6" />
+		<FieldDef fieldName="LAC" tag="1.12" />
+		<FieldDef fieldName="MSISDN" tag="1.7" />
+		<FieldDef fieldName="SDATE" tag="1.14.19" />
+		<FieldDef fieldName="SMSCADDR" tag="1.9" />
+		<FieldDef fieldName="STIME" tag="1.14.20.4" />
+		<FieldDef fieldName="TELE" tag="1.21" />
+	</RecordDef>
+	<RecordDef name="EMY" cttmn="0x03">
+		<FieldDef fieldName="CALLDUR" tag="1.14.17" />
+		<FieldDef fieldName="CELL_ID" tag="1.15" />
+		<FieldDef fieldName="CTTMN" tag="1.2" />
+		<FieldDef fieldName="IMEI" tag="1.8" />
+		<FieldDef fieldName="IMSI" tag="1.6" />
+		<FieldDef fieldName="LAC" tag="1.12" />
+		<FieldDef fieldName="MSISDN" tag="1.7" />
+		<FieldDef fieldName="OTHERDIA" tag="1.9" />
+		<FieldDef fieldName="SDATE" tag="1.14.19" />
+		<FieldDef fieldName="STIME" tag="1.14.20.4" />
+		<FieldDef fieldName="TELE" tag="1.21" />
+		<FieldDef fieldName="TGNOIC" tag="1.50" />
+		<FieldDef fieldName="TGNOOG" tag="1.53" />
+	</RecordDef>
+	<RecordDef name="PABXIC" cttmn="0x05">
+		<FieldDef fieldName="CALLDUR" tag="1.14.17" />
+		<FieldDef fieldName="CELL_ID" tag="1.15" />
+		<FieldDef fieldName="CTTMN" tag="1.2" />
+		<FieldDef fieldName="IMEI" tag="1.8" />
+		<FieldDef fieldName="IMSI" tag="1.6" />
+		<FieldDef fieldName="LAC" tag="1.12" />
+		<FieldDef fieldName="MSISDN" tag="1.7" />
+		<FieldDef fieldName="OTHERDIA" tag="1.9" />
+		<FieldDef fieldName="SDATE" tag="1.14.19" />
+		<FieldDef fieldName="STIME" tag="1.14.20.4" />
+		<FieldDef fieldName="TELE" tag="1.21" />
+		<FieldDef fieldName="TGNOIC" tag="1.50" />
+		<FieldDef fieldName="TGNOOG" tag="1.53" />
+	</RecordDef>
+	<RecordDef name="PABXOG" cttmn="0x04">
+		<FieldDef fieldName="CALLDUR" tag="1.14.17" />
+		<FieldDef fieldName="CELL_ID" tag="1.15" />
+		<FieldDef fieldName="CTTMN" tag="1.2" />
+		<FieldDef fieldName="IMEI" tag="1.8" />
+		<FieldDef fieldName="IMSI" tag="1.6" />
+		<FieldDef fieldName="LAC" tag="1.12" />
+		<FieldDef fieldName="MSISDN" tag="1.7" />
+		<FieldDef fieldName="OTHERDIA" tag="1.9" />
+		<FieldDef fieldName="SDATE" tag="1.14.19" />
+		<FieldDef fieldName="STIME" tag="1.14.20.4" />
+		<FieldDef fieldName="TELE" tag="1.21" />
+		<FieldDef fieldName="TGNOIC" tag="1.50" />
+		<FieldDef fieldName="TGNOOG" tag="1.53" />
+	</RecordDef>
+	<RecordDef name="SSACTIVATION" cttmn="0x0C">
+		<FieldDef fieldName="CALLDUR" tag="1.14.17" />
+		<FieldDef fieldName="CELL_ID" tag="1.15" />
+		<FieldDef fieldName="CTTMN" tag="1.2" />
+		<FieldDef fieldName="IMEI" tag="1.8" />
+		<FieldDef fieldName="IMSI" tag="1.6" />
+		<FieldDef fieldName="LAC" tag="1.12" />
+		<FieldDef fieldName="MSISDN" tag="1.7" />
+		<FieldDef fieldName="OTHERDIA" tag="1.9" />
+		<FieldDef fieldName="SDATE" tag="1.14.19" />
+		<FieldDef fieldName="STIME" tag="1.14.20.4" />
+		<FieldDef fieldName="TELE" tag="1.21" />
+		<FieldDef fieldName="TGNOIC" tag="1.50" />
+		<FieldDef fieldName="TGNOOG" tag="1.53" />
+	</RecordDef>
+	<RecordDef name="SSDEACTIVATION" cttmn="0x0D">
+		<FieldDef fieldName="CALLDUR" tag="1.14.17" />
+		<FieldDef fieldName="CELL_ID" tag="1.15" />
+		<FieldDef fieldName="CTTMN" tag="1.2" />
+		<FieldDef fieldName="IMEI" tag="1.8" />
+		<FieldDef fieldName="IMSI" tag="1.6" />
+		<FieldDef fieldName="LAC" tag="1.12" />
+		<FieldDef fieldName="MSISDN" tag="1.7" />
+		<FieldDef fieldName="OTHERDIA" tag="1.9" />
+		<FieldDef fieldName="SDATE" tag="1.14.19" />
+		<FieldDef fieldName="STIME" tag="1.14.20.4" />
+		<FieldDef fieldName="TELE" tag="1.21" />
+		<FieldDef fieldName="TGNOIC" tag="1.50" />
+		<FieldDef fieldName="TGNOOG" tag="1.53" />
+	</RecordDef>
+	<RecordDef name="SSERASURE" cttmn="0x0B">
+		<FieldDef fieldName="CALLDUR" tag="1.14.17" />
+		<FieldDef fieldName="CELL_ID" tag="1.15" />
+		<FieldDef fieldName="CTTMN" tag="1.2" />
+		<FieldDef fieldName="IMEI" tag="1.8" />
+		<FieldDef fieldName="IMSI" tag="1.6" />
+		<FieldDef fieldName="LAC" tag="1.12" />
+		<FieldDef fieldName="MSISDN" tag="1.7" />
+		<FieldDef fieldName="OTHERDIA" tag="1.9" />
+		<FieldDef fieldName="SDATE" tag="1.14.19" />
+		<FieldDef fieldName="STIME" tag="1.14.20.4" />
+		<FieldDef fieldName="TELE" tag="1.21" />
+		<FieldDef fieldName="TGNOIC" tag="1.50" />
+		<FieldDef fieldName="TGNOOG" tag="1.53" />
+	</RecordDef>
+	<RecordDef name="SSINTERROGATION" cttmn="0x0E">
+		<FieldDef fieldName="CALLDUR" tag="1.14.17" />
+		<FieldDef fieldName="CELL_ID" tag="1.15" />
+		<FieldDef fieldName="CTTMN" tag="1.2" />
+		<FieldDef fieldName="IMEI" tag="1.8" />
+		<FieldDef fieldName="IMSI" tag="1.6" />
+		<FieldDef fieldName="LAC" tag="1.12" />
+		<FieldDef fieldName="MSISDN" tag="1.7" />
+		<FieldDef fieldName="OTHERDIA" tag="1.9" />
+		<FieldDef fieldName="SDATE" tag="1.14.19" />
+		<FieldDef fieldName="STIME" tag="1.14.20.4" />
+		<FieldDef fieldName="TELE" tag="1.21" />
+		<FieldDef fieldName="TGNOIC" tag="1.50" />
+		<FieldDef fieldName="TGNOOG" tag="1.53" />
+	</RecordDef>
+	<RecordDef name="SSREGISTRATION" cttmn="0x0A">
+		<FieldDef fieldName="CALLDUR" tag="1.14.17" />
+		<FieldDef fieldName="CELL_ID" tag="1.15" />
+		<FieldDef fieldName="CTTMN" tag="1.2" />
+		<FieldDef fieldName="IMEI" tag="1.8" />
+		<FieldDef fieldName="IMSI" tag="1.6" />
+		<FieldDef fieldName="LAC" tag="1.12" />
+		<FieldDef fieldName="MSISDN" tag="1.7" />
+		<FieldDef fieldName="OTHERDIA" tag="1.9" />
+		<FieldDef fieldName="SDATE" tag="1.14.19" />
+		<FieldDef fieldName="STIME" tag="1.14.20.4" />
+		<FieldDef fieldName="TELE" tag="1.21" />
+		<FieldDef fieldName="TGNOIC" tag="1.50" />
+		<FieldDef fieldName="TGNOOG" tag="1.53" />
+	</RecordDef>
+	<RecordDef name="TIR" cttmn="0x2B">
+		<FieldDef fieldName="CALLDUR" tag="1.14.17" />
+		<FieldDef fieldName="CELL_ID" tag="1.15" />
+		<FieldDef fieldName="CTTMN" tag="1.2" />
+		<FieldDef fieldName="IMEI" tag="1.8" />
+		<FieldDef fieldName="IMSI" tag="1.6" />
+		<FieldDef fieldName="LAC" tag="1.12" />
+		<FieldDef fieldName="MSISDN" tag="1.7" />
+		<FieldDef fieldName="OTHERDIA" tag="1.9" />
+		<FieldDef fieldName="SDATE" tag="1.14.19" />
+		<FieldDef fieldName="STIME" tag="1.14.20.4" />
+		<FieldDef fieldName="TELE" tag="1.21" />
+		<FieldDef fieldName="TGNOIC" tag="1.50" />
+		<FieldDef fieldName="TGNOOG" tag="1.53" />
+	</RecordDef>
+</ASN1>
+</DEF>

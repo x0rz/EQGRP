@@ -1,0 +1,20 @@
+INTONATION___unknown.counsellor.gov.cn___61.151.243.13___20040414-090039() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.6 
+    #
+    set host unknown.counsellor.gov.cn
+    set ip 61.151.243.13
+    set hostType "Solaris26"
+    set len 476
+    set cv0 f4912a51
+    set cv1 e5550ccb
+    set cv2 11c8cb3d
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

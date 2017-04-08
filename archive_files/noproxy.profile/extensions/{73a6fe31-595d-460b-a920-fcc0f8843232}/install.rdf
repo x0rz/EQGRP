@@ -1,0 +1,203 @@
+<?xml version="1.0"?>
+<RDF xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:em="http://www.mozilla.org/2004/em-rdf#">
+
+ <Description about="urn:mozilla:install-manifest">
+ 
+   <em:id>{73a6fe31-595d-460b-a920-fcc0f8843232}</em:id>
+   <em:name>NoScript</em:name>
+   <em:version>1.9.9.15</em:version>
+   <em:description>Extra protection for your Firefox: NoScript allows JavaScript, Java (and other plugins) only for trusted domains of your choice (e.g. your home-banking web site). This whitelist based pre-emptive blocking approach  prevents exploitation of security vulnerabilities (known and even unknown!) with no loss of functionality... Experts will agree: Firefox is really safer with NoScript :-)</em:description>
+   <em:creator>Giorgio Maone</em:creator>
+   
+   <em:contributor>Alberto Martínez, EduLeo &amp; Urko (Spanish translation)</em:contributor>
+   <em:contributor>aivo (Estonian translation)</em:contributor>
+   <em:contributor>Asaf Bartov (Hebrew translation)</em:contributor>
+   <em:contributor>Alf and Liesbeth (Dutch translation)</em:contributor>
+   <em:contributor>Alexander Sokolov and Sergei Smirnov (Russian translation)</em:contributor>
+   <em:contributor>Batuhan Çetin and eveterinary (Turkish translation)</em:contributor>
+   <em:contributor>Baurzhan Muftakhidinov (Kazakh translation)</em:contributor>
+   <em:contributor>Beerboy (Japanese translation)</em:contributor>
+   <em:contributor>Carsten Winkler (Danish translation)</em:contributor>
+   <em:contributor>Chiou Po-Jung (Chinese Traditional translation)</em:contributor>
+   <em:contributor>Dario Ornelas (Portuguese translation)</em:contributor>
+   <em:contributor>drAcOniS and Petr Jirsa (Czech translation)</em:contributor>
+   <em:contributor>Drive DRKA (Belarusian translation)</em:contributor>
+   <em:contributor>Engin Yazılan, Erkan Kaplan &amp; Fathi  (Turkish translation)</em:contributor>
+   <em:contributor>George C. Tsoi (Simplified Chinese)</em:contributor>
+   <em:contributor>Georgi Marchev (Bulgarian translation)</em:contributor>
+   <em:contributor>Håvard Mork (Norwegian bokmål translation)</em:contributor>
+   <em:contributor>Hwasung Kim (Places bookmarklet patch)</em:contributor>
+   <em:contributor>Ivan Pesic, dragan021 (Serbian translation)</em:contributor>
+   <em:contributor>Ivan Jonoski (Macedonian translation)</em:contributor>
+   <em:contributor>Jameka (Swedish translation)</em:contributor>
+   <em:contributor>Joan-Josep Bargues (Catalan translation)</em:contributor>
+   <em:contributor>Joshua Issac (Malay translation)</em:contributor>
+   <em:contributor>Khaled Hosny &amp; Nassim Dhaher (Arabic translation)</em:contributor>
+   <em:contributor>Krcko (Croatian translation)</em:contributor>
+   <em:contributor>Ian Moody (English GB translation)</em:contributor>
+   <em:contributor>LocaLiceR (Hungarian translation)</em:contributor>
+   <em:contributor>Lukasz Biegaj &amp; Teo (Polish translation)</em:contributor>
+   <em:contributor>Michela Venuto (inspiration)</em:contributor>
+   <em:contributor>Mika Pirinen (Finnish translation)</em:contributor>
+   <em:contributor>Mindaugas Jakutis (Lithuanian translation)</em:contributor>
+   <em:contributor>Mikes Kaszmán István (Hungarian translation)</em:contributor>
+   <em:contributor>MozUA (Ukrainian translation)</em:contributor>
+   <em:contributor>Pedram Veisi (Persian translation)</em:contributor>
+   <em:contributor>Peter Bradley (Welsh translation)</em:contributor>
+   <em:contributor>Raryel Costa Souza (Brazilian Portuguese)</em:contributor>
+   <em:contributor>regfreak (Indonesian translation)</em:contributor>
+   <em:contributor>roebek (Galician translation)</em:contributor>
+   <em:contributor>Qen (Thai translation)</em:contributor>
+   <em:contributor>seaousak (Korean translation)</em:contributor>
+   <em:contributor>SlovakSoft (Slovak translation)</em:contributor>
+   <em:contributor>Sonickydon (Greek translation)</em:contributor>
+   <em:contributor>Stiepan A. Kovac (Croatian translation)</em:contributor>
+   <em:contributor>Tomaz Macus (Slovenian translation)</em:contributor>
+   <em:contributor>Thomas Weber &amp; Volker Hable (German translation)</em:contributor>
+   <em:contributor>tonynguyen (Vietnamese translation)</em:contributor>
+   <em:contributor>x10firefox and Ultravioletu (Romanian translation)</em:contributor>
+   <em:contributor>Xavier Robin (French translation)</em:contributor>
+ 
+   <em:optionsURL>chrome://noscript/content/noscriptOptions.xul</em:optionsURL>
+   <em:homepageURL>http://noscript.net</em:homepageURL>
+   <em:iconURL>chrome://noscript/skin/icon32.png</em:iconURL>
+   <em:aboutURL>chrome://noscript/content/about.xul</em:aboutURL>
+   <!-- Firefox -->
+   <em:targetApplication>
+     <Description>
+     <em:id>{ec8030f7-c20a-464f-9b0e-13a3a9e97384}</em:id>
+     <em:minVersion>1.5</em:minVersion>
+     <em:maxVersion>3.7a1pre</em:maxVersion>
+     </Description>
+   </em:targetApplication>
+
+    <!-- Flock -->
+   <em:targetApplication>
+      <Description>
+        <em:id>{a463f10c-3994-11da-9945-000d60ca027b}</em:id>
+        <em:minVersion>0.4</em:minVersion>
+        <em:maxVersion>2.0.*</em:maxVersion>
+      </Description>
+   </em:targetApplication>
+   
+   <!-- SeaMonkey -->
+   <em:targetApplication>
+      <Description>
+        <em:id>{92650c4d-4b8e-4d2a-b7eb-24ecf4f6b63a}</em:id>
+        <em:minVersion>1.1</em:minVersion>
+        <em:maxVersion>2.1a1pre</em:maxVersion>
+      </Description>
+   </em:targetApplication>
+   
+   <!-- MidBrowser -->
+   <em:targetApplication>
+      <Description>
+        <em:id>{aa5ca914-c309-495d-91cf-3141bbb04115}</em:id>
+        <em:minVersion>0.2</em:minVersion>
+        <em:maxVersion>3.1.*</em:maxVersion>
+      </Description>
+   </em:targetApplication>
+   
+   <!-- E Music -->
+   <em:targetApplication> <!-- eMusic -->
+			<Description>
+				<em:id>dlm@emusic.com</em:id>
+				<em:minVersion>1.0a4</em:minVersion>
+				<em:maxVersion>1.0.0.*</em:maxVersion>
+			</Description>
+		</em:targetApplication>
+   
+    <!-- Toolkit -->
+    <em:targetApplication>
+    <Description>
+      <em:id>toolkit@mozilla.org</em:id>
+      <em:minVersion>1.9a2</em:minVersion>
+      <em:maxVersion>1.9.6</em:maxVersion>
+    </Description>
+    </em:targetApplication>
+    
+    <!-- Songbird -->
+    <em:targetApplication>
+    <Description>
+      <em:id>songbird@songbirdnest.com</em:id>
+      <em:minVersion>0.7</em:minVersion>
+      <em:maxVersion>1.2.0</em:maxVersion>
+    </Description>
+    </em:targetApplication>
+    
+    <em:targetApplication> <!-- Fennec -->
+      <Description>
+        <em:id>{a23983c0-fd0e-11dc-95ff-0800200c9a66}</em:id>
+        <em:minVersion>0.1</em:minVersion>
+        <em:maxVersion>1.0.*</em:maxVersion>
+      </Description>
+    </em:targetApplication>
+    
+    
+   <em:file>
+     <Description about="urn:mozilla:extension:file:noscript.jar">
+        <em:package>content/noscript/</em:package>
+        <em:locale>content/noscript/en-US/</em:locale>
+        <em:skin>skin/classic/noscript/</em:skin>
+        <!-- LOCALECHROME START -->
+        <em:locale>locale/ar/noscript/</em:locale>
+        <em:locale>locale/be-BY/noscript/</em:locale>
+        <em:locale>locale/bg-BG/noscript/</em:locale>
+        <em:locale>locale/ca-AD/noscript/</em:locale>
+        <em:locale>locale/cs-CZ/noscript/</em:locale>
+        <em:locale>locale/da-DK/noscript/</em:locale>
+        <em:locale>locale/de-AT/noscript/</em:locale>
+        <em:locale>locale/de-DE/noscript/</em:locale>
+        <em:locale>locale/el-GR/noscript/</em:locale>
+        <em:locale>locale/en-GB/noscript/</em:locale>
+        <em:locale>locale/es-AR/noscript/</em:locale>
+        <em:locale>locale/es-CL/noscript/</em:locale>
+        <em:locale>locale/eu-ES/noscript/</em:locale>
+        <em:locale>locale/es-ES/noscript/</em:locale>
+        <em:locale>locale/et-EE/noscript/</em:locale>
+        <em:locale>locale/fa-IR/noscript/</em:locale>
+        <em:locale>locale/fi-FI/noscript/</em:locale>
+        <em:locale>locale/fr-FR/noscript/</em:locale>
+        <em:locale>locale/gl-ES/noscript/</em:locale>
+        <em:locale>locale/he-IL/noscript/</em:locale>
+        <em:locale>locale/hr-HR/noscript/</em:locale>
+        <em:locale>locale/hu-HU/noscript/</em:locale>
+        <em:locale>locale/ko-KR/noscript/</em:locale>
+        <em:locale>locale/id-ID/noscript/</em:locale>
+        <em:locale>locale/it-IT/noscript/</em:locale>
+        <em:locale>locale/ja-JP/noscript/</em:locale>
+        <em:locale>locale/km-KH/noscript/</em:locale>
+        <em:locale>locale/lt-LT/noscript/</em:locale>
+        <em:locale>locale/mk-MK/noscript/</em:locale>
+        <em:locale>locale/nb-NO/noscript/</em:locale>
+        <em:locale>locale/nl-NL/noscript/</em:locale>
+        <em:locale>locale/pl-PL/noscript/</em:locale>
+        <em:locale>locale/pt-BR/noscript/</em:locale>
+        <em:locale>locale/pt-PT/noscript/</em:locale>
+        <em:locale>locale/ro-RO/noscript/</em:locale>
+        <em:locale>locale/ru-RU/noscript/</em:locale>
+        <em:locale>locale/sk-SK/noscript/</em:locale> 
+        <em:locale>locale/sl-SI/noscript/</em:locale>
+        <em:locale>locale/sv-SE/noscript/</em:locale>
+        <em:locale>locale/th-TH/noscript/</em:locale>
+        <em:locale>locale/tr-TR/noscript/</em:locale>
+        <em:locale>locale/uk-UA/noscript/</em:locale>
+        <em:locale>locale/vi-VN/noscript/</em:locale>
+        <em:locale>locale/zh-CN/noscript/</em:locale>
+        <em:locale>locale/zh-TW/noscript/</em:locale>
+        <em:locale>locale/cy-GB/noscript/</em:locale>
+        <em:locale>locale/sr-RS/noscript/</em:locale>
+        <em:locale>locale/ms-MY/noscript/</em:locale>
+        <em:locale>locale/kk-KZ/noscript/</em:locale>
+        <em:locale>locale/br-IN/noscript/</em:locale>
+        <em:locale>locale/te-IN/noscript/</em:locale>
+        <em:locale>locale/ur-PK/noscript/</em:locale>
+        <!-- LOCALECHROME STOP -->
+     </Description>
+   </em:file>
+   
+   <!-- LOCALIZED START -->
+   <!-- LOCALIZED STOP -->
+ </Description>
+
+</RDF>

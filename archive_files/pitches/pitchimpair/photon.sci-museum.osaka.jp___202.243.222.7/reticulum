@@ -1,0 +1,20 @@
+PITCHIMPAIR___photon.sci-museum.osaka.jp___202.243.222.7___20090318-114340() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.6 
+    #
+    set host photon.sci-museum.osaka.jp
+    set ip 202.243.222.7
+    set hostType "Solaris26"
+    set len 476
+    set cv0 b6fd331b
+    set cv1 f5ecef10
+    set cv2 0ba811cc
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

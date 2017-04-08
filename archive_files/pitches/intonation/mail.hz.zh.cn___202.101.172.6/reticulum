@@ -1,0 +1,20 @@
+INTONATION___mail.hz.zh.cn___202.101.172.6___20030806-135014() {
+    #
+    # RETICULUM Version:6.6 OS:sparc-sun-solaris2.7 
+    #
+    set host mail.hz.zh.cn
+    set ip 202.101.172.6
+    set hostType "Solaris27"
+    set len 476
+    set cv0 a36cd525
+    set cv1 09619ee7
+    set cv2 ec86a1b2
+    set timeout 10
+    set retries 5
+    set baduids { }
+    set maxdelay 1.5
+    set mindelay 1.0
+#
+#
+set hand [ targsetup $host $ip $len $cv0 $cv1 $cv2 $hostType $mindelay $maxdelay $baduids $timeout $retries ]
+}

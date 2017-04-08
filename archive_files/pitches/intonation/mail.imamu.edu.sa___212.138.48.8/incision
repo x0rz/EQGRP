@@ -1,0 +1,5 @@
+INTONATION___mail.imamu.edu.sa___212.138.48.8___20021002-194811() {
+    ## INCISION Version:4.9 OS:sparc-sun-solaris2.8 
+    export TARG_AYT="057f2b44 02dbac88 a7cdcc70"
+    [ "$UTC_OFFSET" ] || export UTC_OFFSET=600
+}
