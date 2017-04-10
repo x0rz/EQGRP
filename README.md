@@ -57,7 +57,7 @@ Nested Tar archives have been uncompressed in the [archive_files](/archive_files
 - **ESMARKCONANT** exploits phpBB vulnerability (<[2.0.11](https://www.phpbb.com/community/viewtopic.php?t=240636))
 - **ELIDESKEW** Public known vulnerablity in [SquirrelMail](https://squirrelmail.org/) versions 1.4.0 - 1.4.7
 - **ELITEHAMMER** Runs against RedFlag Webmail 4, yields user `nobody`
-- **ENVISIONCOLLISION** RCE for phpBB (derivative)
+- **ENVISIONCOLLISION** RCE for Invision Power Board (IPB)
 - **EPICHERO** RCE for Avaya Media Server
 
 ## Misc
