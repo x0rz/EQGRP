@@ -12,7 +12,7 @@ Nested Tar archives have been uncompressed in the [archive_files](/archive_files
 
 - **COTTONAXE**
 - **EBBISLAND**  related rce
-- **STOICSURGEON** 
+
 - **INCISION** 
 - **ITIME** 
 - **JACKLADDER** 
@@ -106,7 +106,7 @@ Nested Tar archives have been uncompressed in the [archive_files](/archive_files
 - **SLYHERETIC** SLYHERETIC is a light-weight implant for AIX 5.1:-5.2 Uses Hide-in-Plain-Sight techniques to provide stealth.
 - **STRIFEWORLD**: Network-monitoring for UNIX,  needs to be launched as root. Strifeworld is a program that captures data transmitted as part of TCP connections and stores the data in a memory for analysis. Strifeworld reconstructs the actual data streams and stores each session in a file for later analysis.
 - **SUCTIONCHAR**: 32 or 64 bit OS, solaris sparc 8,9, Kernel level implant - transparent, sustained, or realtime interception of processes input/output vnode traffic, able to intercept ssh, telnet, rlogin, rsh, password, login, csh, su, …
-
+- **STOICSURGEON** Rootkit/Backdoor Linux MultiArchi
 
 ## CnC
 - **Seconddate_CnC**: CnC for **SECONDDATE**
