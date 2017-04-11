@@ -10,7 +10,6 @@ Nested Tar archives have been uncompressed in the [archive_files](/archive_files
 # Content
 # Unknown
 
-- **EBBISLAND**  related rce
 - **STOICSURGEON** 
 - **INCISION** 
 - **ITIME** 
@@ -39,9 +38,10 @@ Nested Tar archives have been uncompressed in the [archive_files](/archive_files
 - **EASYSTREET**/**CMSEX** and **cmsd** Solaris `rpc.cmsd` remote root
 - **EBBISLAND**/**ELVISCICADA**/**snmpXdmid** and **frown**: `CVE-2001-0236`, Solaris 2.6-2.9 - snmpXdmid Buffer Overflow
 - **sneer**: *mibissa* (Sun snmpd) RCE, with *DWARF* symbols :D
-- **dtspcdx_sparc** dtspcd RCE for SunOS 5 - 5.8. what a useless exploit
-- **TOOLTALK** DEC, IRIX, or Solaris 2.6 or earlier Tooltalk buffer overflow RCE
-- **VIOLENTSPIRIT** RCE for ttsession daemon in CDE on Solaris 2.6 - 2.9 on SPARC and x86
+- **dtspcdx_sparc** dtspcd RCE for SunOS 5. -5.8. what a useless exploit
+- **TOOLTALK** DEC, IRIX, or Sol2.6 or earlier Tooltalk buffer overflow RCE
+- **VIOLENTSPIRIT** RCE for ttsession daemon in CDE on Solaris 2.6-2.9 on SPARC and x86
+- **EBBISLAND**  RCE Solaris 2.6 -> 2.10 Inject shellcode in vulnerable rpc service
 
 ## Netscape Server
 - **xp_ns-httpd** NetScape Server RCE
