@@ -81,7 +81,7 @@ Nested Tar archives have been uncompressed in the [archive_files](/archive_files
 - **SKIMCOUNTRY** Steal mobile phone log data
 - **SLYHERETIC_CHECKS** Check if a target is ready for **SLYHERETIC** (not included)
 - **EMPTYBOWL** RCE for MailCenter Gateway (mcgate) - an application that comes with Asia Info Message Center mailserver; buffer overflow allows a string passed to popen() call to be controlled by an attacker; arbitraty cmd execute known to work only for AIMC Version 2.9.5.1
-
+- **CURSEHAPPY** Parser of CDR (Call Detail Records) (siemens, alcatel, other containing isb hki lhr files) probably upgrade of ORLEANSTRIDE
 
 # Anti-forensic
 - **toast**: `wtmps` editor/manipulator/querier
