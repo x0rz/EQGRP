@@ -13,7 +13,6 @@ Nested Tar archives have been uncompressed in the [archive_files](/archive_files
 - **COTTONAXE**
 - **EBBISLAND**  related rce
 - **STOICSURGEON** 
-- **INCISION** 
 - **ITIME** 
 - **JACKLADDER** 
 - **DAMPCROWD**
@@ -97,7 +96,7 @@ Nested Tar archives have been uncompressed in the [archive_files](/archive_files
 - **hi** UNIX bind shell
 - **jackpop** bind shell for SPARC
 - **NOPEN** Backdoor? A RAT or post-exploitation shell consisting of a client and a server that encrypts data using RC6 [source](http://electrospaces.blogspot.nl/p/nsas-tao-division-codewords.html)
-- **ORLEANSTRIDE**
+- **ORLEANSTRIDE** SunOS5.8
 - **SAMPLEMAN / ROUTER TOUCH** Clearly hits Cisco via some sort of redirection via a tool on port 2323... (thanks to @cynicalsecurity)
 - **SECONDDATE** Implant for Linux/FreeBSD/Solaris/JunOS
 - **SHENTYSDELIGHT** Linux keylogger
@@ -106,7 +105,7 @@ Nested Tar archives have been uncompressed in the [archive_files](/archive_files
 - **SLYHERETIC** SLYHERETIC is a light-weight implant for AIX 5.1:-5.2 Uses Hide-in-Plain-Sight techniques to provide stealth.
 - **STRIFEWORLD**: Network-monitoring for UNIX,  needs to be launched as root. Strifeworld is a program that captures data transmitted as part of TCP connections and stores the data in a memory for analysis. Strifeworld reconstructs the actual data streams and stores each session in a file for later analysis.
 - **SUCTIONCHAR**: 32 or 64 bit OS, solaris sparc 8,9, Kernel level implant - transparent, sustained, or realtime interception of processes input/output vnode traffic, able to intercept ssh, telnet, rlogin, rsh, password, login, csh, su, …
-
+- **INCISION** Rootkit/Backdoor Linux Can be upgrade to StoicSurgeon(more recent version)
 
 ## CnC
 - **Seconddate_CnC**: CnC for **SECONDDATE**
