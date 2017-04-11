@@ -10,13 +10,12 @@ Nested Tar archives have been uncompressed in the [archive_files](/archive_files
 # Content
 # Unknown
 
-- **COTTONAXE**
 - **STOICSURGEON** 
 - **INCISION** 
 - **ITIME** 
 - **JACKLADDER** 
 - **DAMPCROWD**
-- **ELDESTMYdLE**
+- **ELDESTMYDLE**
 - **SUAVEEYEFUL**
 - **WATCHER**
 - **YELLOWSPIRIT**
@@ -43,6 +42,7 @@ Nested Tar archives have been uncompressed in the [archive_files](/archive_files
 - **TOOLTALK** DEC, IRIX, or Sol2.6 or earlier Tooltalk buffer overflow RCE
 - **VIOLENTSPIRIT** RCE for ttsession daemon in CDE on Solaris 2.6-2.9 on SPARC and x86
 - **EBBISLAND**  RCE Solaris 2.6 -> 2.10 Inject shellcode in vulnerable rpc service
+
 ## Netscape Server
 - **xp_ns-httpd** NetScape Server RCE
 - **nsent** RCE for NetScape Enterprise server 4.1 for Solaris
@@ -53,11 +53,12 @@ Nested Tar archives have been uncompressed in the [archive_files](/archive_files
 - **wuftpd** likely `CVE-2001-0550`
 
 ## Web 
-- **ESMARKCONANT** exploits phpBB vulnerability (<[2.0.11](https://www.phpbb.com/community/viewtopic.php?t=240636))
+- **ESMARKCONANT** exploits phpBB remote command execution (<[2.0.11](https://www.phpbb.com/community/viewtopic.php?t=240636)) `CVE-2004-1315`
 - **ELIDESKEW** Public known vulnerablity in [SquirrelMail](https://squirrelmail.org/) versions 1.4.0 - 1.4.7
 - **ELITEHAMMER** Runs against RedFlag Webmail 4, yields user `nobody`
 - **ENVISIONCOLLISION** RCE for phpBB (derivative)
 - **EPICHERO** RCE for Avaya Media Server
+- **COTTONAXE** RCE to retrieve log and information on LiteSpeed Web Server
 
 ## Misc
 - **calserver** spooler RPC based RCE
@@ -66,15 +67,15 @@ Nested Tar archives have been uncompressed in the [archive_files](/archive_files
 - **ELECTRICSLIDE** RCE (heap-overflow) in [Squid](http://www.squid-cache.org/), with a chinese-looking vector
 - **EMBERSNOUT** a remote exploit against Red Hat 9.0's httpd-2.0.40-21
 - **ENGAGENAUGHTY**/**apache-ssl-linux** Apache2 mod-ssl RCE (2008), SSLv2
-- **ENTERSEED** Postfix RCE, for 2.0.8-2.1.5
-- **ERRGENTLE**/**xp-exim-3-remote-linux** Exim remote root, likely `CVE-2001-0690`, Exim 3.22-3.35
+- **ENTERSEED** Postfix RCE, for 2.0.8 - 2.1.5
+- **ERRGENTLE**/**xp-exim-3-remote-linux** Exim remote root, likely `CVE-2001-0690`, Exim 3.22 - 3.35
 - **EXPOSITTRAG** exploit pcnfsd version 2.x
 - **extinctspinash**: `Chili!Soft ASP` stuff RCE? and *Cobalt RaQ* too?
 - **KWIKEMART** (**km** binary) RCE for SSH1 padding crc32 thingy (https://packetstormsecurity.com/files/24347/ssh1.crc32.txt.html)
 - **prout** (ab)use of `pcnfs` RPC program (version 2 only) (1999)
-- **slugger**: various printers RCE, looks like `CVE-1999-0078`looks 
+- **slugger**: various printers RCE, looks like `CVE-1999-0078`
 - **statdx** Redhat Linux 6.0/6.1/6.2 rpc.statd remote root exploit (IA32)
-- **telex** Telnetd RCE for RHL ?  `CVE-1999-0192`?
+- **telex** Telnetd RCE for RHL?  `CVE-1999-0192`?
 - **toffeehammer** RCE for `cgiecho` part of `cgimail`, exploits fprintf
 - **VS-VIOLET** Solaris 2.6 - 2.9, something related to [XDMCP](https://en.wikipedia.org/wiki/X_display_manager_(program_type)#X_Display_Manager_Control_Protocol)
 - **SKIMCOUNTRY** Steal mobile phone log data
@@ -103,9 +104,8 @@ Nested Tar archives have been uncompressed in the [archive_files](/archive_files
 - **SIDETRACK** implant used for **PITCHIMPAIR**
 - **SIFT** Implant for Solaris/Linux/FreeBSD
 - **SLYHERETIC** SLYHERETIC is a light-weight implant for AIX 5.1:-5.2 Uses Hide-in-Plain-Sight techniques to provide stealth.
-- **STRIFEWORLD**: Network-monitoring for UNIX,  needs to be launched as root. Strifeworld is a program that captures data transmitted as part of TCP connections and stores the data in a memory for analysis. Strifeworld reconstructs the actual data streams and stores each session in a file for later analysis.
+- **STRIFEWORLD**: Network-monitoring for UNIX, needs to be launched as root. Strifeworld is a program that captures data transmitted as part of TCP connections and stores the data in a memory for analysis. Strifeworld reconstructs the actual data streams and stores each session in a file for later analysis.
 - **SUCTIONCHAR**: 32 or 64 bit OS, solaris sparc 8,9, Kernel level implant - transparent, sustained, or realtime interception of processes input/output vnode traffic, able to intercept ssh, telnet, rlogin, rsh, password, login, csh, su, …
-
 
 ## CnC
 - **Seconddate_CnC**: CnC for **SECONDDATE**
