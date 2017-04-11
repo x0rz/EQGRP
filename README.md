@@ -59,7 +59,7 @@ Nested Tar archives have been uncompressed in the [archive_files](/archive_files
 
 ## Misc
 - **calserver** spooler RPC based RCE
-- **EARLYSHOVEL** RCE RHL7 using sendmail
+- **EARLYSHOVEL** RCE RHL7 using sendmail  ` CVE-2003-0681 ` ` CVE-2003-0694 `
 - **ECHOWRECKER**/**sambal**: samba 2.2 and 3.0.2a - 3.0.12-5 RCE (with *DWARF* symbols), for FreeBSD, OpenBSD 3.1, OpenBSD 3.2 (with a non-executable stack, zomg), and Linux. Likely `CVE-2003-0201`. There is also a Solaris version
 - **ELECTRICSLIDE** RCE (heap-overflow) in [Squid](http://www.squid-cache.org/), with a chinese-looking vector
 - **EMBERSNOUT** a remote exploit against Red Hat 9.0's httpd-2.0.40-21
