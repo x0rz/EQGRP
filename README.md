@@ -10,7 +10,6 @@ Nested Tar archives have been uncompressed in the [archive_files](/archive_files
 # Content
 # Unknown
 
-- **COTTONAXE**
 - **EBBISLAND**  related rce
 - **STOICSURGEON** 
 - **INCISION** 
@@ -59,6 +58,7 @@ Nested Tar archives have been uncompressed in the [archive_files](/archive_files
 - **ELITEHAMMER** Runs against RedFlag Webmail 4, yields user `nobody`
 - **ENVISIONCOLLISION** RCE for phpBB (derivative)
 - **EPICHERO** RCE for Avaya Media Server
+- **COTTONAXE** RCE to retrieve log and information on LiteSpeed Web Server
 
 ## Misc
 - **calserver** spooler RPC based RCE
