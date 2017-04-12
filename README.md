@@ -9,7 +9,6 @@ Nested Tar archives have been uncompressed in the [archive_files](/archive_files
 
 # Content
 # Unknown
-- **ITIME** 
 - **JACKLADDER** 
 - **DAMPCROWD**
 - **ELDESTMYDLE**
@@ -28,6 +27,7 @@ Nested Tar archives have been uncompressed in the [archive_files](/archive_files
 - **PORKSERVER** inetd-based server for the **PORK** implant
 - **ri** equivalent to `rpcinfo`
 - **uX_local** Micro X server, likely for remote management
+- **ITIME** Change Date/Time of a last change on a file of an unix filesystem
 
 # Remote Code Execution 
 ## Solaris
