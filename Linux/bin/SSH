@@ -17,7 +17,8 @@ $wiped
 # Here are your pastables for NOPEN redirected ssh onto $targetip:
 
 
-# Tunnel stuff$netcatstart
+# Tunnel stuff
+$netcatstart
 $closetunnels
 $tunnelcmd$netcatend
 
